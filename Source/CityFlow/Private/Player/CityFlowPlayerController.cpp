@@ -67,6 +67,7 @@ void ACityFlowPlayerController::SpawnPreview()
 	{
 		PreviewActor->SetActorEnableCollision(false);
 		PreviewActor->SetActorHiddenInGame(false);
+		PreviewActor->EnterPreviewState();
 	}
 }
 

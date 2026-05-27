@@ -17,7 +17,7 @@ void UGridManager::InitGrid(int32 InGridWidth, int32 InGridHeight, float InCellS
 	GridWidth = InGridWidth;
 	GridHeight = InGridHeight;
 	CellSize = InCellSize;
-	GridOrigin = InGridOrigin;
+	GridOrigin = FVector(InGridOrigin.X - (GridWidth - 1) * CellSize * 0.5f, InGridOrigin.Y - (GridHeight - 1) * CellSize * 0.5f, InGridOrigin.Z);
 
 	Grid.SetNum(GridHeight);
 	for (int32 Y = 0; Y < GridHeight; ++Y)

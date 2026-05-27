@@ -13,6 +13,15 @@ class CITYFLOW_API AGridPlaceableActor : public AActor
 public:
 	AGridPlaceableActor();
 
+	UFUNCTION(BlueprintCallable, Category = "Grid|State")
+	void EnterPreviewState();
+
+	UFUNCTION(BlueprintPure, Category = "Grid|State")
+	bool IsPreview() const { return bIsPreview; }
+
+	UFUNCTION(BlueprintPure, Category = "Grid|State")
+	bool IsPlacedOnGrid() const { return bIsPlaced; }
+
 	UFUNCTION(BlueprintCallable, Category = "Grid|Placement")
 	bool PlaceOnGrid(const FGridVector& InGridPos);
 
@@ -35,10 +44,17 @@ public:
 	FVector GetGridWorldPosition() const;
 
 	UFUNCTION(BlueprintPure, Category = "Grid|Placement")
-	bool IsPlacedOnGrid() const { return bIsPlaced; }
-
-	UFUNCTION(BlueprintPure, Category = "Grid|Placement")
 	const TArray<FGridVector>& GetOccupiedCells() const { return OccupiedCells; }
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Grid|State")
+	void OnEnterPreview();
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Grid|State")
+	void OnEnterPlaced();
 
 	UFUNCTION(BlueprintNativeEvent, Category = "Grid|Placement")
 	void OnPlacedOnGrid();
@@ -46,18 +62,17 @@ public:
 	UFUNCTION(BlueprintNativeEvent, Category = "Grid|Placement")
 	void OnRemovedFromGrid();
 
-protected:
-	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-	UFUNCTION(BlueprintNativeEvent, Category = "Grid|Placement")
-	void BeginPreview();
-
 	virtual ECellType GetPlacementCellType() const { return ECellType::Building; }
 
 	virtual TArray<FGridVector> CalculateOccupiedCells(const FGridVector& BasePos) const;
 
 	virtual bool ValidatePlacement(const FGridVector& BasePos) const;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Grid|State")
+	bool bIsPreview = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Grid|State")
+	bool bIsPlaced = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Grid|Placement")
 	FGridVector GridPosition;
@@ -65,15 +80,14 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Grid|Placement")
 	TArray<FGridVector> OccupiedCells;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Grid|Placement")
-	bool bIsPlaced = false;
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid|Placement")
 	FVector2D BuildingSize = FVector2D(1, 1);
 
 	class UGridManager* GetGridManager() const;
 
 private:
+	void EnterPlacedState();
+
 	void RegisterCells();
 	void UnregisterCells();
 };

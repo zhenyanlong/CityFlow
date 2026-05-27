@@ -10,7 +10,6 @@ AGridPlaceableActor::AGridPlaceableActor()
 void AGridPlaceableActor::BeginPlay()
 {
 	Super::BeginPlay();
-	BeginPreview();
 }
 
 void AGridPlaceableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -20,6 +19,24 @@ void AGridPlaceableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		UnregisterCells();
 	}
 	Super::EndPlay(EndPlayReason);
+}
+
+void AGridPlaceableActor::EnterPreviewState()
+{
+	if (bIsPlaced)
+	{
+		return;
+	}
+
+	bIsPreview = true;
+	OnEnterPreview();
+}
+
+void AGridPlaceableActor::EnterPlacedState()
+{
+	bIsPreview = false;
+	bIsPlaced = true;
+	OnEnterPlaced();
 }
 
 bool AGridPlaceableActor::PlaceOnGrid(const FGridVector& InGridPos)
@@ -44,11 +61,10 @@ bool AGridPlaceableActor::PlaceOnGrid(const FGridVector& InGridPos)
 	OccupiedCells = CalculateOccupiedCells(InGridPos);
 	RegisterCells();
 
-	bIsPlaced = true;
-
 	const FVector WorldPos = GetGridWorldPosition();
 	SetActorLocation(WorldPos);
 
+	EnterPlacedState();
 	OnPlacedOnGrid();
 	GM->OnGridPlaced.Broadcast(this);
 
@@ -196,14 +212,18 @@ void AGridPlaceableActor::UnregisterCells()
 	}
 }
 
+void AGridPlaceableActor::OnEnterPreview_Implementation()
+{
+}
+
+void AGridPlaceableActor::OnEnterPlaced_Implementation()
+{
+}
+
 void AGridPlaceableActor::OnPlacedOnGrid_Implementation()
 {
 }
 
 void AGridPlaceableActor::OnRemovedFromGrid_Implementation()
-{
-}
-
-void AGridPlaceableActor::BeginPreview_Implementation()
 {
 }
