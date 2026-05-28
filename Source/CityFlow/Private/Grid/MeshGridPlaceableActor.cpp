@@ -41,6 +41,31 @@ void AMeshGridPlaceableActor::OnEnterPlaced_Implementation()
 	MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }
 
+void AMeshGridPlaceableActor::OnPreviewValidChanged_Implementation(bool bValid)
+{
+	Super::OnPreviewValidChanged_Implementation(bValid);
+
+	if (!MeshComponent || !IsPreview())
+	{
+		return;
+	}
+
+	if (bValid)
+	{
+		if (PreviewMaterial)
+		{
+			ApplyMaterialToAllSlots(PreviewMaterial);
+		}
+	}
+	else
+	{
+		if (InvalidPreviewMaterial)
+		{
+			ApplyMaterialToAllSlots(InvalidPreviewMaterial);
+		}
+	}
+}
+
 void AMeshGridPlaceableActor::ApplyMaterialToAllSlots(UMaterialInterface* Material)
 {
 	const int32 NumMaterials = MeshComponent->GetNumMaterials();

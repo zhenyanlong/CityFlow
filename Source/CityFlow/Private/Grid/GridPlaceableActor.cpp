@@ -194,7 +194,7 @@ void AGridPlaceableActor::RegisterCells()
 	const ECellType CellType = GetPlacementCellType();
 	for (const FGridVector& Cell : OccupiedCells)
 	{
-		GM->OccupyCell(Cell, CellType, GetUniqueID(), nullptr);
+		GM->OccupyCell(Cell, CellType, GetUniqueID(), this);
 	}
 }
 
@@ -225,5 +225,18 @@ void AGridPlaceableActor::OnPlacedOnGrid_Implementation()
 }
 
 void AGridPlaceableActor::OnRemovedFromGrid_Implementation()
+{
+}
+
+void AGridPlaceableActor::SetPreviewPlacementValid(bool bValid)
+{
+	if (bPreviewPlacementValid != bValid)
+	{
+		bPreviewPlacementValid = bValid;
+		OnPreviewValidChanged(bValid);
+	}
+}
+
+void AGridPlaceableActor::OnPreviewValidChanged_Implementation(bool bValid)
 {
 }

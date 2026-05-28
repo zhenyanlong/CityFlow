@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Grid/CityFlowGridTypes.h"
 #include "CityFlowPlayerController.generated.h"
 
 class UInputAction;
@@ -30,6 +31,21 @@ protected:
 	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
 	void OnPlaceItemStarted();
 
+	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
+	void OnRemoveItemStarted();
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
+	void OnPlaceItemTriggered();
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
+	void OnPlaceItemCompleted();
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
+	void OnRemoveItemTriggered();
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
+	void OnRemoveItemCompleted();
+
 	class UGridManager* GetGridManager() const;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
@@ -38,9 +54,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_PlaceItem;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_RemoveItem;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
 	TSubclassOf<AGridPlaceableActor> PlaceableActorClass;
 
 	UPROPERTY()
 	TObjectPtr<AGridPlaceableActor> PreviewActor;
+
+private:
+	void TryPlaceAtCursor();
+	void TryRemoveAtCursor();
+
+	FGridVector LastPlacedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
+	FGridVector LastRemovedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
 };

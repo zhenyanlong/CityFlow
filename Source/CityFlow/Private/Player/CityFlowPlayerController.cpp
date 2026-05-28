@@ -5,6 +5,9 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+
+#define CF_DEBUG(fmt, ...) if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, FString::Printf(TEXT(fmt), ##__VA_ARGS__)); }
 
 ACityFlowPlayerController::ACityFlowPlayerController()
 {
@@ -41,6 +44,20 @@ void ACityFlowPlayerController::SetupInputComponent()
 		if (IA_PlaceItem)
 		{
 			EnhancedInput->BindAction(IA_PlaceItem, ETriggerEvent::Started, this, &ACityFlowPlayerController::OnPlaceItemStarted);
+			EnhancedInput->BindAction(IA_PlaceItem, ETriggerEvent::Triggered, this, &ACityFlowPlayerController::OnPlaceItemTriggered);
+			EnhancedInput->BindAction(IA_PlaceItem, ETriggerEvent::Completed, this, &ACityFlowPlayerController::OnPlaceItemCompleted);
+		}
+
+		if (IA_RemoveItem)
+		{
+			EnhancedInput->BindAction(IA_RemoveItem, ETriggerEvent::Started, this, &ACityFlowPlayerController::OnRemoveItemStarted);
+			EnhancedInput->BindAction(IA_RemoveItem, ETriggerEvent::Triggered, this, &ACityFlowPlayerController::OnRemoveItemTriggered);
+			EnhancedInput->BindAction(IA_RemoveItem, ETriggerEvent::Completed, this, &ACityFlowPlayerController::OnRemoveItemCompleted);
+			CF_DEBUG("[Remove] IA_RemoveItem bound to OnRemoveItemStarted");
+		}
+		else
+		{
+			CF_DEBUG("[Remove] IA_RemoveItem is NULL - not configured in Blueprint!");
 		}
 	}
 }
@@ -98,6 +115,9 @@ void ACityFlowPlayerController::UpdatePreviewPosition()
 
 	const FVector SnappedPos = GM->GridToWorld(GridPos);
 	PreviewActor->SetActorLocation(SnappedPos);
+
+	const bool bCanPlace = PreviewActor->CanPlaceAt(GridPos);
+	PreviewActor->SetPreviewPlacementValid(bCanPlace);
 }
 
 void ACityFlowPlayerController::DestroyPreview()
@@ -109,7 +129,7 @@ void ACityFlowPlayerController::DestroyPreview()
 	}
 }
 
-void ACityFlowPlayerController::OnPlaceItemStarted_Implementation()
+void ACityFlowPlayerController::TryPlaceAtCursor()
 {
 	if (!PreviewActor || !PlaceableActorClass)
 	{
@@ -128,24 +148,109 @@ void ACityFlowPlayerController::OnPlaceItemStarted_Implementation()
 		return;
 	}
 
-	const FVector HitLocation = Hit.Location;
-	const FGridVector GridPos = GM->WorldToGrid(HitLocation);
-
+	const FGridVector GridPos = GM->WorldToGrid(Hit.Location);
 	if (!GM->IsValidGridPos(GridPos))
+	{
+		return;
+	}
+
+	if (GridPos == LastPlacedGridPos)
 	{
 		return;
 	}
 
 	if (GM->GetCellType(GridPos) != ECellType::Empty)
 	{
+		LastPlacedGridPos = GridPos;
 		return;
 	}
 
 	PreviewActor->SetActorEnableCollision(true);
 	PreviewActor->PlaceOnGrid(GridPos);
+	LastPlacedGridPos = GridPos;
 	PreviewActor = nullptr;
 
 	SpawnPreview();
+}
+
+void ACityFlowPlayerController::OnPlaceItemStarted_Implementation()
+{
+	LastPlacedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
+	TryPlaceAtCursor();
+}
+
+void ACityFlowPlayerController::OnPlaceItemTriggered_Implementation()
+{
+	TryPlaceAtCursor();
+}
+
+void ACityFlowPlayerController::OnPlaceItemCompleted_Implementation()
+{
+	LastPlacedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
+}
+
+void ACityFlowPlayerController::TryRemoveAtCursor()
+{
+	UGridManager* GM = GetGridManager();
+	if (!GM || !GM->IsGridInitialized())
+	{
+		return;
+	}
+
+	FHitResult Hit;
+	if (!GetHitResultUnderCursor(ECC_Visibility, false, Hit))
+	{
+		return;
+	}
+
+	const FGridVector GridPos = GM->WorldToGrid(Hit.Location);
+	if (!GM->IsValidGridPos(GridPos))
+	{
+		return;
+	}
+
+	if (GridPos == LastRemovedGridPos)
+	{
+		return;
+	}
+	LastRemovedGridPos = GridPos;
+
+	const FGridCell& Cell = GM->GetCell(GridPos);
+	if (Cell.Type == ECellType::Empty)
+	{
+		return;
+	}
+
+	AGridPlaceableActor* HitActor = Cast<AGridPlaceableActor>(Cell.RoadActor);
+	if (!HitActor)
+	{
+		return;
+	}
+
+	if (!HitActor->IsPlacedOnGrid())
+	{
+		return;
+	}
+
+	HitActor->RemoveFromGrid();
+	HitActor->Destroy();
+}
+
+void ACityFlowPlayerController::OnRemoveItemStarted_Implementation()
+{
+	CF_DEBUG("[Remove] OnRemoveItemStarted_Implementation called!");
+	LastRemovedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
+	TryRemoveAtCursor();
+}
+
+void ACityFlowPlayerController::OnRemoveItemTriggered_Implementation()
+{
+	TryRemoveAtCursor();
+}
+
+void ACityFlowPlayerController::OnRemoveItemCompleted_Implementation()
+{
+	LastRemovedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
 }
 
 UGridManager* ACityFlowPlayerController::GetGridManager() const

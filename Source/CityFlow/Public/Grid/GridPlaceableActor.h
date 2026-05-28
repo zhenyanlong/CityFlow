@@ -46,6 +46,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Grid|Placement")
 	const TArray<FGridVector>& GetOccupiedCells() const { return OccupiedCells; }
 
+	UFUNCTION(BlueprintCallable, Category = "Grid|State")
+	void SetPreviewPlacementValid(bool bValid);
+
+	UFUNCTION(BlueprintPure, Category = "Grid|State")
+	bool IsPreviewPlacementValid() const { return bPreviewPlacementValid; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -62,6 +68,9 @@ protected:
 	UFUNCTION(BlueprintNativeEvent, Category = "Grid|Placement")
 	void OnRemovedFromGrid();
 
+	UFUNCTION(BlueprintNativeEvent, Category = "Grid|State")
+	void OnPreviewValidChanged(bool bValid);
+
 	virtual ECellType GetPlacementCellType() const { return ECellType::Building; }
 
 	virtual TArray<FGridVector> CalculateOccupiedCells(const FGridVector& BasePos) const;
@@ -73,6 +82,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Grid|State")
 	bool bIsPlaced = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Grid|State")
+	bool bPreviewPlacementValid = true;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Grid|Placement")
 	FGridVector GridPosition;

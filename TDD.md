@@ -36,50 +36,114 @@ Managers communicate through an **event bus** (e.g., `OnRoadPlaced`, `OnVehicleA
 
 #### Logical Grid
 
-`GridManager` uses a `TArray<TArray<FGridCell>>` 2D array. The `FGridCell` structure:
+`GridManager` is a `UWorldSubsystem` that holds a `TArray<TArray<FGridCell>>` 2D array. The `FGridCell` structure:
 
 ```cpp
+USTRUCT(BlueprintType)
 struct FGridCell
 {
     ECellType Type;       // Empty, Road, Building
     uint8 ConnectedMask;  // bit0: Up, bit1: Down, bit2: Left, bit3: Right
     int32 BuildingID;     // If a building cell, references the owning building
-    ARoadTile* RoadActor; // If a road cell, points to the corresponding Actor
+    TObjectPtr<AActor> RoadActor; // If a road cell, points to the corresponding Road Actor
 };
 ```
 
+A `EGridDirection` bitmask enum defines the four cardinal directions (`Up`, `Down`, `Left`, `Right`). A utility struct `FGridVector` provides a lightweight 2D integer coordinate with arithmetic operators, and `GridDirectionUtils` supplies direction-to-vector mappings.
+
 All world coordinates are mapped to grid indices through `WorldToGrid(Location)`, guaranteeing snapping to cell centres during placement.
 
-#### Player Placement Flow
+#### Player Placement Flow (with Preview)
 
-1. Mouse click → **LineTrace** against ground → get world position → convert to grid coordinate `(x, y)`.
-2. **Validation rules:**
-   - Target cell must be `Empty`.
-   - Must be adjacent to at least one existing road cell or building interface (initial placement may start from the map edge).
-3. On success:
-   - Set the cell to `Road`, compute its `ConnectedMask` (check the four neighbours — up/down/left/right — for roads or building interfaces).
-   - Spawn the corresponding `ARoadTile` Actor, pass the current mask so it can automatically select the appropriate model (straight, corner, T-junction, cross) and build internal driving splines.
-4. **Neighbour refresh:** Iterate over the four neighbours; if any is a road, recalculate its mask and call `RoadRef->UpdateConnections(NewMask)`, so that adjacent tiles automatically morph when their connectivity changes.
+1. On `BeginPlay`, the Controller spawns a **preview Actor** that enters preview state.
+2. Every tick, `LineTrace` against the ground tracks the cursor position; the preview Actor snaps to the grid, following the mouse in real time. `CanPlaceAt()` checks whether the target cell is valid; `SetPreviewPlacementValid()` updates the preview material — valid cells show `PreviewMaterial`, occupied cells show `InvalidPreviewMaterial` (both configurable in Blueprint).
+3. **Placement** — bound to `IA_PlaceItem` (left mouse button):
+   - **Started:** reset `LastPlacedGridPos`, execute first placement.
+   - **Triggered** (fires every frame while held): enables **drag-to-place**. The `TryPlaceAtCursor()` helper is called each frame; it skips if the grid coordinate matches `LastPlacedGridPos` (deduplication), otherwise attempts placement at the new cell.
+   - **Completed** (on release): reset `LastPlacedGridPos`.
+   - Placement logic:
+     - Convert the hit world position to grid coordinate `(x, y)`.
+     - **Validation:** target cell must be `Empty`.
+     - On success: the preview Actor transitions to `EnterPlacedState()`, restoring original materials and enabling collision. The cell is set to the appropriate type and `ConnectedMask` is computed. A new preview Actor spawns immediately.
+4. **Removal** — bound to `IA_RemoveItem` (right mouse button):
+   - **Started:** reset `LastRemovedGridPos`, execute first removal.
+   - **Triggered:** enables **drag-to-remove** with the same deduplication via `LastRemovedGridPos`.
+   - **Completed:** reset `LastRemovedGridPos`.
+   - Removal logic (`TryRemoveAtCursor`): raycast → `WorldToGrid()` → look up `Cell.RoadActor` from the grid (not collision). If the cell contains an `AGridPlaceableActor` with `IsPlacedOnGrid() == true`, call `RemoveFromGrid()` + `Destroy()`.
+5. **Neighbour refresh:** Iterate over the four neighbours; if any is a road, recalculate its mask.
+
+### 2.2 Grid Placeable Actor Hierarchy
+
+All items that can be placed on the grid inherit from the abstract base class `AGridPlaceableActor`.
+
+#### Class Hierarchy
+
+```
+AGridPlaceableActor  (Abstract)          ← state management + unified API
+  └─ AMeshGridPlaceableActor (Abstract)  ← StaticMesh + preview material swap
+       └─ ATestGridPlaceableActor         ← test cube
+```
+
+#### AGridPlaceableActor (State Management)
+
+Pure state management with no visual logic. Provides:
+
+| Feature | API |
+|---|---|
+| State flags | `IsPreview()` / `IsPlacedOnGrid()` / `IsPreviewPlacementValid()` |
+| Enter preview | `EnterPreviewState()` → fires `OnEnterPreview()` (BlueprintNativeEvent) |
+| Enter placed | `EnterPlacedState()` → fires `OnEnterPlaced()` |
+| Preview validity | `SetPreviewPlacementValid(bool)` → fires `OnPreviewValidChanged(bool)` (BlueprintNativeEvent). Tracks `bPreviewPlacementValid` flag. |
+| Grid operations | `PlaceOnGrid()` / `RemoveFromGrid()` / `CanPlaceAt()` / `SnapToGridPosition()` |
+| Placement callbacks | `OnPlacedOnGrid()` / `OnRemovedFromGrid()` (BlueprintNativeEvent) |
+| Grid reverse lookup | `RegisterCells()` passes `this` to `OccupyCell()` as `RoadActor`, enabling grid→actor reverse lookup for right-click removal |
+
+#### AMeshGridPlaceableActor (Visual Layer)
+
+Adds a `UStaticMeshComponent` and automatic material switching:
+
+| Feature | Detail |
+|---|---|
+| `MeshComponent` | `UStaticMeshComponent` as RootComponent |
+| `PreviewMaterial` | Configurable in Blueprint; transparent material for valid preview state |
+| `InvalidPreviewMaterial` | Configurable in Blueprint; distinct material (e.g., red) shown when the preview actor hovers over an occupied cell |
+| `OnEnterPreview` override | Saves all original materials → swaps to `PreviewMaterial` on every slot → disables collision |
+| `OnEnterPlaced` override | Restores original materials per-slot → enables collision |
+| `OnPreviewValidChanged` override | If in preview state, swaps material to `PreviewMaterial` when valid or `InvalidPreviewMaterial` when invalid |
 
 ---
 
-### 2.2 Road Tile Automatic Morphing & Spline Management
+### 2.3 Road Tile Automatic Morphing & Spline Management
 
 `ARoadTile` switches its visual and driving path automatically based on `ConnectedMask`.
 
 #### Model Switching
 
-According to the number and relative orientation of set bits in the mask, a preset `UStaticMesh` array is mapped:
+`ARoadTile` inherits from `AMeshGridPlaceableActor` and uses a `FRoadMeshConfig` struct array for flexible Mask→model mapping. Each road type only needs one **canonical orientation (CanonicalMask)** model; all other orientations are derived via 90° clockwise Yaw rotation.
 
-| Connections | Orientation | Model |
-|---|---|---|
-| 1 | — | Dead End |
-| 2 | Opposite | Straight |
-| 2 | Perpendicular | Corner |
-| 3 | — | T-Junction |
-| 4 | — | Cross |
+**EGridDirection bitmask:** Up=1, Down=2, Left=4, Right=8
 
-Meshes are pre-placed in the Blueprint and switched via `SetStaticMesh`.
+**CanonicalMask and standard orientation conventions:**
+
+| Type | CanonicalMask | Standard Orientation | Connections | Notes |
+|------|---------------|---------------------|-------------|-------|
+| DeadEnd | **8** (Right) | Opens toward +X | 1 | |
+| Straight | **12** (Left+Right) | Horizontal, opens -X / +X | 2 (opposite) | Road along X-axis; 90° rotation → vertical |
+| Corner | **10** (Down+Right) | Opens +X / -Y | 2 (perpendicular) | |
+| TJunction | **14** (Down+Left+Right) | Missing Up | 3 | Opens -X / +X / -Y |
+| Cross | **15** (All directions) | — | 4 | |
+
+**Automatic rotation lookup:** `FindMeshConfig()` iterates over `RoadMeshConfigs`, rotating `CanonicalMask` 90° clockwise each step (up to 4 rotations), matching against the actual `ConnectedMask`. On match, returns rotation angle `Rot × 90°`.
+
+**Scale strategy:**
+- `ReferenceCellSize` — model design reference size; runtime `BaseScale = CellSize / ReferenceCellSize`
+- Each config entry has `ScaleMultiplier` (FVector), per-axis independent scaling
+- Final `ActorScale = ScaleMultiplier × BaseScale`
+- On 90° or 270° rotation, automatically Swap(ScaleMultiplier.X, ScaleMultiplier.Y) so vertical straight roads scale correctly
+
+**Neighbour refresh:** `GridManager::OccupyCell` / `ClearCell` call `UpdateNeighborMasks()` to recompute four neighbours' `ConnectedMask`, broadcasting `OnCellChanged`. `ARoadTile` listens to this delegate and automatically calls `UpdateAppearance()` to switch Mesh / Rotation / Scale.
+
+Meshes are configured in Blueprint via the `RoadMeshConfigs` array; at runtime, switching is done via `SetStaticMesh` + `SetActorRotation` + `SetActorScale3D`.
 
 #### Internal Spline Management (Hybrid Strategy)
 
@@ -98,7 +162,7 @@ Vehicles move by interpolating along the point array (or a temporary lightweight
 
 ---
 
-### 2.3 Multi-cell Buildings & Interfaces
+### 2.4 Multi-cell Buildings & Interfaces
 
 - Buildings can occupy rectangular areas such as **2×2** or **2×3**. They are represented in the grid by multiple `Building` cells all belonging to a single `ABuilding` Actor.
 - A building automatically generates a potential road interface (**Doorway**) on the outside of the midpoint of each side; the interface coordinate sits **one cell outside** the building rectangle, with its direction facing outward.
@@ -110,7 +174,7 @@ Vehicles move by interpolating along the point array (or a temporary lightweight
 
 ---
 
-### 2.4 L-System Branch Generation
+### 2.5 L-System Branch Generation
 
 During the Planning Phase, after laying arterial roads, the player can trigger the L-system to automatically grow a **capillary network** to connect any buildings not yet linked to the road network.
 
@@ -146,7 +210,7 @@ Each generated road cell calls `GridManager::OccupyCell` and `RoadManager::Creat
 
 ---
 
-### 2.5 Vehicle AI: Spline-based Pathfinding & Traffic Handling
+### 2.6 Vehicle AI: Spline-based Pathfinding & Traffic Handling
 
 #### Global Pathfinding
 
@@ -186,7 +250,7 @@ For intersection Tiles with connection count **≥ 3**, a simple resource lock i
 
 ---
 
-### 2.6 Origin / Destination Generation & Scoring
+### 2.7 Origin / Destination Generation & Scoring
 
 #### Building Generation
 
@@ -214,12 +278,69 @@ Adopts an **"accumulated arrival score + congestion penalty + efficiency bonus"*
 
 ---
 
+### 2.8 Player & Camera System
+
+#### CityFlowPawn
+
+A `ACharacter` subclass configured for top-down free-flight control:
+
+| Feature | Implementation |
+|---|---|
+| Movement mode | `MOVE_Flying` (gravity-free, any-axis movement) |
+| Input | `Enhanced Input` → `IA_Move` (Action, ValueType Axis2D) |
+| Movement direction | Derived from camera rotation via `GetControlRotation()` — WASD moves relative to the current camera view |
+| Configurable (Blueprint) | `MoveSpeed` |
+| Camera setup | Handled entirely in Blueprint: add `USpringArmComponent` + `UCameraComponent` as child components; the character auto-possesses and becomes the view target |
+
+#### CityFlowPlayerController
+
+| Feature | Implementation |
+|---|---|
+| Cursor | `bShowMouseCursor = true` |
+| Preview system | Spawns a preview actor on `BeginPlay`; follows cursor via `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()`; updates preview placement validity each tick via `SetPreviewPlacementValid()` |
+| Placement | `IA_PlaceItem` (left mouse button) → `Started`/`Triggered`/`Completed` events → `TryPlaceAtCursor()` helper with `LastPlacedGridPos` deduplication for drag-to-place |
+| Removal | `IA_RemoveItem` (right mouse button) → `Started`/`Triggered`/`Completed` events → `TryRemoveAtCursor()` helper with `LastRemovedGridPos` deduplication for drag-to-remove. Looks up the actor from `Cell.RoadActor` in the grid instead of relying on collision hit. |
+| Configurable (Blueprint) | `PlaceableActorClass` (any `AGridPlaceableActor` subclass); `IA_PlaceItem`, `IA_RemoveItem` |
+
+---
+
+### 2.9 Grid Visualization
+
+Two Actor classes provide runtime grid line rendering for debugging and visual reference during the Planning Phase.
+
+#### AGridPlaneVisualizer (Primary)
+
+Uses a single Plane mesh with a translucent world-aligned material for efficient single-drawcall grid line rendering.
+
+| Feature | Implementation |
+|---|---|
+| Rendering method | Single `UStaticMeshComponent` (Plane mesh) scaled to match the full grid dimensions |
+| Material | `UMaterialInstanceDynamic` created at runtime from a configurable `GridMaterial`; parameters `CellSize`, `LineWidth`, `LineColor`, `OriginX`, `OriginY` are passed from `GridManager` |
+| Grid alignment | Plane size and position are derived from `GridManager::GetGridWidth()/GetHeight()/GetCellSize()/GetGridOrigin()` at `SetupPlane()` |
+| Visual customization | `LineColor`, `LineWidth`, `ZOffset` are all Blueprint-configurable |
+
+The material uses `M_PrototypeGrid` with `Blend Mode = Translucent` and simple world-position-based math in the material graph. The Plane is placed slightly above the grid origin plane via `ZOffset` to avoid Z-fighting.
+
+**Blueprint API:**
+
+| Function | Description |
+|---|---|
+| `SetupPlane()` | Reads grid parameters from `GridManager`, configures Plane position, scale, and dynamic material |
+| `UpdateMaterialParams()` | Refreshes all material parameters from current `GridManager` state and property values |
+| `SetGridVisible(bool)` | Toggles Plane visibility |
+
+#### AGridVisualizer
+
+Uses `ULineBatchComponent::DrawLine()` to procedurally draw individual grid lines. Replaced in favour of `AGridPlaneVisualizer` for performance, but retained as an alternative renderer.
+
+---
+
 ## 3. Performance Considerations
 
 | Concern | Strategy |
 |---|---|
 | **Grid Scale Control** | Map size is limited to **20×20 up to 30×30**; total road tile count stays bounded, avoiding logic iteration overhead. |
-| **Spline Component Optimisation** | As described in [2.2](#22-road-tile-automatic-morphing--spline-management), complex intersections use on-the-fly path calculation, tying the number of spline components to the **vehicle count** rather than the tile count. |
+| **Spline Component Optimisation** | As described in [2.3](#23-road-tile-automatic-morphing--spline-management), complex intersections use on-the-fly path calculation, tying the number of spline components to the **vehicle count** rather than the tile count. |
 | **Vehicle Count** | Simultaneous vehicles are kept **below 50**, controlled by spawn frequency and number of buildings. |
 | **A\* Caching** | The road graph is rebuilt only when changes occur in the Planning Phase; it is read-only during simulation, and path results can be **cached per vehicle**. |
 
@@ -229,10 +350,12 @@ Adopts an **"accumulated arrival score + congestion penalty + efficiency bonus"*
 
 | Tool / Library | Usage |
 |---|---|
-| **Unreal Engine 5.4+** | Core logic implemented with Blueprints and minimal C++. |
+| **Unreal Engine 5.6** | Core logic implemented with C++. |
+| **Enhanced Input** | WASD movement and placement action binding via `UInputAction` + `UInputMappingContext`. |
 | **`USplineComponent`** | Used for vehicle movement paths on simple road segments. |
 | **`UStaticMeshComponent`** | Road and building visuals; assets sourced from engine built-ins or free low-poly packs. |
+| **`UWorldSubsystem`** | `GridManager` as a globally-accessible singleton subsystem. |
 | **Custom A\*** (Blueprint implementation) | Global path planning on the grid graph. |
-| **`LineTraceByChannel`** | Mouse-based placement interaction. |
+| **`LineTraceByChannel`** | Mouse-based placement interaction and preview tracking. |
 | **Timer / Event System** | Growth animation, vehicle spawning, congestion detection cycles. |
 | **No Third-party Middleware** | All functionality built within the engine, minimising dependency risk. |
