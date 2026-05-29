@@ -1,5 +1,6 @@
 #include "Grid/GridManager.h"
 #include "Grid/GridPlaceableActor.h"
+#include "Engine/World.h"
 
 void UGridManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -222,4 +223,72 @@ void UGridManager::UpdateNeighborMasks(const FGridVector& GridPos)
 			OnCellChanged.Broadcast(N, Grid[N.Y][N.X]);
 		}
 	}
+}
+
+AGridPlaceableActor* UGridManager::TryPlaceBuildingRandom(TSubclassOf<AGridPlaceableActor> PlaceableClass)
+{
+	if (!PlaceableClass || !bGridInitialized)
+	{
+		return nullptr;
+	}
+
+	const AGridPlaceableActor* CDO = PlaceableClass->GetDefaultObject<AGridPlaceableActor>();
+	if (!CDO)
+	{
+		return nullptr;
+	}
+
+	const int32 SizeX = FMath::Max(1, FMath::RoundToInt32(CDO->GetBuildingSize().X));
+	const int32 SizeY = FMath::Max(1, FMath::RoundToInt32(CDO->GetBuildingSize().Y));
+
+	TArray<FGridVector> ValidPositions;
+
+	for (int32 Y = 0; Y <= GridHeight - SizeY; ++Y)
+	{
+		for (int32 X = 0; X <= GridWidth - SizeX; ++X)
+		{
+			bool bValid = true;
+			for (int32 dy = 0; dy < SizeY && bValid; ++dy)
+			{
+				for (int32 dx = 0; dx < SizeX && bValid; ++dx)
+				{
+					if (Grid[Y + dy][X + dx].Type != ECellType::Empty)
+					{
+						bValid = false;
+					}
+				}
+			}
+
+			if (bValid)
+			{
+				ValidPositions.Add(FGridVector(X, Y));
+			}
+		}
+	}
+
+	if (ValidPositions.Num() == 0)
+	{
+		return nullptr;
+	}
+
+	const int32 RandomIndex = FMath::RandRange(0, ValidPositions.Num() - 1);
+	const FGridVector ChosenPos = ValidPositions[RandomIndex];
+	const FVector WorldPos = GridToWorld(ChosenPos);
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AGridPlaceableActor* NewActor = World->SpawnActor<AGridPlaceableActor>(PlaceableClass, WorldPos, FRotator::ZeroRotator, SpawnParams);
+	if (NewActor)
+	{
+		NewActor->PlaceOnGrid(ChosenPos);
+	}
+
+	return NewActor;
 }

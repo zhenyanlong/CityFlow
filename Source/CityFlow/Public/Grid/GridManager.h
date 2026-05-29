@@ -75,6 +75,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Grid")
 	FVector GetGridOrigin() const { return GridOrigin; }
 
+	UFUNCTION(BlueprintCallable, Category = "Grid|Debug")
+	AGridPlaceableActor* TryPlaceBuildingRandom(TSubclassOf<AGridPlaceableActor> PlaceableClass);
+
 	UPROPERTY(BlueprintAssignable, Category = "Grid|Events")
 	FOnCellChanged OnCellChanged;
 

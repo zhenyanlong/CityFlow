@@ -46,6 +46,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Grid|Placement")
 	const TArray<FGridVector>& GetOccupiedCells() const { return OccupiedCells; }
 
+	UFUNCTION(BlueprintPure, Category = "Grid|Placement")
+	FVector2D GetBuildingSize() const { return BuildingSize; }
+
 	UFUNCTION(BlueprintCallable, Category = "Grid|State")
 	void SetPreviewPlacementValid(bool bValid);
 
