@@ -32,3 +32,7 @@
 - Subscribed ARoadTile to GridManager::OnCellChanged delegate for automatic neighbour refresh on placement / removal
 - Defined CanonicalMask values: DeadEnd=8(Right), Straight=12(Left+Right), Corner=10(Down+Right), TJunction=14(Down+Left+Right), Cross=15(All)
 - Updated TDD.md and TDD_Chinese.md with correct CanonicalMask mapping table and rotation/scale strategy
+
+## 2026-05-29
+
+- Fixed a model bug in SM_Road_Main by importing a new SM_Road_Main_Extend mesh from Blender

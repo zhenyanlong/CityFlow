@@ -32,3 +32,7 @@
 - 将 ARoadTile 订阅到 GridManager::OnCellChanged 委托，放置/删除时自动触发邻居外观刷新
 - 定义了 CanonicalMask 值：死胡同=8(Right)、直路=12(Left+Right)、转角=10(Down+Right)、T字路口=14(Down+Left+Right)、十字路口=15(全方向)
 - 更新了 TDD.md 和 TDD_Chinese.md，记录了正确的 CanonicalMask 映射表和旋转/缩放策略
+
+## 2026-05-29
+
+- 通过从 Blender 导入新的 SM_Road_Main_Extend 模型，修复了 SM_Road_Main 的模型 bug
