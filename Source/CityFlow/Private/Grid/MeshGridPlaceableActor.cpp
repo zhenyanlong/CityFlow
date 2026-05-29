@@ -86,3 +86,18 @@ void AMeshGridPlaceableActor::RestoreOriginalMaterials()
 	}
 	OriginalMaterials.Empty();
 }
+
+void AMeshGridPlaceableActor::CaptureOriginalMaterials()
+{
+	if (!MeshComponent)
+	{
+		return;
+	}
+
+	const int32 NumMaterials = MeshComponent->GetNumMaterials();
+	OriginalMaterials.SetNum(NumMaterials);
+	for (int32 i = 0; i < NumMaterials; ++i)
+	{
+		OriginalMaterials[i] = MeshComponent->GetMaterial(i);
+	}
+}

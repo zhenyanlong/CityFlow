@@ -36,3 +36,10 @@
 ## 2026-05-29
 
 - 通过从 Blender 导入新的 SM_Road_Main_Extend 模型，修复了 SM_Road_Main 的模型 bug
+- 在 AGridPlaceableActor 基类添加了 virtual UpdatePreviewAppearance() 方法（默认空实现）
+- 在 ARoadTile 覆写 UpdatePreviewAppearance()：预览时通过 GridManager::CalculateConnectedMask 预测 ConnectedMask 并用 FindMeshConfig 切换 mesh/rotation/scale，同时使用 preview material
+- 在 ARoadTile 添加了 MeshMaterialCache (TMap<UStaticMesh*, TArray<UMaterialInterface*>>)，从 UStaticMesh::GetStaticMaterials() 延迟缓存每 mesh 的原始材质
+- 在 ARoadTile 覆写了 OnEnterPlaced() 和 OnPreviewValidChanged()，防止材质在 preview/invalid/original 之间随机切换
+- 在 UpdateAppearance() 中添加了 EnsureMeshMaterialsCached() + RestoreMeshMaterials()，确保邻居更新时正确恢复材质
+- 在 CityFlowPlayerController::UpdatePreviewPosition() 中每帧调用 UpdatePreviewAppearance()
+- 更新了 TDD.md 和 TDD_Chinese.md，记录预览外观和 MeshMaterialCache 架构

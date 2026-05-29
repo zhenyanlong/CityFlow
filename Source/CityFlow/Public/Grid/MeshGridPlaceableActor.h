@@ -17,6 +17,8 @@ protected:
 	virtual void OnEnterPlaced_Implementation() override;
 	virtual void OnPreviewValidChanged_Implementation(bool bValid) override;
 
+	void CaptureOriginalMaterials();
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<class UStaticMeshComponent> MeshComponent;
 

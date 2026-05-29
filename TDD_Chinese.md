@@ -111,6 +111,10 @@ AGridPlaceableActor  (Abstract)          ← 状态管理 + 统一 API
 | `OnEnterPlaced` 覆写 | 按材质槽索引逐个恢复原始材质 → 开启碰撞 |
 | `OnPreviewValidChanged` 覆写 | 处于预览状态时，合法则切换到 `PreviewMaterial`，不合法则切换到 `InvalidPreviewMaterial` |
 
+#### 预览外观扩展 (AGridPlaceableActor)
+
+在 `AGridPlaceableActor` 基类上定义了 `virtual void UpdatePreviewAppearance(const FGridVector& GridPos)` 方法（默认空实现）。Controller 每帧在 `SetPreviewPlacementValid()` 之后调用此方法，允许子类根据预测的网格位置更新预览视觉。
+
 ---
 
 ### 2.3 道路地块自动变形与样条管理
@@ -144,6 +148,27 @@ AGridPlaceableActor  (Abstract)          ← 状态管理 + 统一 API
 **邻居刷新：** `GridManager::OccupyCell` / `ClearCell` 调用 `UpdateNeighborMasks()` 重新计算四个邻居的 `ConnectedMask`，触发 `OnCellChanged` 广播。`ARoadTile` 监听该委托，自动调用 `UpdateAppearance()` 切换 Mesh / Rotation / Scale。
 
 模型在 Blueprint 中通过 `RoadMeshConfigs` 数组配置，运行时通过 `SetStaticMesh` + `SetActorRotation` + `SetActorScale3D` 进行切换。
+
+#### 预览外观
+
+`ARoadTile` 覆写 `UpdatePreviewAppearance()`，在放置前预测未来 `ConnectedMask`。预览状态下每帧：
+
+1. 调用 `GridManager::CalculateConnectedMask(GridPos)` 计算放置后该位置会得到的掩码。
+2. 运行 `FindMeshConfig()` 查找匹配的 Mesh/Rotation/Scale。
+3. 将相应 mesh、旋转、缩放应用到预览 Actor。
+4. 根据放置有效性，用 `PreviewMaterial` 或 `InvalidPreviewMaterial` 覆盖所有材质槽。
+
+玩家可以在点击前看到目标单元格将出现哪种道路 mesh 配置。
+
+#### Mesh 材质缓存
+
+`ARoadTile` 维护一个 `TMap<UStaticMesh*, TArray<UMaterialInterface*>> MeshMaterialCache`，用于在放置后可靠地恢复原始 mesh 材质。缓存通过 `EnsureMeshMaterialsCached()` 延迟填充，从 `UStaticMesh::GetStaticMaterials()` 读取默认材质。
+
+- **预览时：** `UpdatePreviewAppearance` 在 `SetStaticMesh()` 之前调用 `EnsureMeshMaterialsCached()`，然后用预览/非法材质覆盖所有材质槽。
+- **放置时：** `OnEnterPlaced()` 覆写父类实现，在父类的 `RestoreOriginalMaterials()` 之后从缓存恢复材质。`UpdateAppearance()` 在因邻居更新导致 mesh 变更时也会调用 `EnsureMeshMaterialsCached()` + `RestoreMeshMaterials()`。
+- **`OnPreviewValidChanged`** 被覆写为空体，防止父类的材质切换逻辑干扰由 `UpdatePreviewAppearance` 管理的逐网格预览外观。
+
+此方案避免了 `OnPreviewValidChanged`、`OnEnterPreview` 和 `UpdatePreviewAppearance` 之间材质随机翻转的竞态问题。
 
 #### 内部样条管理（混合策略）
 
@@ -297,7 +322,7 @@ A\* 节点序列被转换为连续的运动计划：
 | 功能 | 实现 |
 |---|---|
 | 光标 | `bShowMouseCursor = true` |
-| 预览系统 | `BeginPlay` 时生成预览 Actor；通过 `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()` 跟随光标；每帧通过 `SetPreviewPlacementValid()` 更新预览位置有效性 |
+| 预览系统 | `BeginPlay` 时生成预览 Actor；通过 `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()` 跟随光标；每帧通过 `SetPreviewPlacementValid()` 更新有效性，然后调用 `UpdatePreviewAppearance()` 让 `ARoadTile` 在预览中显示预测的 mesh |
 | 放置 | `IA_PlaceItem`（鼠标左键）→ `Started`/`Triggered`/`Completed` 事件 → `TryPlaceAtCursor()` 辅助函数，通过 `LastPlacedGridPos` 去重实现拖拽连续放置 |
 | 删除 | `IA_RemoveItem`（鼠标右键）→ `Started`/`Triggered`/`Completed` 事件 → `TryRemoveAtCursor()` 辅助函数，通过 `LastRemovedGridPos` 去重实现拖拽连续删除。从网格 `Cell.RoadActor` 查找 Actor，不依赖碰撞命中。 |
 | 蓝图可配置 | `PlaceableActorClass`（任意 `AGridPlaceableActor` 子类）；`IA_PlaceItem`、`IA_RemoveItem` |

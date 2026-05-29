@@ -118,6 +118,8 @@ void ACityFlowPlayerController::UpdatePreviewPosition()
 
 	const bool bCanPlace = PreviewActor->CanPlaceAt(GridPos);
 	PreviewActor->SetPreviewPlacementValid(bCanPlace);
+
+	PreviewActor->UpdatePreviewAppearance(GridPos);
 }
 
 void ACityFlowPlayerController::DestroyPreview()

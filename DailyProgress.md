@@ -36,3 +36,10 @@
 ## 2026-05-29
 
 - Fixed a model bug in SM_Road_Main by importing a new SM_Road_Main_Extend mesh from Blender
+- Added virtual UpdatePreviewAppearance() method to AGridPlaceableActor base class (default empty)
+- Overrode UpdatePreviewAppearance() in ARoadTile: preview actor now predicts ConnectedMask via GridManager::CalculateConnectedMask and switches mesh/rotation/scale via FindMeshConfig with preview material
+- Added MeshMaterialCache (TMap<UStaticMesh*, TArray<UMaterialInterface*>>) to ARoadTile, lazily caching original materials per-mesh from UStaticMesh::GetStaticMaterials()
+- Overrode OnEnterPlaced() and OnPreviewValidChanged() in ARoadTile to prevent material flipping between preview/invalid/original states
+- Added EnsureMeshMaterialsCached() + RestoreMeshMaterials() in UpdateAppearance() for correct material restoration during neighbour updates
+- Called UpdatePreviewAppearance() every tick in CityFlowPlayerController::UpdatePreviewPosition()
+- Updated TDD.md and TDD_Chinese.md with preview appearance and MeshMaterialCache architecture

@@ -36,6 +36,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Road")
 	void UpdateAppearance();
 
+	virtual void UpdatePreviewAppearance(const FGridVector& GridPos) override;
+
+	virtual void OnEnterPlaced_Implementation() override;
+	virtual void OnPreviewValidChanged_Implementation(bool bValid) override;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -50,4 +55,8 @@ private:
 	bool FindMeshConfig(uint8 Mask, UStaticMesh*& OutMesh, float& OutYaw, FVector& OutScaleMultiplier) const;
 	static uint8 RotateMask90CW(uint8 Mask);
 
+	void EnsureMeshMaterialsCached(UStaticMesh* Mesh);
+	void RestoreMeshMaterials(UStaticMesh* Mesh);
+
+	TMap<TObjectPtr<UStaticMesh>, TArray<TObjectPtr<UMaterialInterface>>> MeshMaterialCache;
 };

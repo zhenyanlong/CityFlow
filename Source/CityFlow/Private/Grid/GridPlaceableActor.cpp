@@ -240,3 +240,7 @@ void AGridPlaceableActor::SetPreviewPlacementValid(bool bValid)
 void AGridPlaceableActor::OnPreviewValidChanged_Implementation(bool bValid)
 {
 }
+
+void AGridPlaceableActor::UpdatePreviewAppearance(const FGridVector& GridPos)
+{
+}

@@ -52,6 +52,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Grid|State")
 	bool IsPreviewPlacementValid() const { return bPreviewPlacementValid; }
 
+	UFUNCTION(BlueprintCallable, Category = "Grid|Preview")
+	virtual void UpdatePreviewAppearance(const FGridVector& GridPos);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
