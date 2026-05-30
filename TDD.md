@@ -14,7 +14,7 @@ Core management classes are gathered in the `GameMode` or delegated Manager comp
 |---|---|
 | **GridManager** | Maintains a 2D logical grid, storing each cell's type (`Empty`, `Road`, `Building`) and connection mask. Provides grid snapping, placement validation, neighbour queries, and building interface registration. |
 | **RoadManager** | Handles creation, destruction, and morphing of road Actors. Receives placement requests from the player or the L-system, updates the grid via `GridManager`, and triggers neighbour refreshes. |
-| **LSystemManager** | Runs at the end of the Planning Phase. Extracts branch starting points from the arterial network and executes a probabilistic grid L-system to automatically grow a capillary road network that connects any remaining buildings. Includes a growth animation controller. |
+| **LSystemManager** | A `UWorldSubsystem` that runs at the end of the Planning Phase. Extracts selective branch starting points from dead-end and straight arterial segments, then executes a breadth-first, attraction-biased iterative growth algorithm to spawn a capillary road network that connects remaining buildings. Growth is animated via `FTimerHandle` at a configurable step interval. |
 | **VehicleManager** | Manages spawning and lifetime of all vehicle Actors during the Simulation Phase. Provides A* pathfinding on the road graph, spline-based movement, congestion waiting, and intersection occupation. |
 | **ScoringManager** | Independently calculates the score, listens for vehicle-arrival events, periodically detects congestion, and tallies the final total. |
 
@@ -308,37 +308,106 @@ ABuilding
 
 ### 2.5 L-System Branch Generation
 
-During the Planning Phase, after laying arterial roads, the player can trigger the L-system to automatically grow a **capillary network** to connect any buildings not yet linked to the road network.
+`ULSystemManager` is a `UWorldSubsystem` that triggers at the end of the Planning Phase. It uses a **breadth-first iterative queue** to automatically grow a capillary road network, connecting any buildings not yet linked to the road network.
+
+#### Architecture
+
+`ULSystemManager` is accessed via `GetWorld()->GetSubsystem<ULSystemManager>()`. All configuration is done through Blueprint-callable setter functions (no `UPROPERTY(EditAnywhere)` exposed).
 
 #### Starting Point Extraction
 
-- Iterate over all arterial road cells. For each direction in the `ConnectedMask` that is **unset** and whose neighbour is `Empty`, record that cell and direction as a **"branch growth point"**.
-- Additionally, all unconnected building interfaces act as separate starting points.
+Starting points are collected from two sources:
 
-#### Probabilistic Grid L-System Interpreter
+**A. Dead-end road cells:**
+- Iterate over all road cells; for each dead-end (`ConnectedMask` has exactly 1 bit set), record growth points in the unconnected directions.
 
-A recursive function `GrowBranch(Position, Direction, Budget)` simulates tree-like expansion analogous to an L-system. Core logic:
+**B. Straight road segments (spaced sampling):**
+- Identify straight road segments (`ConnectedMask` with 2 opposite bits: Up+Down or Left+Right).
+- Walk the segment in both axis directions to collect the full contiguous segment.
+- If segment length < 3 cells, skip (too short to branch from).
+- Sample perpendicular branch points every `MinBranchSpacing + 1` cells along the segment.
+- Corner, T-junction, and Cross tiles are **skipped** (already well-connected).
 
-1. Attempt to step forward one cell; check legality (inside bounds, unoccupied). On success, place a road and consume 1 budget unit.
-2. Calculate the **attraction direction** to the nearest unconnected building, using it to weight branch probabilities: the chance of turning toward the attraction direction is increased.
-3. With probability `p_branch` (e.g., `0.6`), spawn branches by calling itself with left- and/or right-turn explorations, achieving an effect similar to `F → F[+F]F[-F]F` but steered by the attraction target.
-4. If the forward step fails, the function backtracks, automatically trying other branch directions.
+**C. Unconnected building doorways:**
+- Iterate all unconnected buildings; for each doorway whose connection point is `Empty`, add a growth point from the building's grid edge cell in the doorway's facing direction.
 
-**Termination conditions:**
+#### Breadth-First Iterative Growth
 
-- Budget exhausted.
-- All buildings connected.
-- No legal expansion directions remain.
+Instead of a recursive backtracking algorithm, an **iterative queue** drives growth:
+
+1. A `FLSystemGrowthPoint` struct holds a grid position and a growth direction.
+2. `ProcessGrowthStep()` is called on an `FTimerHandle` at `GrowthInterval` (default 0.1s).
+3. Each step pops the **front** of the queue, calls `TryGrowAt()`.
+4. New growth points are inserted at the **back** of the queue, producing breadth-first alternation between all active branches.
+
+#### Multi-cell Straight Extension
+
+When `TryGrowAt()` runs on a growth point, it does not place a single cell. Instead, it attempts to place up to `StraightExtendLength` (default 3) cells in the point's direction:
+
+- Each cell is placed via `World::SpawnActor<ARoadTile>` + `PlaceOnGrid()`.
+- Stops early if the path is blocked, budget exhausted, or placement fails.
+- Only the **last** successfully placed cell generates continuation points.
+
+#### Side Branch Validation
+
+Before a side branch (left/right turn) is added, `IsSideBranchValid()` checks the two cells adjacent to the branch target cell (relative to the branch direction). If **either** side is already a Road cell, the branch is **rejected** — this prevents branches from filling in gaps between parallel roads.
+
+#### Forward Continuation & Probabilistic Branching
+
+For each newly placed cell's valid neighbours (excluding the back-direction):
+
+| Direction | Behaviour |
+|---|---|
+| Forward (same direction) | **Always** added as a continuation point |
+| Left / Right | Added with `BranchProbability` (default 0.6) — only if `IsSideBranchValid()` passes |
+
+#### Attraction-biased Sorting
+
+New growth points are sorted by an attraction score before insertion:
+
+```
+Score = Lerp(DistScore, AlignScore, AttractionStrength)
+  DistScore  = 1 / (1 + euclidean distance to nearest unconnected building)
+  AlignScore = dot(normalised direction to building, growth direction), clamped ≥ 0
+```
+
+Higher-scored points execute first within the batch. This steers branches toward unconnected buildings without overriding the breadth-first guarantee.
+
+#### Configurable Parameters (Blueprint Setters)
+
+| Setter | Default | Description |
+|---|---|---|
+| `SetRoadTileClass(TSubclassOf<ARoadTile>)` | — | Road tile class for spawned branches |
+| `SetBranchBudget(int32)` | 50 | Maximum total road cells to place |
+| `SetGrowthInterval(float)` | 0.1 | Seconds between each growth step (animation speed) |
+| `SetBranchProbability(float)` | 0.6 | Probability of spawning a side branch at each step |
+| `SetAttractionStrength(float)` | 0.7 | Weight of direction alignment vs. distance in attraction score |
+| `SetStraightExtendLength(int32)` | 3 | Number of cells placed per forward step (multi-cell extension) |
+| `SetMinBranchSpacing(int32)` | 3 | Minimum spacing between branch points on straight segments |
+
+#### Event Delegates
+
+| Delegate | Signature | When |
+|---|---|---|
+| `OnGenerationStarted` | `()` | After start points collected, before first step |
+| `OnGenerationStep` | `(int32 RemainingBudget)` | After each growth step |
+| `OnGenerationFinished` | `(bool bAllBuildingsConnected)` | On completion, abort, or termination |
+
+#### Termination Conditions
+
+- Budget exhausted (all remaining budget consumed).
+- All buildings connected (early success).
+- Queue empty — no more legal growth directions.
+
+#### Road Tile Creation
+
+`CreateRoadTile()` spawns an `ARoadTile` via `World::SpawnActor` + `PlaceOnGrid()`. `PlaceOnGrid` internally calls `GridManager::OccupyCell`, triggering neighbour mask updates and the `OnCellChanged` broadcast — so `ARoadTile` automatically switches to the correct mesh/rotation on placement.
 
 #### Growth Animation
 
-- An `FTimerHandle` executes one expansion step every **0.1 seconds**, showing the capillary roads appearing tile-by-tile.
-- Incomplete roads use a **translucent material**, switching to opaque on completion.
-- Building highlights trigger when a branch connects.
-
-#### Integration
-
-Each generated road cell calls `GridManager::OccupyCell` and `RoadManager::CreateRoadTile`, updating the road graph so that subsequent vehicle pathfinding works correctly.
+- `FTimerHandle` calls `ProcessGrowthStep()` every `GrowthInterval` seconds, placing cells one batch at a time (batch = up to `StraightExtendLength` cells per step).
+- (Future) Incomplete roads use a translucent material; completed roads switch to opaque.
+- (Future) Building highlights trigger when a branch connects.
 
 ---
 

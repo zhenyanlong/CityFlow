@@ -22,6 +22,19 @@
 - 修复了 UV 贴图：侧墙使用累计 UVOffset + 长度比例，顶部 V=0 不翻转
 - 修复了三角形缠绕顺序：统一使用 UE 左手坐标系顺时针 (CW) 为正面
 - 更新了 TDD.md 和 TDD_Chinese.md，添加了 2.4b FoundationComponent 章节
+- 创建了 ULSystemManager（UWorldSubsystem）用于 L-system 毛细道路生成
+- 实现了选择性起点采样：死胡同 + 直路段间隔点（跳过转角/交叉口）
+- 实现了广度优先迭代队列生长策略，基于 FTimerHandle 以可配置 GrowthInterval 进行动画
+- 实现了多格直道延伸（StraightExtendLength 可配置，默认每前进步骤 3 格）
+- 实现了 IsSideBranchValid()，防止侧向分支在平行道路间填空
+- 添加了吸引偏向排序（DistScore + AlignScore，按 AttractionStrength 混合），将分支引向未连接建筑
+- 为所有参数添加了蓝图可调用的 Setter/Getter：RoadTileClass、BranchBudget、GrowthInterval、BranchProbability、AttractionStrength、StraightExtendLength、MinBranchSpacing
+- 添加了事件委托：OnGenerationStarted、OnGenerationStep(int32)、OnGenerationFinished(bool)
+- 修复了 Insert(NewPt,0) 导致的深度优先和吸引反转 bug，改为 Add(NewPt)
+- 将 GetDoorwayConnectionPoint() 和 TransformLocalPosition() 提升为 ABuilding 的 public 方法
+- 将 LSystemManager 从 AActor 重构为 UWorldSubsystem，与 GridManager 保持一致
+- 更新了 TDD.md 和 TDD_Chinese.md 第 2.5 节，添加完整的实现细节
+- 更新了 TDD 第 1 节架构概览，反映 LSystemManager 为 UWorldSubsystem
 
 ## 2026-05-26
 

@@ -14,7 +14,7 @@ CityFlow 采用**阶段分离、组件化**的架构，将游戏流程拆分为*
 |---|---|
 | **GridManager** | 维护二维逻辑网格，存储每个单元格的类型（`Empty`、`Road`、`Building`）和连接掩码。提供网格吸附、放置验证、邻居查询和建筑接口注册功能。 |
 | **RoadManager** | 处理道路 Actor 的创建、销毁和变形。接收来自玩家或 L-system 的放置请求，通过 `GridManager` 更新网格，并触发邻居刷新。 |
-| **LSystemManager** | 在规划阶段结束时运行。从主干网络中提取分支起点，执行概率化网格 L-system，自动生成毛细道路网络来连接剩余建筑。包含生长动画控制器。 |
+| **LSystemManager** | `UWorldSubsystem`，在规划阶段结束时运行。从死胡同和直干路段中提取选择性的分支起点，然后执行广度优先、吸引偏向的迭代生长算法，生成毛细道路网络连接剩余建筑。通过 `FTimerHandle` 以可配置的步长间隔进行生长动画。 |
 | **VehicleManager** | 在模拟阶段管理所有车辆 Actor 的生成和生命周期。提供道路图上的 A* 寻路、基于样条的运动、拥堵等待和交叉口占用管理。 |
 | **ScoringManager** | 独立计算分数，监听车辆到达事件，定期检测拥堵，统计最终总分。 |
 
@@ -308,37 +308,106 @@ ABuilding
 
 ### 2.5 L-System 分支生成
 
-在规划阶段，铺设主干道路后，玩家可触发 L-system 自动生成**毛细网络**，连接所有尚未接入道路网络的建筑。
+`ULSystemManager` 是一个 `UWorldSubsystem`，在规划阶段结束时触发。它使用**广度优先迭代队列**自动生成毛细道路网络，连接所有尚未接入道路网络的建筑。
+
+#### 架构
+
+`ULSystemManager` 通过 `GetWorld()->GetSubsystem<ULSystemManager>()` 访问。所有配置均通过蓝图可调用的 Setter 函数完成（不暴露 `UPROPERTY(EditAnywhere)`）。
 
 #### 起点提取
 
-- 遍历所有主干道路单元格。对于 `ConnectedMask` 中**未置位**且邻居为 `Empty` 的每个方向，将该单元格和方向记录为**"分支生长点"**。
-- 此外，所有未连接的建筑接口也作为独立的起始点。
+从两个来源收集生长起点：
 
-#### 概率化网格 L-System 解释器
+**A. 死胡同道路格：**
+- 遍历所有道路格；对每个死胡同（`ConnectedMask` 仅 1 位置位），记录未连接方向上的生长点。
 
-递归函数 `GrowBranch(Position, Direction, Budget)` 模拟类似 L-system 的树状扩展。核心逻辑：
+**B. 直路段（间隔采样）：**
+- 识别直路路段（`ConnectedMask` 含 2 个对向位：Up+Down 或 Left+Right）。
+- 沿两个轴向遍历该路段，收集完整连续段。
+- 若段长 < 3 格，跳过（太短不适合分支）。
+- 沿段每 `MinBranchSpacing + 1` 格在垂直方向采样分支点。
+- 转角、T 型路口、十字路口**跳过**（已充分连接）。
 
-1. 向前尝试走一格；检查合法性（边界内、未被占用）。成功后放置道路并消耗 1 单位预算。
-2. 计算到最近未连接建筑的**吸引方向**，用于加权分支概率：朝向吸引方向转弯的概率增大。
-3. 以概率 `p_branch`（如 `0.6`）产生分支，通过调用自身进行左转和/或右转探索，实现类似 `F → F[+F]F[-F]F` 的效果，但受到吸引目标的引导。
-4. 若前进失败，函数回溯并自动尝试其他分支方向。
+**C. 未连接建筑出入口：**
+- 遍历所有未连接建筑；对每个出入口连接点为 `Empty` 的，从建筑网格边缘格沿出入口朝向添加生长点。
 
-**终止条件：**
+#### 广度优先迭代生长
+
+系统使用**迭代队列**而非递归回溯算法驱动生长：
+
+1. `FLSystemGrowthPoint` 结构体持有网格位置和生长方向。
+2. `ProcessGrowthStep()` 通过 `FTimerHandle` 以 `GrowthInterval`（默认 0.1s）间隔调用。
+3. 每步从**队首**取出一个点，调用 `TryGrowAt()`。
+4. 新的生长点插入**队尾**，在所有活跃分支之间产生广度优先交替。
+
+#### 多格直道延伸
+
+`TryGrowAt()` 执行时不是只放一格。它会尝试在点方向上连续放置最多 `StraightExtendLength`（默认 3）格：
+
+- 每格通过 `World::SpawnActor<ARoadTile>` + `PlaceOnGrid()` 放置。
+- 若路径阻断、预算耗尽或放置失败则提前停止。
+- 仅**最后**成功放置的格生成后续生长点。
+
+#### 侧向分支验证
+
+侧向分支（左/右转）添加前，`IsSideBranchValid()` 检查分支目标格两侧的相邻格（相对于分支方向）。若**任一**侧已是 Road，分支被**拒绝**——防止在平行道路之间填空。
+
+#### 前进延续与概率分叉
+
+对每个新放置格的有效邻居（排除来路方向）：
+
+| 方向 | 行为 |
+|---|---|
+| 前进（同方向） | **总是**添加为延续点 |
+| 左 / 右 | 以 `BranchProbability`（默认 0.6）概率添加 —— 仅在 `IsSideBranchValid()` 通过时 |
+
+#### 吸引偏向排序
+
+新生长点在插入队列前按吸引分数排序：
+
+```
+Score = Lerp(DistScore, AlignScore, AttractionStrength)
+  DistScore  = 1 / (1 + 到最近未连接建筑的欧几里得距离)
+  AlignScore = dot(归一化建筑方向, 生长方向)，截断 ≥ 0
+```
+
+分数高的点在同一批次内优先执行。这在不破坏广度优先保证的前提下将分支引向未连接建筑。
+
+#### 可配置参数（蓝图 Setter）
+
+| Setter | 默认值 | 描述 |
+|---|---|---|
+| `SetRoadTileClass(TSubclassOf<ARoadTile>)` | — | 分支生成使用的道路地块类 |
+| `SetBranchBudget(int32)` | 50 | 最大可放置道路格总数 |
+| `SetGrowthInterval(float)` | 0.1 | 每步生长间隔秒数（动画速度） |
+| `SetBranchProbability(float)` | 0.6 | 每步产生侧向分支的概率 |
+| `SetAttractionStrength(float)` | 0.7 | 吸引评分中方向对齐 vs. 距离的权重 |
+| `SetStraightExtendLength(int32)` | 3 | 每前进步骤放置的格数（多格延伸） |
+| `SetMinBranchSpacing(int32)` | 3 | 直路段上分支点之间的最小间距 |
+
+#### 事件委托
+
+| 委托 | 签名 | 触发时机 |
+|---|---|---|
+| `OnGenerationStarted` | `()` | 收集起始点后，第一步之前 |
+| `OnGenerationStep` | `(int32 RemainingBudget)` | 每步生长后 |
+| `OnGenerationFinished` | `(bool bAllBuildingsConnected)` | 完成、中止或终止时 |
+
+#### 终止条件
 
 - 预算耗尽。
-- 所有建筑已连接。
-- 无合法扩展方向。
+- 所有建筑已连接（提前成功）。
+- 队列为空 —— 无更多合法生长方向。
+
+#### 道路地块创建
+
+`CreateRoadTile()` 通过 `World::SpawnActor` + `PlaceOnGrid()` 生成 `ARoadTile`。`PlaceOnGrid` 内部调用 `GridManager::OccupyCell`，触发邻居掩码更新和 `OnCellChanged` 广播 —— 因此 `ARoadTile` 放置后自动切换到正确的 mesh/rotation。
 
 #### 生长动画
 
-- `FTimerHandle` 每 **0.1 秒**执行一次扩展步骤，逐格展示毛细道路的生成。
-- 未完成的道路使用**半透明材质**，完成后切换为不透明。
-- 分支连接建筑时触发建筑高亮。
-
-#### 集成
-
-每个生成的道路单元格调用 `GridManager::OccupyCell` 和 `RoadManager::CreateRoadTile`，更新道路图，确保后续车辆寻路正常工作。
+- `FTimerHandle` 每 `GrowthInterval` 秒调用 `ProcessGrowthStep()`，每步放置一批格（每批最多 `StraightExtendLength` 格）。
+- （未来）未完成的道路使用半透明材质；完成后切换为不透明。
+- （未来）分支连接建筑时触发建筑高亮。
 
 ---
 

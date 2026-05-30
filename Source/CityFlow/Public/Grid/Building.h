@@ -53,6 +53,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	FVector2D GetEffectiveBuildingSize() const;
 
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FGridVector GetDoorwayConnectionPoint(const FBuildingDoorway& Doorway) const;
+
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FGridVector TransformLocalPosition(const FGridVector& LocalPos) const;
+
 	virtual void UpdatePreviewAppearance(const FGridVector& GridPos) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Building")
@@ -69,9 +75,6 @@ protected:
 
 private:
 	void UpdateBuildingAppearance();
-
-	FGridVector TransformLocalPosition(const FGridVector& LocalPos) const;
-	FGridVector GetDoorwayConnectionPoint(const FBuildingDoorway& Doorway) const;
 
 	void EnsureMeshMaterialsCached(UStaticMesh* Mesh);
 	void RestoreMeshMaterials(UStaticMesh* Mesh);

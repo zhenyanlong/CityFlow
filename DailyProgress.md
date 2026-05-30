@@ -22,6 +22,19 @@
 - Fixed UV mapping: walls use cumulative UVOffset + edge-length ratio, top V=0 (no flip)
 - Fixed triangle winding order: unified UE left-hand coordinate clockwise (CW) as front face
 - Updated TDD.md and TDD_Chinese.md with section 2.4b FoundationComponent documentation
+- Created ULSystemManager as a UWorldSubsystem for L-system capillary road generation
+- Implemented selective start-point sampling: dead-end roads + spaced points on straight segments (corners/junctions skipped)
+- Implemented breadth-first iterative queue growth strategy with FTimerHandle-based animation at configurable GrowthInterval
+- Implemented multi-cell straight extension (StraightExtendLength configurable, default 3 cells per forward step)
+- Implemented IsSideBranchValid() to prevent side branches from filling gaps between parallel roads
+- Added attraction-biased sorting (DistScore + AlignScore blended by AttractionStrength) to steer branches toward unconnected buildings
+- Added Blueprint-callable Setter/Getter for all parameters: RoadTileClass, BranchBudget, GrowthInterval, BranchProbability, AttractionStrength, StraightExtendLength, MinBranchSpacing
+- Added event delegates: OnGenerationStarted, OnGenerationStep(int32), OnGenerationFinished(bool)
+- Fixed depth-first and attraction-reversal bugs by changing Insert(NewPt,0) to Add(NewPt)
+- Moved GetDoorwayConnectionPoint() and TransformLocalPosition() to public in ABuilding
+- Refactored LSystemManager from AActor to UWorldSubsystem for consistency with GridManager
+- Updated TDD.md and TDD_Chinese.md section 2.5 with full implementation details
+- Updated TDD section 1 architecture overview to reflect LSystemManager as UWorldSubsystem
 
 ## 2026-05-26
 

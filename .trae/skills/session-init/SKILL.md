@@ -92,19 +92,9 @@ description: "初始化开发会话，读取 GDD、TDD、DailyProgress 文档以
 
 ### 代码组织规范
 
-项目遵循 UE 的 `Public/` 和 `Private/` 分离约定，在此之上按**功能模块**分层组织：
+项目遵循 UE 的 `Public/` 和 `Private/` 分离约定，在此之上按**功能模块**分层组织。具体有哪些模块由 TDD 文档定义，此处只规定模块内部的代码组织方式。
 
-**模块顶层目录（在 `Public/` 和 `Private/` 下各有一份镜像）：**
-
-| 目录 | 用途 | 示例 |
-|---|---|---|
-| `Grid/` | 网格系统（已存在，文件不动） | `GridManager`, `GridPlaceableActor` |
-| `Player/` | 玩家（已存在，文件不动） | `CityFlowPawn`, `CityFlowPlayerController` |
-| `Vehicle/` | 车辆系统（未来模块） | — |
-| `LSystem/` | L-system 生成（未来模块） | — |
-| `Scoring/` | 计分系统（未来模块） | — |
-
-**每个新模块内部按文件类型分子目录：**
+**每个模块内部按文件类型分子目录：**
 
 ```
 {Module}/
@@ -117,13 +107,13 @@ description: "初始化开发会话，读取 GDD、TDD、DailyProgress 文档以
 | 子目录 | 存放内容 | 命名约定 |
 |---|---|---|
 | `Types/` | 枚举、结构体、纯数据定义 | `{Module}Types.h`、`{Module}Structs.h` |
-| `Subsystem/` | WorldSubsystem 等管理类 | `{Module}Manager.h`（如 `VehicleManager`） |
+| `Subsystem/` | WorldSubsystem 等管理类 | `{Module}Manager.h` 或具体名 |
 | `Actor/` | 所有 Actor 子类 | `{Module}Actor.h` 或具体名 |
-| `Comp/` | ActorComponent / SceneComponent | `{Module}Component.h` |
+| `Comp/` | ActorComponent / SceneComponent | `{Module}Component.h` 或具体名 |
 
 **规则：**
-- 现有 `Grid/` 目录下的文件**不移动**，保持原样
-- 任何**新增模块**（如 Vehicle、LSystem、Scoring）必须遵守上述分子目录规范
+- **已存在的文件不动**：已经放在模块根目录下的文件（如 `Grid/GridManager.h`）不要挪动位置
+- **新增文件必须分目录**：向任何模块（包括已存在的模块）添加新文件时，必须按上述子目录规范放置
 - `Public/` 和 `Private/` 下的目录结构保持镜像一致
 - 测试代码放入 `Test/` 目录，不纳入正式模块
 
