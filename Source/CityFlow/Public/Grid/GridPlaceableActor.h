@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Grid/CityFlowGridTypes.h"
+#include "Components/SceneComponent.h"
 #include "GridPlaceableActor.generated.h"
 
 UCLASS(Abstract)
@@ -48,6 +49,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Grid|Placement")
 	FVector2D GetBuildingSize() const { return BuildingSize; }
+
+	UFUNCTION(BlueprintPure, Category = "Grid|Placement")
+	EPlaceableType GetPlaceableType() const { return PlaceableType; }
 
 	UFUNCTION(BlueprintCallable, Category = "Grid|State")
 	void SetPreviewPlacementValid(bool bValid);
@@ -100,6 +104,12 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid|Placement")
 	FVector2D BuildingSize = FVector2D(1, 1);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid|Placement")
+	EPlaceableType PlaceableType = EPlaceableType::Road;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<USceneComponent> RootSceneComponent;
 
 	class UGridManager* GetGridManager() const;
 

@@ -1,5 +1,6 @@
 #include "Grid/GridManager.h"
 #include "Grid/GridPlaceableActor.h"
+#include "Grid/Building.h"
 #include "Engine/World.h"
 
 void UGridManager::Initialize(FSubsystemCollectionBase& Collection)
@@ -191,22 +192,30 @@ uint8 UGridManager::CalculateConnectedMask(const FGridVector& GridPos) const
 {
 	uint8 Mask = 0;
 
-	if (GetCellType(GridPos + GridDirectionUtils::Up) == ECellType::Road)
+	auto CheckNeighbor = [&](EGridDirection Dir)
 	{
-		Mask |= static_cast<uint8>(EGridDirection::Up);
-	}
-	if (GetCellType(GridPos + GridDirectionUtils::Down) == ECellType::Road)
-	{
-		Mask |= static_cast<uint8>(EGridDirection::Down);
-	}
-	if (GetCellType(GridPos + GridDirectionUtils::Left) == ECellType::Road)
-	{
-		Mask |= static_cast<uint8>(EGridDirection::Left);
-	}
-	if (GetCellType(GridPos + GridDirectionUtils::Right) == ECellType::Road)
-	{
-		Mask |= static_cast<uint8>(EGridDirection::Right);
-	}
+		const FGridVector NeighborPos = GridPos + GridDirectionUtils::GetVector(Dir);
+		const ECellType NeighborType = GetCellType(NeighborPos);
+
+		if (NeighborType == ECellType::Road)
+		{
+			Mask |= static_cast<uint8>(Dir);
+		}
+		else if (NeighborType == ECellType::Building)
+		{
+			const FGridCell& NeighborCell = GetCell(NeighborPos);
+			const ABuilding* Building = Cast<ABuilding>(NeighborCell.RoadActor);
+			if (Building && Building->HasDoorwayAt(GridPos))
+			{
+				Mask |= static_cast<uint8>(Dir);
+			}
+		}
+	};
+
+	CheckNeighbor(EGridDirection::Up);
+	CheckNeighbor(EGridDirection::Down);
+	CheckNeighbor(EGridDirection::Left);
+	CheckNeighbor(EGridDirection::Right);
 
 	return Mask;
 }
@@ -271,9 +280,10 @@ AGridPlaceableActor* UGridManager::TryPlaceBuildingRandom(TSubclassOf<AGridPlace
 		return nullptr;
 	}
 
-	const int32 RandomIndex = FMath::RandRange(0, ValidPositions.Num() - 1);
-	const FGridVector ChosenPos = ValidPositions[RandomIndex];
-	const FVector WorldPos = GridToWorld(ChosenPos);
+	static const EGridRotation AllRotations[] = {
+		EGridRotation::Rot0, EGridRotation::Rot90,
+		EGridRotation::Rot180, EGridRotation::Rot270
+	};
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -281,14 +291,92 @@ AGridPlaceableActor* UGridManager::TryPlaceBuildingRandom(TSubclassOf<AGridPlace
 		return nullptr;
 	}
 
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	const int32 NumPositions = ValidPositions.Num();
+	const int32 StartIndex = FMath::RandRange(0, NumPositions - 1);
 
-	AGridPlaceableActor* NewActor = World->SpawnActor<AGridPlaceableActor>(PlaceableClass, WorldPos, FRotator::ZeroRotator, SpawnParams);
-	if (NewActor)
+	for (int32 Attempt = 0; Attempt < NumPositions; ++Attempt)
 	{
-		NewActor->PlaceOnGrid(ChosenPos);
+		const FGridVector& ChosenPos = ValidPositions[(StartIndex + Attempt) % NumPositions];
+
+		const int32 StartRot = FMath::RandRange(0, 3);
+		for (int32 r = 0; r < 4; ++r)
+		{
+			const EGridRotation Rot = AllRotations[(StartRot + r) % 4];
+
+			const bool bSwapped = (Rot == EGridRotation::Rot90 || Rot == EGridRotation::Rot270);
+			const int32 EffX = bSwapped ? SizeY : SizeX;
+			const int32 EffY = bSwapped ? SizeX : SizeY;
+
+			if (ChosenPos.X + EffX > GridWidth || ChosenPos.Y + EffY > GridHeight)
+			{
+				continue;
+			}
+
+			bool bFootprintClear = true;
+			for (int32 dy = 0; dy < EffY && bFootprintClear; ++dy)
+			{
+				for (int32 dx = 0; dx < EffX && bFootprintClear; ++dx)
+				{
+					if (Grid[ChosenPos.Y + dy][ChosenPos.X + dx].Type != ECellType::Empty)
+					{
+						bFootprintClear = false;
+					}
+				}
+			}
+
+			if (!bFootprintClear)
+			{
+				continue;
+			}
+
+			const FVector WorldPos = GridToWorld(ChosenPos);
+
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+			AGridPlaceableActor* NewActor = World->SpawnActor<AGridPlaceableActor>(
+				PlaceableClass, WorldPos, FRotator::ZeroRotator, SpawnParams);
+
+			if (NewActor)
+			{
+				if (ABuilding* Building = Cast<ABuilding>(NewActor))
+				{
+					Building->BuildingRotation = Rot;
+				}
+
+				if (NewActor->PlaceOnGrid(ChosenPos))
+				{
+					return NewActor;
+				}
+
+				NewActor->Destroy();
+			}
+		}
 	}
 
-	return NewActor;
+	return nullptr;
+}
+
+TArray<AGridPlaceableActor*> UGridManager::TryPlaceBuildingsRandom(const TArray<FBuildingSpawnRequest>& Requests)
+{
+	TArray<AGridPlaceableActor*> Result;
+
+	for (const FBuildingSpawnRequest& Request : Requests)
+	{
+		if (!Request.BuildingClass)
+		{
+			continue;
+		}
+
+		for (int32 i = 0; i < Request.Count; ++i)
+		{
+			AGridPlaceableActor* Actor = TryPlaceBuildingRandom(Request.BuildingClass);
+			if (Actor)
+			{
+				Result.Add(Actor);
+			}
+		}
+	}
+
+	return Result;
 }

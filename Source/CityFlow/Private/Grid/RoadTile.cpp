@@ -4,6 +4,7 @@
 
 ARoadTile::ARoadTile()
 {
+	PlaceableType = EPlaceableType::Road;
 }
 
 void ARoadTile::BeginPlay()

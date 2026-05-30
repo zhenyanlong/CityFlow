@@ -11,6 +11,23 @@ enum class ECellType : uint8
 	Building UMETA(DisplayName = "Building")
 };
 
+UENUM(BlueprintType)
+enum class EPlaceableType : uint8
+{
+	Road      UMETA(DisplayName = "Road"),
+	Building  UMETA(DisplayName = "Building"),
+	Landscape UMETA(DisplayName = "Landscape")
+};
+
+UENUM(BlueprintType)
+enum class EGridRotation : uint8
+{
+	Rot0   UMETA(DisplayName = "0°"),
+	Rot90  UMETA(DisplayName = "90°"),
+	Rot180 UMETA(DisplayName = "180°"),
+	Rot270 UMETA(DisplayName = "270°")
+};
+
 UENUM(BlueprintType, Meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
 enum class EGridDirection : uint8
 {
@@ -45,10 +62,10 @@ struct CITYFLOW_API FGridVector
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 X = 0;
 
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 Y = 0;
 
 	FGridVector() = default;
@@ -119,5 +136,17 @@ namespace GridDirectionUtils
 	static TArray<EGridDirection> GetAllDirections()
 	{
 		return { EGridDirection::Up, EGridDirection::Down, EGridDirection::Left, EGridDirection::Right };
+	}
+
+	static EGridDirection Rotate90CW(EGridDirection Dir)
+	{
+		switch (Dir)
+		{
+		case EGridDirection::Up:    return EGridDirection::Right;
+		case EGridDirection::Right: return EGridDirection::Down;
+		case EGridDirection::Down:  return EGridDirection::Left;
+		case EGridDirection::Left:  return EGridDirection::Up;
+		default:                    return EGridDirection::None;
+		}
 	}
 }

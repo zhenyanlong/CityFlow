@@ -5,7 +5,7 @@
 AMeshGridPlaceableActor::AMeshGridPlaceableActor()
 {
 	MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
-	RootComponent = MeshComponent;
+	MeshComponent->SetupAttachment(RootComponent);
 }
 
 void AMeshGridPlaceableActor::OnEnterPreview_Implementation()

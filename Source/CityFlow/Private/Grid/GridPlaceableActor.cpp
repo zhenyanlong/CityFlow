@@ -5,6 +5,9 @@
 AGridPlaceableActor::AGridPlaceableActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+	RootComponent = RootSceneComponent;
 }
 
 void AGridPlaceableActor::BeginPlay()

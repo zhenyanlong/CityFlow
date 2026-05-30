@@ -7,6 +7,18 @@
 
 class AGridPlaceableActor;
 
+USTRUCT(BlueprintType)
+struct FBuildingSpawnRequest
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+	TSubclassOf<AGridPlaceableActor> BuildingClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+	int32 Count = 1;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCellChanged, FGridVector, CellPos, const FGridCell&, NewCell);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGridPlaced, AGridPlaceableActor*, PlacedActor);
 
@@ -78,14 +90,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Grid|Debug")
 	AGridPlaceableActor* TryPlaceBuildingRandom(TSubclassOf<AGridPlaceableActor> PlaceableClass);
 
+	UFUNCTION(BlueprintCallable, Category = "Grid|Debug")
+	TArray<AGridPlaceableActor*> TryPlaceBuildingsRandom(const TArray<FBuildingSpawnRequest>& Requests);
+
 	UPROPERTY(BlueprintAssignable, Category = "Grid|Events")
 	FOnCellChanged OnCellChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "Grid|Events")
 	FOnGridPlaced OnGridPlaced;
 
-protected:
 	void UpdateNeighborMasks(const FGridVector& GridPos);
+
+protected:
 
 private:
 	TArray<TArray<FGridCell>> Grid;
