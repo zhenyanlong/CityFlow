@@ -35,6 +35,8 @@
 - Refactored LSystemManager from AActor to UWorldSubsystem for consistency with GridManager
 - Updated TDD.md and TDD_Chinese.md section 2.5 with full implementation details
 - Updated TDD section 1 architecture overview to reflect LSystemManager as UWorldSubsystem
+- Added FoundationCollisionProfileName and SidewalkCollisionProfileName to UFoundationComponent with dropdown options from GetCollisionProfileOptions()
+- Updated TDD.md and TDD_Chinese.md section 2.4b with collision profile configuration
 
 ## 2026-05-26
 

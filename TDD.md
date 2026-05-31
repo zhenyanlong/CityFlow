@@ -284,6 +284,8 @@ ABuilding
 | `SidewalkHeight` | 10 | Sidewalk extrusion height above foundation top |
 | `FoundationMaterial` | — | Material for foundation body |
 | `SidewalkMaterial` | — | Material for sidewalk ring |
+| `FoundationCollisionProfileName` | `None` | Collision profile for the foundation procedural mesh. Exposed as a dropdown via `GetCollisionProfileOptions()`, listing all engine and project collision profiles. |
+| `SidewalkCollisionProfileName` | `None` | Collision profile for the sidewalk procedural mesh. Same dropdown behaviour as foundation. |
 
 #### Per-Edge Connection Handling
 

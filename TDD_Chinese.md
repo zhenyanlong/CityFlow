@@ -284,6 +284,8 @@ ABuilding
 | `SidewalkHeight` | 10 | 人行道在地基顶部之上的挤出高度 |
 | `FoundationMaterial` | — | 地基主体的材质 |
 | `SidewalkMaterial` | — | 人行道环的材质 |
+| `FoundationCollisionProfileName` | `None` | 地基 ProceduralMesh 的碰撞预设。通过 `GetCollisionProfileOptions()` 以下拉菜单形式暴露，列出所有引擎和项目碰撞预设。 |
+| `SidewalkCollisionProfileName` | `None` | 人行道 ProceduralMesh 的碰撞预设。与地基具有相同的下拉菜单行为。 |
 
 #### 按边连接处理
 

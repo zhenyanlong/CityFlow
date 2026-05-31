@@ -35,6 +35,8 @@
 - 将 LSystemManager 从 AActor 重构为 UWorldSubsystem，与 GridManager 保持一致
 - 更新了 TDD.md 和 TDD_Chinese.md 第 2.5 节，添加完整的实现细节
 - 更新了 TDD 第 1 节架构概览，反映 LSystemManager 为 UWorldSubsystem
+- 为 UFoundationComponent 添加了 FoundationCollisionProfileName 和 SidewalkCollisionProfileName，通过 GetCollisionProfileOptions() 提供下拉菜单选项
+- 更新了 TDD.md 和 TDD_Chinese.md 第 2.4b 节，添加碰撞预设配置
 
 ## 2026-05-26
 

@@ -22,6 +22,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Foundation")
 	void ClearFoundation();
 
+	UFUNCTION()
+	static TArray<FString> GetCollisionProfileOptions();
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation")
 	float FoundationHeight = 50.0f;
 
@@ -42,6 +45,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation")
 	TObjectPtr<UMaterialInterface> SidewalkMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation|Collision", meta = (GetOptions = "GetCollisionProfileOptions"))
+	FName FoundationCollisionProfileName = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foundation|Collision", meta = (GetOptions = "GetCollisionProfileOptions"))
+	FName SidewalkCollisionProfileName = NAME_None;
 
 private:
 	struct FOutlinePoint

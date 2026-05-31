@@ -1,10 +1,35 @@
 #include "Grid/FoundationComponent.h"
 #include "ProceduralMeshComponent.h"
 #include "Materials/MaterialInterface.h"
+#include "Engine/CollisionProfile.h"
 
 UFoundationComponent::UFoundationComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
+}
+
+TArray<FString> UFoundationComponent::GetCollisionProfileOptions()
+{
+    TArray<FString> Options;
+    Options.Add(TEXT(""));
+
+    UCollisionProfile* ProfileManager = UCollisionProfile::Get();
+    if (!ProfileManager)
+    {
+        return Options;
+    }
+
+    int32 NumProfiles = ProfileManager->GetNumOfProfiles();
+    for (int32 i = 0; i < NumProfiles; ++i)
+    {
+        const FCollisionResponseTemplate* Profile = ProfileManager->GetProfileByIndex(i);
+        if (Profile)
+        {
+            Options.Add(Profile->Name.ToString());
+        }
+    }
+
+    return Options;
 }
 
 void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, float CellSize,
@@ -162,13 +187,17 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
             1.0f));
     }
     FoundationMesh->CreateMeshSection_LinearColor(0, FoundationVerts, FoundationTris, FoundationNormals, FoundationUVs,
-        TArray<FLinearColor>(), TArray<FProcMeshTangent>(), true);
-    
-    if (FoundationMaterial)
-    {
-        FoundationMesh->SetMaterial(0, FoundationMaterial);
-    }
-    FoundationMesh->RegisterComponent();
+		TArray<FLinearColor>(), TArray<FProcMeshTangent>(), true);
+	
+	if (FoundationMaterial)
+	{
+		FoundationMesh->SetMaterial(0, FoundationMaterial);
+	}
+	if (!FoundationCollisionProfileName.IsNone())
+	{
+		FoundationMesh->SetCollisionProfileName(FoundationCollisionProfileName);
+	}
+	FoundationMesh->RegisterComponent();
 
     BuildSidewalk(Owner, HW, HH);
 }
@@ -279,13 +308,17 @@ void UFoundationComponent::BuildSidewalk(AActor* Owner, float HW, float HH)
             1.0f));
     }
     SidewalkMesh->CreateMeshSection_LinearColor(0, V, T, N, UVs,
-        TArray<FLinearColor>(), TArray<FProcMeshTangent>(), true);
-    
-    if (SidewalkMaterial)
-    {
-        SidewalkMesh->SetMaterial(0, SidewalkMaterial);
-    }
-    SidewalkMesh->RegisterComponent();
+		TArray<FLinearColor>(), TArray<FProcMeshTangent>(), true);
+	
+	if (SidewalkMaterial)
+	{
+		SidewalkMesh->SetMaterial(0, SidewalkMaterial);
+	}
+	if (!SidewalkCollisionProfileName.IsNone())
+	{
+		SidewalkMesh->SetCollisionProfileName(SidewalkCollisionProfileName);
+	}
+	SidewalkMesh->RegisterComponent();
 }
 
 void UFoundationComponent::ClearFoundation()
