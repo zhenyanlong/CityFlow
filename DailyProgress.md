@@ -1,3 +1,48 @@
+## 2026-05-31
+
+### Vehicle Spawn System (v0.1, preliminary debug passed)
+
+- Redesigned UVehicleDataAsset from per-vehicle parameter table to vehicle class registry: added FVehicleSpawnEntry struct (TSubclassOf<AVehicleActor> + SpawnWeight), referenced via UCityFlowDeveloperSettings::DefaultVehicleDataAsset
+- Updated UVehicleManager: CacheSpawnEntries() loads registry on simulation start, PickRandomVehicleClass() performs weighted random selection per spawn, SpawnVehicle() uses picked class instead of hardcoded base class
+- Removed AVehicleActor::InitializeFromDataAsset(); each BP subclass now configures its own Mesh/MoveSpeed/DebugColor in Class Defaults
+- Added USceneComponent VehicleRoot as root component with VehicleMesh attached as child, enabling local rotation/scale adjustment in Blueprint subclasses
+- Added VehicleZOffset (default 30) to AVehicleActor: all waypoint positions offset by this value to place vehicles on top of road surface instead of inside it
+- Vehicle root rotation follows movement direction each frame via SetWorldRotation(Yaw from MoveDir)
+- Vehicles now auto-destroy on arrival (Destroy() called in VehicleManager tick after broadcasting OnVehicleArrived)
+- Added default Cube mesh fallback in AVehicleActor constructor so vehicles are visible even without a configured DataAsset
+
+### VehicleManager Improvements (v0.1, preliminary debug passed)
+
+- Vehicle spawning retry logic: each tick randomly picks an origin, shuffles all destinations (Fisher-Yates), and iterates until a connected pair is found; if nothing connects, tries all other origins
+- Destination randomization: a fresh shuffled destination list is generated per spawn tick, avoiding fixed origin-to-dest bindings
+- Added comprehensive UE_LOG diagnostics at every SpawnVehicle failure point (null building, no doorway on road, A* path failed, movement plan invalid, PickRandomVehicleClass returned null, SpawnActor failed, success with path details)
+- Added logging to CacheSpawnEntries (missing DataAsset config, empty entries array, loaded types summary) and PickRandomVehicleClass (no entries fallback warning)
+
+### Budget System Bug Fixes
+
+- Fixed OccupyCell: budget check was after Cell.Type/BuildingID/RoadActor writes; on budget exhaustion the Cell was permanently corrupted as Type=Road/Mask=0 without broadcasting OnCellChanged. Moved budget guard before any Cell mutation.
+- Fixed RegisterCells: OccupyCell return value was silently dropped; PlaceOnGrid would transition actor to Placed state even when grid occupancy failed. Changed RegisterCells to return bool; PlaceOnGrid now checks result and rolls back on failure.
+- Fixed AGridPlaceableActor::PlaceOnGrid: on RegisterCells failure, now calls ClearCell on any partially-occupied cells and resets GridPosition, preventing state pollution.
+
+### PlayerController Bug Fix
+
+- Fixed TryPlaceAtCursor: PlaceOnGrid return value was unchecked. On failure, the preview actor had collision enabled but was neither placed nor destroyed, leaking in the world, blocking raycasts and preventing further placement on most cells. Now only clears PreviewActor pointer and spawns new preview on success; reverts collision on failure.
+
+### GameMode Configuration Fix
+
+- Removed CityFlowGameMode::BeginPlay() overwriting GridWidth/GridHeight/CellSize/BuildingCount with DeveloperSettings defaults. BP GameMode Class Defaults are now authoritative for grid and building parameters.
+
+### C++ Foundations (code-complete, not yet gameplay-verified)
+
+- ACityFlowGameMode state machine (Planning→Simulating→Evaluation): BeginPlay scene init, building spawn delegation, phase transitions, simulation timer, budget split (Player vs L-system share)
+- UScoringManager (UWorldSubsystem): arrival points tracking, per-second congestion penalty, full-connectivity bonus, final score computation
+- ACityFlowHUD: GameWidget/EvaluationWidget lifecycle management
+- UCityFlowGameWidget C++ base: BlueprintImplementableEvent callbacks for phase/score/budget/L-system, Blueprint-callable StartSimulation/EndSimulation/RestartPlanning/TriggerLSystem
+- UCityFlowCheatExtension: 15 CF_* console commands (phase control, vehicle spawning/debug, budget, stats, simulation speed)
+- UCityFlowDeveloperSettings (Config=Game, Project Settings panel): grid, budget, simulation, scoring, vehicles, debug flags
+- Build.cs: added UMG, Slate, SlateCore, DeveloperSettings module dependencies
+- Updated TDD.md and TDD_Chinese.md sections 1, 2.6, 2.7, 2.10, 2.11, 2.12, 2.13
+
 ## 2026-05-30
 
 - Added EPlaceableType enum (Road/Building/Landscape) and EGridRotation enum (Rot0/Rot90/Rot180/Rot270) to CityFlowGridTypes.h

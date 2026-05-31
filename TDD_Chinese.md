@@ -10,13 +10,13 @@ CityFlow 采用**阶段分离、组件化**的架构，将游戏流程拆分为*
 
 核心管理类集中在 `GameMode` 或委派的 Manager 组件中：
 
-| 管理器 | 职责 |
-|---|---|
-| **GridManager** | 维护二维逻辑网格，存储每个单元格的类型（`Empty`、`Road`、`Building`）和连接掩码。提供网格吸附、放置验证、邻居查询和建筑接口注册功能。 |
-| **RoadManager** | 处理道路 Actor 的创建、销毁和变形。接收来自玩家或 L-system 的放置请求，通过 `GridManager` 更新网格，并触发邻居刷新。 |
-| **LSystemManager** | `UWorldSubsystem`，在规划阶段结束时运行。从死胡同和直干路段中提取选择性的分支起点，然后执行广度优先、吸引偏向的迭代生长算法，生成毛细道路网络连接剩余建筑。通过 `FTimerHandle` 以可配置的步长间隔进行生长动画。 |
-| **VehicleManager** | 在模拟阶段管理所有车辆 Actor 的生成和生命周期。提供道路图上的 A* 寻路、基于样条的运动、拥堵等待和交叉口占用管理。 |
-| **ScoringManager** | 独立计算分数，监听车辆到达事件，定期检测拥堵，统计最终总分。 |
+| 管理器 | 类型 | 职责 |
+|---|---|---|
+| **GridManager** | `UWorldSubsystem` | 维护二维逻辑网格。提供网格吸附、放置验证、邻居查询、连接掩码计算和建筑接口注册。**管理共享道路预算** —— 玩家放置和 L-system 生成都从同一个 `RoadBudget` 池中消费。 |
+| **LSystemManager** | `UWorldSubsystem` | **可选的**辅助毛细道路生成器。从死胡同和直路段提取分支起点，执行广度优先、吸引偏向的生长算法。与玩家**共享道路预算**。由玩家手动触发（UI 按钮或控制台命令）。 |
+| **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | 生成并管理所有车辆 Actor。提供道路图上的 **A\* 寻路**，将网格路径转换为世界空间航点运动计划，处理**拥堵检测**（每格车辆数统计）和**交叉口占用**（≥3 向路口的互斥锁）。每帧 Tick。 |
+| **ScoringManager** | `UWorldSubsystem` | 在模拟阶段追踪到达数、到达分数和拥堵惩罚。使用定时器周期性扣除拥堵惩罚。结算时计算包含全连通奖励的最终分数。 |
+| **CityFlowGameMode** | `AGameModeBase` | 拥有**状态机**（`ECityFlowGamePhase`：Planning → Simulating → Evaluation）。初始化网格、生成默认建筑、管理共享预算分配、触发阶段切换。为 UI 控制提供蓝图可调用 API。 |
 
 各管理器通过**事件总线**（如 `OnRoadPlaced`、`OnVehicleArrived`）进行通信，避免硬引用。
 
@@ -413,71 +413,80 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 
 ---
 
-### 2.6 车辆 AI：基于样条的寻路与交通处理
+### 2.6 车辆 AI：A\* 寻路与航点运动
 
-#### 全局寻路
+#### 实现状态：✅ 已实现
 
-- `GridManager` 根据当前网格构建道路图（每个道路单元格为一个节点；连接方向匹配的相邻单元格之间存在边）。
-- **A\* 算法**计算从起点建筑接口单元格到目的地建筑接口单元格的最短节点序列。
-- 路径在车辆生成时**计算一次**；若规划阶段道路网络发生变更，受影响的车辆路径会重新计算。
+`AVehicleActor` 是一个可蓝图化的 `AActor`，根组件为 `UStaticMeshComponent`。可在蓝图中子类化以实现不同车辆类型。
 
-#### 路径转样条运动计划
+**核心运动模型：** 车辆沿预计算的 `FVehicleMovementPlan`（由 A\* 网格路径派生的世界空间 `FVehicleWaypoint` 序列）移动。每帧以 `MoveSpeed` 向当前航点插值。距航点在 `WaypointReachedThreshold` 内时推进至下一航点。到达终点时广播 `OnVehicleArrived`。
 
-A\* 节点序列被转换为连续的运动计划：
+**车辆生成：** `UVehicleManager::SpawnVehicle(Origin, Destination)` 选取两个建筑的出入口连接点，通过 `BuildPath()` 运行 A\*，将结果转为运动计划，然后通过 `PickRandomVehicleClass()` 从生成表中按权重随机选取车辆子类进行生成。生成的 `AVehicleActor` 子类已在其蓝图中配置了自身的 Mesh、速度和其它属性。
 
+**A\* 寻路：**
+- 节点 = 道路格（`ECellType::Road`）；边 = `ConnectedMask` 方向位。
+- 代价 = 每步 1（均匀）；启发式 = 曼哈顿距离。
+- 路径平滑消除冗余中间节点（共线段合并）。
+
+**交叉口占用：**
+- 交叉口 = 任意 ≥ 3 个连接方向的道路格。
+- `TMap<FGridVector, AVehicleActor*> IntersectionLocks` 作为简单互斥锁。
+- 接近被占交叉口的车辆等待；`IntersectionWaitTime` 超时后重试。
+
+**拥堵检测：**
+- 每帧 `UpdateCongestion()` 将世界位置映射到网格格。
+- 超过 `CongestionThreshold`（默认 3）辆车的格标记为拥堵。
+- 拥堵数据可通过 `GetCongestedCells()` 查询。
+
+#### 车辆生成表
+
+`UVehicleDataAsset`（`UPrimaryDataAsset`）作为**车辆类注册表**：
+
+```cpp
+USTRUCT()
+struct FVehicleSpawnEntry
+{
+    TSubclassOf<AVehicleActor> VehicleClass;   // AVehicleActor 的蓝图子类
+    float SpawnWeight = 1.0f;                  // 相对生成概率
+};
 ```
-(Tile1, 入口=无, 出口=右) → (Tile2, 入口=左, 出口=上) → …
-```
 
-当车辆进入新的 Tile 时，获取其 `(入口, 出口)` 对应的行驶路径：
+`UVehicleDataAsset::VehicleEntries` 是一个 `FVehicleSpawnEntry` 数组。`UVehicleManager::CacheSpawnEntries()` 在模拟开始时加载 `DeveloperSettings::DefaultVehicleDataAsset` 引用的 DataAsset，然后每次生成时由 `PickRandomVehicleClass()` 执行加权随机选取。
 
-- 直道路段直接提供样条。
-- 交叉口返回点数组。
+每个 `AVehicleActor` 子类（如 `BP_Car`、`BP_Truck`）在其蓝图默认值中直接配置自身的 `VehicleMesh`、`MoveSpeed`、`DebugColor` 等属性——无需 DataAsset 驱动属性覆盖。
 
-……随后沿路径开始移动。
-
-#### 拥堵处理
-
-- 车辆使用 `SphereOverlapActors` 检测同路径上的前方车辆。
-- 若距离小于 `MinFollowDistance`，车辆减速或停止，保持**安全车距**。
-
-#### 交叉口占用
-
-对于连接数 **≥ 3** 的交叉口 Tile，采用简单的资源锁机制：
-
-- 交叉口维护一个 `bOccupied` 布尔值和**请求队列**。
-- 车辆进入前需请求权限：
-  - 若 `!bOccupied`，授予权限并将 `bOccupied` 设为 `true`。
-  - 车辆完全离开后释放。
-- 等待车辆在入口前停止，**不阻塞其他方向**。
+| 状态 | 描述 |
+|---|---|
+| `Idle` | 初始或错误状态 |
+| `Moving` | 沿航点计划移动 |
+| `WaitingCongestion` | 前方车辆过近 |
+| `WaitingIntersection` | 等待交叉口锁 |
+| `Arrived` | 到达终点 |
 
 ---
 
 ### 2.7 起点 / 目的地生成与计分
 
+#### 实现状态：✅ 已实现
+
 #### 建筑生成
 
-- 游戏开始时，若干多单元格建筑随机放置在地图上，确保不重叠且间距充足：
-  - **住宅** = 起点 (Origin)
-  - **商业 / 办公** = 目的地 (Destination)
-- 额外的建筑对可按间隔（如每 **60 秒**）出现，增加挑战性。
+`CityFlowGameMode::InitializeDefaultScene()` 委托给 `GridManager::TryPlaceBuildingsRandom()`，使用可配置的 `OriginBuildingClass` / `DestinationBuildingClass` 数量。建筑随机放置带随机旋转，确保不重叠。
 
 #### 车辆生成
 
-- 模拟阶段中，每个起点建筑以固定频率（如每 **5 秒**）生成一辆车。
-- 随机选择一个当前存在的目的地，触发 A\* 寻路。
-- 若**无合法路径**存在，车辆不生成，并向玩家发出提示。
+`UVehicleManager::Tick()` 以 `SpawnInterval`（默认 5s）间隔生成车辆。每帧随机选取起点和终点，调用 `SpawnVehicle()` 计算 A\* 路径并生成 Actor。
 
-#### 计分机制
-
-采用**"累计到达分数 + 拥堵惩罚 + 效率奖励"**模型，鼓励高效的网络设计：
+#### 计分机制（UScoringManager）
 
 | 项目 | 规则 |
 |---|---|
-| **基础到达分** | 每辆车到达目的地奖励 **+100** |
-| **拥堵惩罚** | 每秒检查每个道路地块；若包含 **> 2 辆车**则计为一个拥堵点。每秒 **−= 5 × 拥堵点数量**。 |
-| **效率奖励** | 剩余主干和毛细预算之和 × 系数，加入最终得分。 |
-| **全连通奖励** | 模拟结束时若**所有建筑已连接**，额外 **+500** |
+| **基础到达分** | 每辆车到达 +ArrivalScore（默认 100，可通过 DeveloperSettings 配置） |
+| **拥堵惩罚** | 每秒扣除 CongestionPenaltyPerSecond × 拥堵格数（默认 5/格/秒） |
+| **全连通奖励** | 结算时所有建筑连通，+FullConnectivityBonus（默认 500） |
+| **效率奖励** | 剩余道路预算（未来：按比例奖励） |
+
+模拟开始时 `StartScoring()`，结算时 `StopScoring()`。
 
 ---
 
@@ -535,6 +544,95 @@ A\* 节点序列被转换为连续的运动计划：
 #### AGridVisualizer
 
 使用 `ULineBatchComponent::DrawLine()` 逐条绘制网格线。出于性能考虑已被 `AGridPlaneVisualizer` 替代，但仍保留作为备选渲染器。
+
+---
+
+### 2.10 道路预算系统
+
+#### 实现状态：✅ 已实现
+
+`GridManager::RoadBudget` 追踪**共享道路预算**池。玩家放置和 L-system 生长都从同一池中消费。
+
+**预算流程：**
+1. `CityFlowGameMode::BeginPlay()` 调用 `GridManager::SetRoadBudget(TotalRoadBudget)`。
+2. `GridManager::OccupyCell()` 对 `ECellType::Road` 递减 `RoadBudget`；预算耗尽时返回 `false`。
+3. `LSystemManager::StartGenerate()` 从 `GridManager::GetRemainingBudget()` 读取当前预算；每次 `ProcessGrowthStep()` 重新同步。
+4. GameMode 对外暴露 `PlayerBudget` / `LSystemBudget` 用于 UI 展示。
+
+| 方法 | 描述 |
+|---|---|
+| `SetRoadBudget(int32)` | 设置绝对预算值 |
+| `GetRemainingBudget()` | 返回当前剩余 |
+| `ConsumeRoadBudget(int32)` | 尝试扣除 |
+| `AddRoadBudget(int32)` | 增加预算（调试/作弊） |
+
+---
+
+### 2.11 GameMode 状态机
+
+#### 实现状态：✅ 已实现
+
+`ACityFlowGameMode` 通过 `ECityFlowGamePhase` 管理游戏生命周期：
+
+| 阶段 | 转换 | 动作 |
+|---|---|---|
+| **None** → **Planning** | `BeginPlay()` | 初始化网格、生成默认建筑、创建 GameWidget、设置预算 |
+| **Planning** → **Simulating** | `StartSimulationPhase()` | 锁定道路放置、启动 VehicleManager 生成 + ScoringManager、启动模拟计时器 |
+| **Simulating** → **Evaluation** | 计时器到期或 `EndSimulationPhase()` | 停止生成、结算分数、广播事件 |
+| **Evaluation** → **Planning** | `RestartPlanningPhase()` | 清除车辆、重置预算、重新开放放置 |
+
+**事件：** `OnGamePhaseChanged`、`OnPlanningPhaseEnd`、`OnSimulationPhaseEnd`
+
+---
+
+### 2.12 UI 系统
+
+#### 实现状态：✅ 已实现
+
+**CityFlowHUD**（`ACityFlowHUD`）：
+- 管理 `GameWidget`（规划/模拟覆盖层）和 `EvaluationWidget`（结算界面）。
+- `ShowGameWidget()` / `ShowEvaluationWidget()` 切换可见 Widget。
+
+**CityFlowGameWidget**（`UUserWidget` C++ 基类）：
+- 暴露 `BlueprintImplementableEvent` 回调：`OnPhaseChanged_BP`、`OnScoreChanged_BP`、`OnBudgetChanged_BP`、`OnLSystemStep_BP`、`OnLSystemFinished_BP`、`OnEvaluation_BP`。
+- 提供蓝图可调用操作：`StartSimulation()`、`EndSimulation()`、`RestartPlanning()`、`TriggerLSystem()`。
+- 在 `NativeConstruct()` 中绑定 GameMode/ScoringManager/LSystemManager 委托。
+
+蓝图子类使用 UMG 实现视觉布局（按钮、文本块、进度条）。
+
+---
+
+### 2.13 调试基础设施
+
+#### 控制台命令（CityFlowCheatExtension）
+
+所有命令以 `CF_` 为前缀，通过控制台（~）访问：
+
+| 命令 | 描述 |
+|---|---|
+| `CF_StartSimulation` | 触发模拟阶段 |
+| `CF_EndSimulation` | 提前结束模拟 |
+| `CF_RestartPlanning` | 返回规划阶段 |
+| `CF_TriggerLSystem` | 手动触发 L-system 生长 |
+| `CF_SpawnVehicle` | 生成单辆测试车辆 |
+| `CF_ClearVehicles` | 销毁所有车辆 |
+| `CF_TogglePathDebug` | 切换路径线绘制 |
+| `CF_ToggleIntersectionDebug` | 切换交叉口框绘制 |
+| `CF_ToggleCongestionDebug` | 切换拥堵框绘制 |
+| `CF_SetBudget N` | 设置绝对预算 |
+| `CF_AddBudget N` | 增加预算 |
+| `CF_ShowGridStats` | 打印网格统计信息 |
+| `CF_ShowVehicleStats` | 打印车辆列表和状态 |
+| `CF_ShowScoreStats` | 打印分数明细 |
+| `CF_SetSimulationSpeed X` | 设置时间膨胀 |
+
+#### 可视化调试（DeveloperSettings 开关）
+- `bDebugDrawPaths` — 绘制车辆路径线 + 航点
+- `bDebugDrawCongestion` — 在拥堵格上绘制红色框
+- `bDebugDrawIntersections` — 在交叉口上绘制橙/红色框
+
+#### DeveloperSettings（Config=Game）
+`UCityFlowDeveloperSettings` 默认所有游戏参数，通过 项目设置 → CityFlow 进行编辑器内配置。
 
 ---
 

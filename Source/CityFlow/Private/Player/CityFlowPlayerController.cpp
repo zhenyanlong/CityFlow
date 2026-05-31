@@ -168,11 +168,17 @@ void ACityFlowPlayerController::TryPlaceAtCursor()
 	}
 
 	PreviewActor->SetActorEnableCollision(true);
-	PreviewActor->PlaceOnGrid(GridPos);
-	LastPlacedGridPos = GridPos;
-	PreviewActor = nullptr;
 
-	SpawnPreview();
+	if (PreviewActor->PlaceOnGrid(GridPos))
+	{
+		LastPlacedGridPos = GridPos;
+		PreviewActor = nullptr;
+		SpawnPreview();
+	}
+	else
+	{
+		PreviewActor->SetActorEnableCollision(false);
+	}
 }
 
 void ACityFlowPlayerController::OnPlaceItemStarted_Implementation()

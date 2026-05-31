@@ -87,6 +87,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Grid")
 	FVector GetGridOrigin() const { return GridOrigin; }
 
+	UFUNCTION(BlueprintCallable, Category = "Grid|Budget")
+	void SetRoadBudget(int32 InBudget);
+
+	UFUNCTION(BlueprintPure, Category = "Grid|Budget")
+	int32 GetRemainingBudget() const { return RoadBudget; }
+
+	UFUNCTION(BlueprintCallable, Category = "Grid|Budget")
+	bool ConsumeRoadBudget(int32 Count = 1);
+
+	UFUNCTION(BlueprintCallable, Category = "Grid|Budget")
+	void AddRoadBudget(int32 Amount);
+
 	UFUNCTION(BlueprintCallable, Category = "Grid|Debug")
 	AGridPlaceableActor* TryPlaceBuildingRandom(TSubclassOf<AGridPlaceableActor> PlaceableClass);
 
@@ -110,4 +122,5 @@ private:
 	float CellSize = 100.0f;
 	FVector GridOrigin = FVector::ZeroVector;
 	bool bGridInitialized = false;
+	int32 RoadBudget = 0;
 };

@@ -10,13 +10,13 @@ CityFlow adopts a **phase-separated, component-based** architecture, splitting g
 
 Core management classes are gathered in the `GameMode` or delegated Manager components:
 
-| Manager | Responsibility |
-|---|---|
-| **GridManager** | Maintains a 2D logical grid, storing each cell's type (`Empty`, `Road`, `Building`) and connection mask. Provides grid snapping, placement validation, neighbour queries, and building interface registration. |
-| **RoadManager** | Handles creation, destruction, and morphing of road Actors. Receives placement requests from the player or the L-system, updates the grid via `GridManager`, and triggers neighbour refreshes. |
-| **LSystemManager** | A `UWorldSubsystem` that runs at the end of the Planning Phase. Extracts selective branch starting points from dead-end and straight arterial segments, then executes a breadth-first, attraction-biased iterative growth algorithm to spawn a capillary road network that connects remaining buildings. Growth is animated via `FTimerHandle` at a configurable step interval. |
-| **VehicleManager** | Manages spawning and lifetime of all vehicle Actors during the Simulation Phase. Provides A* pathfinding on the road graph, spline-based movement, congestion waiting, and intersection occupation. |
-| **ScoringManager** | Independently calculates the score, listens for vehicle-arrival events, periodically detects congestion, and tallies the final total. |
+| Manager | Type | Responsibility |
+|---|---|---|
+| **GridManager** | `UWorldSubsystem` | Maintains a 2D logical grid. Provides grid snapping, placement validation, neighbour queries, connected-mask calculation, and building interface registration. **Manages the shared road budget** — both player and L-system placement consume from a single pool tracked by `RoadBudget`. |
+| **LSystemManager** | `UWorldSubsystem` | **Optional** auxiliary capillary road generator. Extracts branch starting points from dead-ends and straight segments, then executes breadth-first, attraction-biased growth. Consumes from the **shared road budget** alongside the player. Triggered manually by player (UI button or console command). |
+| **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | Spawns and manages all vehicle Actors. Provides **A\* pathfinding** on the road graph, converts grid paths to world-space waypoint-based movement plans, handles **congestion detection** (per-cell vehicle count), and **intersection occupation** (simple mutex lock for ≥3-way junctions). Ticks every frame for vehicle state updates. |
+| **ScoringManager** | `UWorldSubsystem` | Tracks arrival count, arrival score, and congestion penalties during the Simulation Phase. Uses a periodic timer for congestion penalty deduction. Computes final score including full-connectivity bonus on evaluation. |
+| **CityFlowGameMode** | `AGameModeBase` | Owns the **state machine** (`ECityFlowGamePhase`: Planning → Simulating → Evaluation). Initializes the grid, spawns default buildings, manages the shared road budget split (Player vs L-System), and triggers phase transitions. Provides Blueprint-callable API for UI control. |
 
 Managers communicate through an **event bus** (e.g., `OnRoadPlaced`, `OnVehicleArrived`) to avoid hard references.
 
@@ -413,71 +413,84 @@ Higher-scored points execute first within the batch. This steers branches toward
 
 ---
 
-### 2.6 Vehicle AI: Spline-based Pathfinding & Traffic Handling
+### 2.6 Vehicle AI: A\* Pathfinding & Waypoint-Based Movement
 
-#### Global Pathfinding
+#### Implementation Status: ✅ Implemented
 
-- `GridManager` builds a road graph from the current grid (each road cell is a node; edges exist between adjacent cells whose connected directions match).
-- An **A\* algorithm** computes the shortest node sequence from the origin building's interface cell to the destination building's interface cell.
-- Paths are calculated **once per vehicle at spawn**; if the road network is modified during the Planning Phase, affected vehicle paths are recalculated.
+**VehicleActor** (`AVehicleActor`) is a Blueprintable `AActor` with a `UStaticMeshComponent` root. It can be subclassed in Blueprint for different vehicle types (cars, trucks, etc.).
 
-#### Path to Spline Movement Plan
+**Core movement model:** Vehicles follow a pre-computed `FVehicleMovementPlan` — a sequence of world-space `FVehicleWaypoint` structs derived from the A\* grid path. Each frame, the vehicle interpolates toward its current waypoint at `MoveSpeed`. When within `WaypointReachedThreshold`, it advances to the next waypoint. Arrival at the final waypoint broadcasts `OnVehicleArrived`.
 
-The A\* node sequence is converted into a continuous movement plan:
+**Vehicle Spawning:** `UVehicleManager::SpawnVehicle(Origin, Destination)` picks doorway connection points from both buildings, runs A\* through `BuildPath()`, converts the result to a movement plan, and spawns a vehicle using `PickRandomVehicleClass()` which selects from the spawn table by weighted random. The spawned `AVehicleActor` subclass already has its own mesh, speed, and other properties configured directly in its Blueprint.
 
+**A\* Pathfinding:**
+- Nodes = road cells (`ECellType::Road`); edges = `ConnectedMask` direction bits.
+- Cost = 1 per step (uniform); heuristic = Manhattan distance.
+- Algorithm: standard A\* with `TMap<FGridVector, FAStarNode>` for open/closed sets.
+- Path smoothing removes redundant intermediate nodes (collinear segments collapsed).
+
+**Intersection Occupation:**
+- An intersection is any road cell with ≥ 3 connected directions.
+- `TMap<FGridVector, AVehicleActor*> IntersectionLocks` serves as a simple mutex.
+- Vehicles approaching an intersection waypoint wait if it's occupied.
+- After `IntersectionWaitTime` timeout, they retry.
+
+**Congestion Detection:**
+- Each tick, `UpdateCongestion()` maps world positions to grid cells.
+- Cells with > `CongestionThreshold` (default 3) vehicles are flagged congested.
+- Congestion data is queryable via `GetCongestedCells()` and broadcasts `OnCongestionUpdated`.
+
+#### Vehicle Spawn Table
+
+`UVehicleDataAsset` (`UPrimaryDataAsset`) acts as a **vehicle class registry**:
+
+```cpp
+USTRUCT()
+struct FVehicleSpawnEntry
+{
+    TSubclassOf<AVehicleActor> VehicleClass;   // Blueprint subclass of AVehicleActor
+    float SpawnWeight = 1.0f;                  // Relative spawn probability
+};
 ```
-(Tile1, entry=None, exit=Right) → (Tile2, entry=Left, exit=Up) → …
-```
 
-When a vehicle enters a new Tile, it retrieves the driving path for its `(entry, exit)` pair:
+`UVehicleDataAsset::VehicleEntries` is an array of `FVehicleSpawnEntry`. `UVehicleManager::CacheSpawnEntries()` loads the DataAsset referenced by `DeveloperSettings::DefaultVehicleDataAsset` on simulation start, then `PickRandomVehicleClass()` performs weighted random selection per spawn.
 
-- Straight segments supply a spline directly.
-- Intersections supply a point array.
+Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `VehicleMesh`, `MoveSpeed`, `DebugColor`, etc. directly in its Blueprint defaults — no DataAsset-driven property override is needed.
 
-... and begins moving along it.
+#### Vehicle Movement State Machine
 
-#### Congestion Handling
-
-- Vehicles use `SphereOverlapActors` to detect a leading vehicle on the same path.
-- If the distance is less than `MinFollowDistance`, the vehicle decelerates or stops, maintaining a **safe gap**.
-
-#### Intersection Occupation
-
-For intersection Tiles with connection count **≥ 3**, a simple resource lock is used:
-
-- The intersection holds a `bOccupied` boolean and a **request queue**.
-- Before entering, a vehicle requests permission:
-  - If `!bOccupied`, permission is granted and `bOccupied` is set to `true`.
-  - Released after the vehicle fully exits.
-- Waiting vehicles stop just before the entrance, **without blocking other directions**.
+| State | Description |
+|---|---|
+| `Idle` | Initial or error state |
+| `Moving` | Following waypoint plan |
+| `WaitingCongestion` | Stopped due to lead vehicle proximity |
+| `WaitingIntersection` | Waiting for intersection lock |
+| `Arrived` | Reached destination; broadcasts event |
 
 ---
 
 ### 2.7 Origin / Destination Generation & Scoring
 
+#### Implementation Status: ✅ Implemented
+
 #### Building Generation
 
-- At the start of the game, a number of multi-cell buildings are randomly placed on the map, ensuring no overlaps and adequate spacing:
-  - **Residence** = Origin
-  - **Commerce / Office** = Destination
-- Additional building pairs can appear at intervals (e.g., every **60 seconds**) to increase challenge.
+The `CityFlowGameMode::InitializeDefaultScene()` delegates to `GridManager::TryPlaceBuildingsRandom()` with configurable `OriginBuildingClass` / `DestinationBuildingClass` counts. Buildings are randomly placed with random rotations, ensuring no overlaps.
 
 #### Vehicle Spawning
 
-- During the Simulation Phase, each origin building spawns a car at a fixed frequency (e.g., every **5 seconds**).
-- A random currently existing destination is chosen, and A\* pathfinding is triggered.
-- If **no legal path** exists, the car is not spawned and the player is alerted.
+`UVehicleManager::Tick()` spawns vehicles at `SpawnInterval` intervals (default 5s). Each tick picks a random origin and destination, calls `SpawnVehicle()` which computes an A\* path and spawns the actor. If no path exists, the vehicle is silently skipped; no alert is raised yet (future).
 
-#### Scoring Mechanism
-
-Adopts an **"accumulated arrival score + congestion penalty + efficiency bonus"** model to encourage efficient network design:
+#### Scoring Mechanism (UScoringManager)
 
 | Component | Rule |
 |---|---|
-| **Base Arrival Points** | Each car reaching a destination grants **+100** |
-| **Congestion Penalty** | Every second, each road tile is checked; if it contains **> 2 vehicles** it is counted as a congestion point. Score **−= 5 × congestion point count** per second. |
-| **Efficiency Bonus** | The sum of remaining arterial and capillary budgets × a coefficient is added to the final score. |
-| **Full-Connectivity Bonus** | If **all buildings are connected** when simulation ends, an extra **+500** |
+| **Base Arrival Points** | Each vehicle arriving at destination grants **+ArrivalScore** (default 100, configurable via DeveloperSettings) |
+| **Congestion Penalty** | Every second, `UpdateCongestionPenalty()` checks `GetCongestedCells()`; penalises **−CongestionPenaltyPerSecond × congested_cell_count** (default 5/cell/s) |
+| **Full-Connectivity Bonus** | If all buildings connected at evaluation, **+FullConnectivityBonus** (default 500) |
+| **Efficiency Bonus** | Remaining road budget at end (future: proportional bonus) |
+
+Scoring starts on `StartScoring()` (called by GameMode on Simulation begin) and stops on `StopScoring()` (on Evaluation). Final score computed in `ComputeFinalScore()`.
 
 ---
 
@@ -535,6 +548,104 @@ The material uses `M_PrototypeGrid` with `Blend Mode = Translucent` and simple w
 #### AGridVisualizer
 
 Uses `ULineBatchComponent::DrawLine()` to procedurally draw individual grid lines. Replaced in favour of `AGridPlaneVisualizer` for performance, but retained as an alternative renderer.
+
+---
+
+### 2.10 Road Budget System
+
+#### Implementation Status: ✅ Implemented
+
+A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both player placement and L-system growth consume from the same pool.
+
+**Budget Flow:**
+1. `CityFlowGameMode::BeginPlay()` sets `GridManager::SetRoadBudget(TotalRoadBudget)`.
+2. `GridManager::OccupyCell()` for `ECellType::Road` decrements `RoadBudget`; returns `false` when budget exhausted (prevents placement).
+3. `LSystemManager::StartGenerate()` reads current budget from `GridManager::GetRemainingBudget()`; each `ProcessGrowthStep()` re-syncs.
+4. GameMode exposes split-tracked `PlayerBudget` / `LSystemBudget` for UI display but actual enforcement is through GridManager.
+
+**API:**
+| Method | Description |
+|---|---|
+| `SetRoadBudget(int32)` | Sets absolute budget value |
+| `GetRemainingBudget()` | Returns current remaining |
+| `ConsumeRoadBudget(int32)` | Attempts to deduct |
+| `AddRoadBudget(int32)` | Adds to budget (debug/cheat) |
+
+---
+
+### 2.11 GameMode State Machine
+
+#### Implementation Status: ✅ Implemented
+
+`ACityFlowGameMode` owns the game lifecycle via `ECityFlowGamePhase`:
+
+| Phase | Transition | Actions |
+|---|---|---|
+| **None** → **Planning** | `BeginPlay()` | Init grid, spawn default buildings, create GameWidget, set budget |
+| **Planning** → **Simulating** | `StartSimulationPhase()` (UI/Cheat) | Lock road placement, start VehicleManager spawning + ScoringManager, start simulation timer |
+| **Simulating** → **Evaluation** | Timer expiry or `EndSimulationPhase()` (UI/Cheat) | Stop spawning, finalize scoring, broadcast events |
+| **Evaluation** → **Planning** | `RestartPlanningPhase()` (UI/Cheat) | Clear vehicles, reset budget, re-enable placement |
+
+**Blueprint-Configurable Properties:**
+- `OriginBuildingClass` / `DestinationBuildingClass` — building BP classes
+- `RoadTileClass` — road tile BP class
+- `VehicleClass` — vehicle BP class (future override)
+- `GameWidgetClass` / `EvaluationWidgetClass` — UMG widget classes
+- `TotalRoadBudget`, `LSystemBudgetShare` — budget split
+- `SimulationDuration`, `DefaultBuildingCount`, `DefaultGridWidth/Height/CellSize`
+
+**Events:** `OnGamePhaseChanged`, `OnPlanningPhaseEnd`, `OnSimulationPhaseEnd`
+
+---
+
+### 2.12 UI System
+
+#### Implementation Status: ✅ Implemented
+
+**CityFlowHUD** (`ACityFlowHUD`):
+- Manages `GameWidget` (Planning/Simulation overlay) and `EvaluationWidget` (results screen).
+- `ShowGameWidget()` / `ShowEvaluationWidget()` swap visible widgets.
+
+**CityFlowGameWidget** (`UUserWidget` C++ base):
+- Exposes `BlueprintImplementableEvent` callbacks for phase changes (`OnPhaseChanged_BP`), score updates (`OnScoreChanged_BP`), budget changes (`OnBudgetChanged_BP`), L-system progress (`OnLSystemStep_BP`, `OnLSystemFinished_BP`), evaluation (`OnEvaluation_BP`).
+- Provides Blueprint-callable actions: `StartSimulation()`, `EndSimulation()`, `RestartPlanning()`, `TriggerLSystem()`.
+- Binds to GameMode/ScoringManager/LSystemManager delegates in `NativeConstruct()`.
+
+Blueprint subclasses implement the visual layout with UMG (buttons, text blocks, progress bars).
+
+---
+
+### 2.13 Debug Infrastructure
+
+#### Console Commands (CityFlowCheatExtension)
+
+All commands prefixed with `CF_`, accessible via console (~):
+
+| Command | Description |
+|---|---|
+| `CF_StartSimulation` | Triggers simulation phase |
+| `CF_EndSimulation` | Ends simulation early |
+| `CF_RestartPlanning` | Returns to planning |
+| `CF_TriggerLSystem` | Manually triggers L-system growth |
+| `CF_SpawnVehicle` | Spawns a single test vehicle |
+| `CF_ClearVehicles` | Destroys all vehicles |
+| `CF_TogglePathDebug` | Toggles path line drawing |
+| `CF_ToggleIntersectionDebug` | Toggles intersection box drawing |
+| `CF_ToggleCongestionDebug` | Toggles congestion box drawing |
+| `CF_SetBudget N` | Sets absolute budget |
+| `CF_AddBudget N` | Adds budget |
+| `CF_ShowGridStats` | Prints grid statistics |
+| `CF_ShowVehicleStats` | Prints vehicle list and states |
+| `CF_ShowScoreStats` | Prints scoring breakdown |
+| `CF_SetSimulationSpeed X` | Sets time dilation |
+
+#### Visual Debug (DeveloperSettings toggles)
+- `bDebugDrawPaths` — Draws vehicle path lines + waypoints
+- `bDebugDrawCongestion` — Draws red boxes on congested cells
+- `bDebugDrawIntersections` — Draws orange/red boxes on intersections
+
+#### DeveloperSettings (Config=Game)
+`UCityFlowDeveloperSettings` defaults all gameplay parameters (`TotalRoadBudget`, `SimulationDurationSeconds`, `VehicleSpawnInterval`, `ArrivalScore`, `CongestionPenaltyPerSecond`, `CongestionThreshold`, etc.) with in-editor configuration via Project Settings → CityFlow.
 
 ---
 

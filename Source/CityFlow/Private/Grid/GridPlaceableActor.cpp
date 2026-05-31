@@ -62,7 +62,17 @@ bool AGridPlaceableActor::PlaceOnGrid(const FGridVector& InGridPos)
 
 	GridPosition = InGridPos;
 	OccupiedCells = CalculateOccupiedCells(InGridPos);
-	RegisterCells();
+
+	if (!RegisterCells())
+	{
+		for (const FGridVector& Cell : OccupiedCells)
+		{
+			GM->ClearCell(Cell);
+		}
+		OccupiedCells.Empty();
+		GridPosition = FGridVector();
+		return false;
+	}
 
 	const FVector WorldPos = GetGridWorldPosition();
 	SetActorLocation(WorldPos);
@@ -186,19 +196,24 @@ UGridManager* AGridPlaceableActor::GetGridManager() const
 	return World->GetSubsystem<UGridManager>();
 }
 
-void AGridPlaceableActor::RegisterCells()
+bool AGridPlaceableActor::RegisterCells()
 {
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
-		return;
+		return false;
 	}
 
 	const ECellType CellType = GetPlacementCellType();
 	for (const FGridVector& Cell : OccupiedCells)
 	{
-		GM->OccupyCell(Cell, CellType, GetUniqueID(), this);
+		if (!GM->OccupyCell(Cell, CellType, GetUniqueID(), this))
+		{
+			return false;
+		}
 	}
+
+	return true;
 }
 
 void AGridPlaceableActor::UnregisterCells()

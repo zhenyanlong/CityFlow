@@ -84,12 +84,18 @@ bool UGridManager::OccupyCell(const FGridVector& GridPos, ECellType Type, int32 
 		return false;
 	}
 
+	if (Type == ECellType::Road && RoadBudget <= 0)
+	{
+		return false;
+	}
+
 	Cell.Type = Type;
 	Cell.BuildingID = BuildingID;
 	Cell.RoadActor = RoadActor;
 
 	if (Type == ECellType::Road)
 	{
+		--RoadBudget;
 		Cell.ConnectedMask = CalculateConnectedMask(GridPos);
 		UpdateNeighborMasks(GridPos);
 	}
@@ -157,6 +163,26 @@ TArray<FGridVector> UGridManager::GetNeighbors(const FGridVector& GridPos, bool 
 	}
 
 	return Result;
+}
+
+void UGridManager::SetRoadBudget(int32 InBudget)
+{
+	RoadBudget = FMath::Max(0, InBudget);
+}
+
+bool UGridManager::ConsumeRoadBudget(int32 Count)
+{
+	if (RoadBudget < Count)
+	{
+		return false;
+	}
+	RoadBudget -= Count;
+	return true;
+}
+
+void UGridManager::AddRoadBudget(int32 Amount)
+{
+	RoadBudget = FMath::Max(0, RoadBudget + Amount);
 }
 
 TArray<FGridVector> UGridManager::GetCellsOfType(ECellType Type) const

@@ -1,3 +1,48 @@
+## 2026-05-31
+
+### 车辆生成系统（v0.1，通过初步调试）
+
+- 重新设计 UVehicleDataAsset：从单车型参数表改为车辆类注册表，新增 FVehicleSpawnEntry 结构体（TSubclassOf<AVehicleActor> + SpawnWeight），通过 UCityFlowDeveloperSettings::DefaultVehicleDataAsset 引用
+- 更新 UVehicleManager：CacheSpawnEntries() 在模拟开始时加载注册表，PickRandomVehicleClass() 每次生成时按加权随机选取车辆子类，SpawnVehicle() 使用选取的类而非硬编码基类
+- 移除 AVehicleActor::InitializeFromDataAsset()；每个 BP 子类在 Class Defaults 中自行配置 Mesh/MoveSpeed/DebugColor
+- 添加 USceneComponent VehicleRoot 作为根组件，VehicleMesh 作为子组件挂载其下，支持蓝图中自由调整本地旋转/缩放
+- 添加 VehicleZOffset（默认 30）：所有航点坐标偏移此值，使车辆位于道路表面之上而非陷入道路内部
+- 车辆每帧通过 SetWorldRotation(Yaw from MoveDir) 使 VehicleRoot 朝向行进方向
+- 车辆到达后自动销毁（VehicleManager Tick 中广播 OnVehicleArrived 后调用 Destroy()）
+- AVehicleActor 构造函数中添加默认 Cube mesh 回退，即使未配置 DataAsset 车辆也可见
+
+### VehicleManager 改进（v0.1，通过初步调试）
+
+- 车辆生成重试逻辑：每帧随机选取一个 origin，将全部 destinations 随机打乱（Fisher-Yates 洗牌），遍历直到找到可连通对；全都不通则尝试换下一个 origin
+- 目的地随机化：每次生成间隔重新洗牌 destination 列表，避免固定 origin→dest 绑定
+- 在 SpawnVehicle 每个失败点添加了全面的 UE_LOG 诊断（建筑为空、出入口不在道路上、A* 寻路失败、运动计划无效、PickRandomVehicleClass 返回空、SpawnActor 失败、成功时打印路径详情）
+- CacheSpawnEntries 添加日志（未配置 DataAsset、条目数组为空、已加载类型汇总）和 PickRandomVehicleClass（无条目回退警告）
+
+### 预算系统 Bug 修复
+
+- 修复 OccupyCell：预算检查在 Cell.Type/BuildingID/RoadActor 写入之后执行；预算耗尽时 Cell 被永久污染为 Type=Road/Mask=0，且不广播 OnCellChanged。将预算守卫移到所有 Cell 变更之前。
+- 修复 RegisterCells：OccupyCell 返回值被静默丢弃；PlaceOnGrid 即使网格占用失败也会将 Actor 切换为 Placed 状态。将 RegisterCells 改为返回 bool；PlaceOnGrid 现在检查结果并在失败时回滚。
+- 修复 AGridPlaceableActor::PlaceOnGrid：RegisterCells 失败时，现在对已部分占用的 Cell 调用 ClearCell 并重置 GridPosition，防止状态污染。
+
+### PlayerController Bug 修复
+
+- 修复 TryPlaceAtCursor：PlaceOnGrid 返回值未被检查。失败时预览 Actor 碰撞已开启但既未放置也未销毁——泄漏在世界中，阻挡射线检测，导致大部分格子无法继续放置。现在仅在成功后清除 PreviewActor 指针并生成新预览；失败时恢复碰撞。
+
+### GameMode 配置修复
+
+- 移除 CityFlowGameMode::BeginPlay() 中用 DeveloperSettings 默认值覆盖 GridWidth/GridHeight/CellSize/BuildingCount 的逻辑。BP GameMode Class Defaults 现为网格和建筑参数的权威数据源。
+
+### C++ 基础框架（代码完成，尚未通过玩法验证）
+
+- ACityFlowGameMode 状态机（Planning→Simulating→Evaluation）：BeginPlay 场景初始化、建筑生成委托、阶段切换、模拟计时器、预算分配（玩家 vs L-system 份额）
+- UScoringManager（UWorldSubsystem）：到达分数追踪、每秒拥堵惩罚、全连通奖励、最终分数计算
+- ACityFlowHUD：GameWidget/EvaluationWidget 生命周期管理
+- UCityFlowGameWidget C++ 基类：用于阶段/分数/预算/L-system 变化的 BlueprintImplementableEvent 回调，蓝图可调用的 StartSimulation/EndSimulation/RestartPlanning/TriggerLSystem
+- UCityFlowCheatExtension：15 个 CF_* 控制台命令（阶段控制、车辆生成/调试、预算操作、统计打印、模拟速度）
+- UCityFlowDeveloperSettings（Config=Game，Project Settings 面板）：网格、预算、模拟、计分、车辆、调试开关的默认值
+- Build.cs：添加 UMG、Slate、SlateCore、DeveloperSettings 模块依赖
+- 更新 TDD.md 和 TDD_Chinese.md 第 1、2.6、2.7、2.10、2.11、2.12、2.13 节
+
 ## 2026-05-30
 
 - 添加了 EPlaceableType 枚举（Road/Building/Landscape）和 EGridRotation 枚举（Rot0/Rot90/Rot180/Rot270）到 CityFlowGridTypes.h

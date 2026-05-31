@@ -116,6 +116,6 @@ protected:
 private:
 	void EnterPlacedState();
 
-	void RegisterCells();
+	bool RegisterCells();
 	void UnregisterCells();
 };

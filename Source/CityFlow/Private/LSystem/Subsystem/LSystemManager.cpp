@@ -90,7 +90,8 @@ void ULSystemManager::StartGenerate()
 		return;
 	}
 
-	RemainingBudget = BranchBudget;
+	RemainingBudget = GM->GetRemainingBudget();
+	BranchBudget = RemainingBudget;
 	bIsGenerating = true;
 
 	PendingGrowthPoints.Empty();
@@ -287,6 +288,15 @@ void ULSystemManager::ProcessGrowthStep()
 		return;
 	}
 
+	UGridManager* GM = GetGridManager();
+	if (!GM)
+	{
+		FinishGeneration(false);
+		return;
+	}
+
+	RemainingBudget = GM->GetRemainingBudget();
+
 	if (PendingGrowthPoints.Num() == 0 || RemainingBudget <= 0)
 	{
 		FinishGeneration(AreAllBuildingsConnected());
@@ -304,6 +314,7 @@ void ULSystemManager::ProcessGrowthStep()
 
 	TryGrowAt(Point);
 
+	RemainingBudget = GM->GetRemainingBudget();
 	OnGenerationStep.Broadcast(RemainingBudget);
 
 	if (PendingGrowthPoints.Num() == 0 || RemainingBudget <= 0)
@@ -347,7 +358,7 @@ bool ULSystemManager::TryGrowAt(const FLSystemGrowthPoint& Point)
 			break;
 		}
 
-		if (RemainingBudget <= 0)
+		if (GM->GetRemainingBudget() <= 0)
 		{
 			break;
 		}
