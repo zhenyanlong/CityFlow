@@ -35,6 +35,28 @@
 
 - Cleaned up unused `PopCount` from RoadTile.cpp, removed `#include "Grid/RoadTile.h"` from VehicleManager.cpp
 
+### Vehicle Acceleration / Deceleration
+
+- Unified speed-target model: `CurrentSpeed` smoothly transitions toward `TargetSpeed` via `FInterpConstantTo`
+- `TargetSpeed = MoveSpeed × min(remaining distance / DecelerationDistance, 1.0)`, handling both acceleration and deceleration in one formula
+- New `Acceleration` (800) and `DecelerationDistance` (200) Blueprint-configurable properties
+- Vehicles naturally decelerate to zero on arrival instead of instantly stopping
+
+### SpawnVehicle: Start/End Path from Building Cell
+
+- Vehicle path start/end changed from road cell outside doorway to the building cell containing the doorway
+- Iterates `Origin->Doorways` array directly, records `StartBuildingCell` / `EndBuildingCell` alongside the road connection point
+- `Path.Insert(StartBuildingCell, 0)` + `Path.Add(EndBuildingCell)`, A* still runs between road cells only
+- Vehicle spans: building cell → roadway → target building cell
+
+### Remove SmoothPath, BuildPath Returns Raw A\* Path
+
+- **Bug:** SmoothPath merged collinear cells, eliminating straight-cell separators between turn clusters; `bPreviousWasTurn` was never reset
+- **Fix:** `BuildPath` returns `FindRoadPath` raw results directly, with straight cells correctly resetting the consecutive-turn flag
+- Removed defunct `SmoothPath()` and `CanPathBetween()`
+- Raw A\* path maxes at ~50 points on a 20×20 grid, no spline performance impact
+- Updated TDD.md / TDD_Chinese.md to remove SmoothPath references
+
 ### Bug Fixes
 
 - Fixed DeveloperSettings `GetSectionText()` compilation error on UE 5.6 (renamed to `GetSectionDescription()` with `#if WITH_EDITOR` guard)

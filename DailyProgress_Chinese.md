@@ -35,6 +35,28 @@
 
 - 清理 RoadTile.cpp 中未使用的 `PopCount`，移除 VehicleManager.cpp 中 `#include "Grid/RoadTile.h"`
 
+### 车辆加速/减速
+
+- 统一速度目标模型：`CurrentSpeed` 通过 `FInterpConstantTo` 向 `TargetSpeed` 平滑过渡
+- `TargetSpeed = MoveSpeed × min(剩余距离/DecelerationDistance, 1.0)`，同时实现加速和减速
+- 新增 `Acceleration`（800）和 `DecelerationDistance`（200）Blueprint 可配置参数
+- 到达终点时自然减速至零，不再瞬间停止
+
+### SpawnVehicle 起点/终点改为 Building Cell
+
+- 车辆路径起点和终点从 doorway 外面的道路格改为 doorway 所在的建筑格
+- 遍历 `Origin->Doorways` 数组，同步记录 `StartBuildingCell` / `EndBuildingCell`
+- `Path.Insert(StartBuildingCell, 0)` + `Path.Add(EndBuildingCell)`，A* 寻路仍在 road cell 之间进行
+- 车辆从建筑格出发 → 驶向道路格 → 沿途行驶 → 驶入目标建筑格
+
+### 移除 SmoothPath，BuildPath 直接返回原始 A\* 路径
+
+- **Bug:** SmoothPath 合并共线中间格导致两个弯道群之间无直道格分隔，`bPreviousWasTurn` 永不重置
+- **修复:** `BuildPath` 直接返回 `FindRoadPath` 原始路径，直道格作为弯道序列分隔符正确重置标记
+- 移除废弃的 `SmoothPath()` 和 `CanPathBetween()`
+- 原始 A\* 路径在 20×20 网格下最多约 50 个点，对样条性能无影响
+- 同步更新 TDD.md / TDD_Chinese.md 移除 SmoothPath 引用
+
 ### Bug 修复
 
 - 修复 UE 5.6 上 DeveloperSettings `GetSectionText()` 编译错误（重命名为 `GetSectionDescription()`，添加 `#if WITH_EDITOR` 守卫）

@@ -194,7 +194,7 @@ This approach avoids race conditions between `OnPreviewValidChanged`, `OnEnterPr
   - Sampled into 13 world-space points for a smooth arcing curve.
 
 **Current approach (v0.3, refactored):**
-- `BuildSplinePath()` generates spline points and corresponding tangent directions from the A\* path (via `SmoothPath` which retains turning points).
+- `BuildSplinePath()` generates spline points and corresponding tangent directions from the raw A\* path (all cells preserved, no merging).
 - Returns a parallel `TArray<FVector>` of tangent directions (one per point) used by `SetSplinePath` to set exact spline tangents.
 - Straight cell centers are included in the output — they serve as separators between consecutive turn sequences.
 - **Turn offset:** each turning point is replaced by two offset points:
@@ -433,7 +433,7 @@ Higher-scored points execute first within the batch. This steers branches toward
 **Spline-based movement model:** The vehicle maintains a `CurrentSplineDistance` float. Each frame, `TickMovementSpline(DeltaTime)` advances this distance by `MoveSpeed * DeltaTime`, queries the spline for the world-space position (`GetLocationAtDistanceAlongSpline`) and direction (`GetDirectionAtDistanceAlongSpline`), and updates the actor's location and rotation. When `CurrentSplineDistance >= SplineLength`, the vehicle arrives. This part is working correctly.
 
 **Path construction (`BuildSplinePath`) — v0.3 turn-offset approach:**
-Processes the smoothed A\* path (cell centers at direction changes) in a single pass, outputting both spline points and per-point tangent directions:
+Processes the raw A\* path (all cells preserved) in a single pass, outputting both spline points and per-point tangent directions:
 - **First cell:** adds `cell_center` with tangent toward next cell.
 - **Turn cells:** replaces each turn with offset points:
   - Entry offset: `cell_center - EntryDir * CellSize/2`, tangent = `EntryDir` (toward center)
@@ -452,7 +452,6 @@ Processes the smoothed A\* path (cell centers at direction changes) in a single 
 - Nodes = road cells (`ECellType::Road`); edges = `ConnectedMask` direction bits.
 - Cost = 1 per step (uniform); heuristic = Manhattan distance.
 - Algorithm: standard A\* with `TMap<FGridVector, FAStarNode>` for open/closed sets.
-- Path smoothing removes redundant intermediate nodes (collinear segments collapsed).
 
 **Intersection Occupation:**
 - An intersection is any road cell with ≥ 3 connected directions.

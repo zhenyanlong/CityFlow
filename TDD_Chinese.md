@@ -194,7 +194,7 @@ AGridPlaceableActor  (Abstract)          ← 状态管理 + 统一 API
   - 采样 13 个世界空间点，生成平滑弧线。
 
 **当前方案（v0.3，已重构）：**
-- `BuildSplinePath()` 基于 A\* 路径（经 `SmoothPath` 保留转弯点）生成样条点和对应的切线方向。
+- `BuildSplinePath()` 基于 A\* 原始路径（全部格子保留不合并）生成样条点和对应的切线方向。
 - 返回等长的 `TArray<FVector>` 切线方向数组，由 `SetSplinePath` 用于设置精确的样条切线。
 - 直道格子中心也包含在输出中 —— 作为连续弯道序列之间的分隔符。
 - **转弯点偏移：** 每个转弯点替换为两个偏移点：
@@ -433,7 +433,7 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 **基于样条的运动模型：** 车辆维护一个 `CurrentSplineDistance` 浮点数。每帧 `TickMovementSpline(DeltaTime)` 将此距离推进 `MoveSpeed * DeltaTime`，从样条查询世界空间位置（`GetLocationAtDistanceAlongSpline`）和方向（`GetDirectionAtDistanceAlongSpline`），并更新 Actor 的位置和旋转。当 `CurrentSplineDistance >= SplineLength` 时车辆到达。这部分工作正常。
 
 **路径构建（`BuildSplinePath`）— v0.3 转弯偏移方案：**
-对平滑后 A\* 路径（仅含方向变化处的格子中心）做单次遍历，同步输出样条点和每点的切线方向：
+对 A\* 原始路径（所有格子均保留）做单次遍历，同步输出样条点和每点的切线方向：
 - **首格：** 添加 `cell_center`，切线朝向下一格。
 - **转弯格：** 将每个弯道替换为偏移点：
   - 入口偏移：`cell_center - EntryDir * CellSize/2`，切线 = `EntryDir`（指向格子中心）
@@ -451,7 +451,6 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 **A\* 寻路：**
 - 节点 = 道路格（`ECellType::Road`）；边 = `ConnectedMask` 方向位。
 - 代价 = 每步 1（均匀）；启发式 = 曼哈顿距离。
-- 路径平滑消除冗余中间节点（共线段合并）。
 
 **交叉口占用：**
 - 交叉口 = 任意 ≥ 3 个连接方向的道路格。
