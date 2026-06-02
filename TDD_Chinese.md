@@ -426,25 +426,44 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 
 ### 2.6 车辆 AI：A\* 寻路与样条运动
 
-#### 实现状态：✅ 已实现 — v0.3 转弯偏移方案
+#### 实现状态：✅ 已实现 — v0.4 双向车道 + 弯道感知切线缩放
 
 `AVehicleActor` 是一个可蓝图化的 `AActor`，包含 `UStaticMeshComponent` 车身和 `USplineComponent`（`PathSpline`），后者存储从起点到终点的完整世界空间路径。`PathSpline` 使用绝对变换（未挂载到移动中的根组件），确保车辆移动时世界空间查询保持正确。
 
-**基于样条的运动模型：** 车辆维护一个 `CurrentSplineDistance` 浮点数。每帧 `TickMovementSpline(DeltaTime)` 将此距离推进 `MoveSpeed * DeltaTime`，从样条查询世界空间位置（`GetLocationAtDistanceAlongSpline`）和方向（`GetDirectionAtDistanceAlongSpline`），并更新 Actor 的位置和旋转。当 `CurrentSplineDistance >= SplineLength` 时车辆到达。这部分工作正常。
+**基于样条的运动模型：** 车辆维护一个 `CurrentSplineDistance` 浮点数。每帧 `TickMovementSpline(DeltaTime)` 将此距离推进 `MoveSpeed * DeltaTime`，从样条查询世界空间位置（`GetLocationAtDistanceAlongSpline`）和方向（`GetDirectionAtDistanceAlongSpline`），并更新 Actor 的位置和旋转。当 `CurrentSplineDistance >= SplineLength` 时车辆到达。
 
-**路径构建（`BuildSplinePath`）— v0.3 转弯偏移方案：**
-对 A\* 原始路径（所有格子均保留）做单次遍历，同步输出样条点和每点的切线方向：
-- **首格：** 添加 `cell_center`，切线朝向下一格。
+**路径构建（`BuildSplinePath`）— v0.4 转弯偏移 + arrive/leave 分离：**
+对 A\* 原始路径（所有格子均保留）做单次遍历，输出样条点、每点切线方向和**独立的 arrive/leave 切线长度乘数**：
+- **首格：** 添加 `cell_center`，切线朝向下一格，两乘数 = 1.0。
 - **转弯格：** 将每个弯道替换为偏移点：
-  - 入口偏移：`cell_center - EntryDir * CellSize/2`，切线 = `EntryDir`（指向格子中心）
-  - 出口偏移：`cell_center + ExitDir * CellSize/2`，切线 = `ExitDir`（远离格子中心）
-  - 连续弯道跳过入口偏移点（防止点重复导致样条打结）。
-- **直道格：** 添加 `cell_center`，切线 = 前进方向；作为弯道序列间的分隔符。
-- **末格：** 添加 `cell_center`，切线方向从上一格指向自身。
+  - 入口偏移：`cell_center - EntryDir * CellSize/2`，切线 = `EntryDir`；非连续弯道时 arrive=1.0，leave=TurnMult。
+  - 出口偏移：`cell_center + ExitDir * CellSize/2`，切线 = `ExitDir`；arrive=TurnMult，leave=1.0（可被后续连续弯道覆盖）。
+  - 连续弯道：跳过入口偏移点，改为将上一个出口点的 leave 乘数覆盖为当前弯道的 TurnMult。
+- **直道格：** 添加 `cell_center`，切线=前进方向，两乘数=1.0（重置弯道序列）。
+- **末格：** 添加 `cell_center`，两乘数=1.0。
 
-`SetSplinePath(Points, TangentDirs)` 通过 `SetTangentAtSplinePoint` 将每个样条点的入/出切线设为 `TangentDir * CellSize/2`，确保切线方向与格网正交（无斜对角偏斜）且长度足够短以防止过度弯曲。
+**弯道方向检测与缩放（v0.4）：**
+- 使用叉积 Z 分量：`CrossZ = EntryDir.X × ExitDir.Y - EntryDir.Y × ExitDir.X`
+  - `CrossZ > 0` → 右转；`CrossZ < 0` → 左转。
+- `bRightHand == bIsRightTurn` → 外侧（大弯）→ `TurnMult = 1.0 + LaneOffsetFactor`
+- `bRightHand != bIsRightTurn` → 内侧（小弯）→ `TurnMult = 1.0 - LaneOffsetFactor`
 
-**设计原理：** 入口偏移点的切线将样条拉向格子中心；出口偏移点的切线将其推出。配合半格偏移的位置，样条紧贴转角曲线。连续弯道通过仅保留出口点共享边界，避免重合点导致样条打结畸变。
+**`SetSplinePath` 切线控制 — 手柄打断方案（v0.4）：**
+1. 旧方式建样条：`AddSplineWorldPoint` 全点，`SetTangentAtSplinePoint` 统一切线长度为 `CellSize`。
+2. 打断手柄联动：通过 `SetSplinePointType(i, CurveCustomTangent, false)` 将全点设为 `CurveCustomTangent`，然后 `UpdateSpline()`。
+3. 按段覆盖：通过 `SplineCurves.Position.Points[i]`，对每个 `LeaveTangentLengths[i] ≠ 1.0` 的段 `(i, i+1)`：
+   - `Points[i].LeaveTangent = TangentDir[i] * CellSize * LMult`
+   - `Points[i+1].ArriveTangent = TangentDir[i+1] * CellSize * LMult`
+   - 两端手柄共用同一乘数，保证曲线段变形对称。
+4. 最后 `UpdateSpline()` 应用。
+
+**双向车道偏移（v0.4）：**
+- 生成所有样条点和切线方向后，`BuildSplinePath` 对每个点施加垂直偏移。
+- 偏移距离 = `CellSize × LaneOffsetFactor`（可配置，默认 0.2）。
+- 右垂直方向 = `(TangentDir.Y, -TangentDir.X, 0.0)` — 切线在 XY 平面顺时针旋转 90°。
+- 右舵（`ECityFlowDrivingSide::RightHand`）：点偏移 `+RightPerp × Offset`
+- 左舵（`ECityFlowDrivingSide::LeftHand`）：点偏移 `−RightPerp × Offset`
+- 配置：`ACityFlowGameMode::DrivingSide` 和 `LaneOffsetFactor` 在模拟开始时通过 `SetDrivingSide()` / `SetLaneOffsetFactor()` 传递给 `UVehicleManager`。
 
 **车辆生成：** `UVehicleManager::SpawnVehicle(Origin, Destination)` 选取出入口连接点，通过 `BuildPath()` 运行 A\*，调用 `BuildSplinePath()` 生成世界空间点数组，生成车辆，吸附到第一个样条点，调用 `Vehicle->SetSplinePath(Points)`。
 
@@ -452,13 +471,15 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 - 节点 = 道路格（`ECellType::Road`）；边 = `ConnectedMask` 方向位。
 - 代价 = 每步 1（均匀）；启发式 = 曼哈顿距离。
 
-**交叉口占用：**
+**交叉口占用（双向，v0.4）：**
 - 交叉口 = 任意 ≥ 3 个连接方向的道路格。
-- `TMap<FGridVector, AVehicleActor*> IntersectionLocks` 作为简单互斥锁。
-- **移动前检查：** 每帧在沿样条推进之前，车辆向前看 `CellSize * 0.5` 并转为网格坐标。若该格为另一车辆持有的锁定交叉口，则进入 `WaitingIntersection` 状态，`IntersectionWaitTime` 后重试。
-- **锁获取：** 移动后，若车辆当前网格格是交叉口，调用 `VehicleManager::AcquireIntersectionLock()` 获取锁。
-- **锁释放：** `UpdateIntersectionLocks()` 为已离开交叉口格的车辆释放锁。
-- 此基于网格位置的方案消除了对显式"交叉口入口/出口"航点的需求。
+- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>> IntersectionLocks`：每个交叉口格映射到一组 `(Vehicle, EntryGridDirection)` 对。
+- **方向感知冲突检查：** 进入交叉口之前，车辆的进入网格方向（通过 `GridDirectionUtils::DirectionFromWorldVector(VelocityDirection)` 获得）与已有占用者比较：
+  - 同向 → 不冲突（同车道同向）
+  - 反向 → 不冲突（对向双向车道）
+  - 垂直方向 → **冲突**（交叉路径）；车辆进入 `WaitingIntersection`
+- **锁获取：** 移动至交叉口格后，车辆注册 `(this, EntryDir)` 到该交叉口的占用者集合。
+- **锁释放：** `UpdateIntersectionLocks()` 移除已离开交叉口格或不再活跃的车辆。
 
 **拥堵检测：**
 - 每帧 `UpdateCongestion()` 将世界位置映射到网格格。
@@ -607,6 +628,16 @@ struct FVehicleSpawnEntry
 | **Planning** → **Simulating** | `StartSimulationPhase()` | 锁定道路放置、启动 VehicleManager 生成 + ScoringManager、启动模拟计时器 |
 | **Simulating** → **Evaluation** | 计时器到期或 `EndSimulationPhase()` | 停止生成、结算分数、广播事件 |
 | **Evaluation** → **Planning** | `RestartPlanningPhase()` | 清除车辆、重置预算、重新开放放置 |
+
+**蓝图可配置属性：**
+- `OriginBuildingClass` / `DestinationBuildingClass` — 建筑蓝图类
+- `RoadTileClass` — 道路地块蓝图类
+- `VehicleClass` — 车辆蓝图类（未来覆写）
+- `GameWidgetClass` / `EvaluationWidgetClass` — UMG Widget 类
+- `TotalRoadBudget`、`LSystemBudgetShare` — 预算分配
+- `SimulationDuration`、`DefaultBuildingCount`、`DefaultGridWidth/Height/CellSize`
+- `DrivingSide` — `ECityFlowDrivingSide`（右舵/左舵），控制双向车道行驶侧
+- `LaneOffsetFactor` — float（0.0~0.45，默认 0.2），样条路径距道路中心的偏移比例
 
 **事件：** `OnGamePhaseChanged`、`OnPlanningPhaseEnd`、`OnSimulationPhaseEnd`
 

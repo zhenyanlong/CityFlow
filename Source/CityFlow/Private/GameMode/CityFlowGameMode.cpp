@@ -134,6 +134,8 @@ void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
 
 		if (VM)
 		{
+			VM->SetDrivingSide(DrivingSide);
+			VM->SetLaneOffsetFactor(LaneOffsetFactor);
 			VM->StartSpawning();
 		}
 

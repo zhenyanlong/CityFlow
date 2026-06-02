@@ -300,7 +300,9 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 	Path.Add(EndBuildingCell);
 
 	TArray<FVector> SplineTangentDirs;
-	TArray<FVector> SplinePoints = BuildSplinePath(Path, SplineTangentDirs);
+	TArray<float> SplineArriveLengths;
+	TArray<float> SplineLeaveLengths;
+	TArray<FVector> SplinePoints = BuildSplinePath(Path, SplineTangentDirs, SplineArriveLengths, SplineLeaveLengths);
 	if (SplinePoints.Num() == 0)
 	{
 		UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: spline path is empty"));
@@ -338,7 +340,9 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 
 	Vehicle->Origin = Origin;
 	Vehicle->SetDestination(Destination);
-	Vehicle->SetSplinePath(SplinePoints, SplineTangentDirs);
+
+	const float TangentLen = GM->GetCellSize();
+	Vehicle->SetSplinePath(SplinePoints, SplineTangentDirs, SplineArriveLengths, SplineLeaveLengths, TangentLen);
 
 	ActiveVehicles.Add(Vehicle);
 	OnVehicleSpawned.Broadcast(Vehicle);
@@ -360,10 +364,15 @@ static FVector GridDeltaToWorldDir(const FGridVector& Delta)
 	return FVector(static_cast<float>(Delta.X), static_cast<float>(Delta.Y), 0.0f).GetSafeNormal();
 }
 
-TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path, TArray<FVector>& OutTangentDirs) const
+TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path,
+	TArray<FVector>& OutTangentDirs,
+	TArray<float>& OutArriveTangentLengths,
+	TArray<float>& OutLeaveTangentLengths) const
 {
 	TArray<FVector> AllPoints;
 	OutTangentDirs.Reset();
+	OutArriveTangentLengths.Reset();
+	OutLeaveTangentLengths.Reset();
 	if (Path.Num() == 0)
 	{
 		return AllPoints;
@@ -376,17 +385,27 @@ TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path
 	}
 
 	const float HalfCell = GM->GetCellSize() * 0.5f;
+	const float TurnLongMult  = 1.0f + LaneOffsetFactor;
+	const float TurnShortMult = 1.0f - LaneOffsetFactor;
+	const bool bRightHand = (DrivingSide == ECityFlowDrivingSide::RightHand);
+
+	// Helper to add a point with given arrive/leave length multipliers
+	auto AddPoint = [&](const FVector& Pos, const FVector& TangentDir, float ArriveLen, float LeaveLen)
+	{
+		AllPoints.Add(Pos);
+		OutTangentDirs.Add(TangentDir);
+		OutArriveTangentLengths.Add(ArriveLen);
+		OutLeaveTangentLengths.Add(LeaveLen);
+	};
 
 	if (Path.Num() == 1)
 	{
-		AllPoints.Add(GM->GridToWorld(Path[0]));
-		OutTangentDirs.Add(FVector::ForwardVector);
+		AddPoint(GM->GridToWorld(Path[0]), FVector::ForwardVector, 1.0f, 1.0f);
 		return AllPoints;
 	}
 
 	const FVector StartTangentDir = GridDeltaToWorldDir(Path[1] - Path[0]);
-	AllPoints.Add(GM->GridToWorld(Path[0]));
-	OutTangentDirs.Add(StartTangentDir);
+	AddPoint(GM->GridToWorld(Path[0]), StartTangentDir, 1.0f, 1.0f);
 
 	bool bPreviousWasTurn = false;
 
@@ -404,30 +423,66 @@ TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path
 		if (bIsTurn)
 		{
 			const FVector Center = GM->GridToWorld(Curr);
+			const FVector EntryDir = GridDeltaToWorldDir(EntryDelta);
 			const FVector ExitDir = GridDeltaToWorldDir(ExitDelta);
 
-			if (!bPreviousWasTurn)
+			const float CrossZ = EntryDir.X * ExitDir.Y - EntryDir.Y * ExitDir.X;
+			const bool bIsRightTurn = CrossZ > 0.0f;
+			const bool bOutside = (bRightHand == bIsRightTurn);
+			const float TurnMult = bOutside ? TurnLongMult : TurnShortMult;
+
+			if (bPreviousWasTurn)
 			{
-				const FVector EntryDir = GridDeltaToWorldDir(EntryDelta);
-				AllPoints.Add(Center - EntryDir * HalfCell);
-				OutTangentDirs.Add(EntryDir);
+				// Consecutive turn: previous turn's exit point is treated as
+				// this turn's entry — update that point's leave tangent to this TurnMult
+				const int32 LastIdx = OutLeaveTangentLengths.Num() - 1;
+				OutLeaveTangentLengths[LastIdx] = TurnMult;
+			}
+			else
+			{
+				// First turn in sequence: add entry offset
+				//       arrive = 1.0  (from previous straight)
+				//       leave  = TurnMult  (face turn curve)
+				AddPoint(Center - EntryDir * HalfCell, EntryDir, 1.0f, TurnMult);
 			}
 
-			AllPoints.Add(Center + ExitDir * HalfCell);
-			OutTangentDirs.Add(ExitDir);
+			// Add exit offset
+			//       arrive = TurnMult  (face turn curve)
+			//       leave  = 1.0  (default — may be overridden if next is consecutive)
+			AddPoint(Center + ExitDir * HalfCell, ExitDir, TurnMult, 1.0f);
 		}
 		else
 		{
-			AllPoints.Add(GM->GridToWorld(Curr));
-			OutTangentDirs.Add(GridDeltaToWorldDir(ExitDelta));
+			// Straight cell: both arrive and leave = 1.0 (resets turn sequence)
+			AddPoint(GM->GridToWorld(Curr), GridDeltaToWorldDir(ExitDelta), 1.0f, 1.0f);
 		}
 
 		bPreviousWasTurn = bIsTurn;
 	}
 
 	const FVector EndTangentDir = GridDeltaToWorldDir(Path.Last() - Path[Path.Num() - 2]);
-	AllPoints.Add(GM->GridToWorld(Path.Last()));
-	OutTangentDirs.Add(EndTangentDir);
+	AddPoint(GM->GridToWorld(Path.Last()), EndTangentDir, 1.0f, 1.0f);
+
+	// Apply bidirectional lane offset
+	if (LaneOffsetFactor > 0.0f)
+	{
+		const float LaneOffset = GM->GetCellSize() * LaneOffsetFactor;
+
+		for (int32 i = 0; i < AllPoints.Num(); ++i)
+		{
+			const FVector Tangent = OutTangentDirs[i].GetSafeNormal();
+			const FVector RightPerp(Tangent.Y, -Tangent.X, 0.0f);
+
+			if (bRightHand)
+			{
+				AllPoints[i] += RightPerp * LaneOffset;
+			}
+			else
+			{
+				AllPoints[i] -= RightPerp * LaneOffset;
+			}
+		}
+	}
 
 	return AllPoints;
 }
@@ -607,44 +662,71 @@ void UVehicleManager::UpdateIntersectionLocks()
 
 	for (auto It = IntersectionLocks.CreateIterator(); It; ++It)
 	{
-		AVehicleActor* Vehicle = It.Value();
-		if (!Vehicle || !ActiveVehicles.Contains(Vehicle) ||
-			Vehicle->GetMovementState() == EVehicleMovementState::Arrived)
+		TMap<TObjectPtr<AVehicleActor>, EGridDirection>& VehiclesAtIntersection = It.Value();
+
+		for (auto VehIt = VehiclesAtIntersection.CreateIterator(); VehIt; ++VehIt)
 		{
-			It.RemoveCurrent();
-			continue;
+			AVehicleActor* Vehicle = VehIt.Key();
+			if (!Vehicle || !ActiveVehicles.Contains(Vehicle) ||
+				Vehicle->GetMovementState() == EVehicleMovementState::Arrived)
+			{
+				VehIt.RemoveCurrent();
+				continue;
+			}
+
+			const FGridVector VehicleGrid = GM->WorldToGrid(Vehicle->GetActorLocation());
+			if (VehicleGrid != It.Key())
+			{
+				VehIt.RemoveCurrent();
+			}
 		}
 
-		const FGridVector VehicleGrid = GM->WorldToGrid(Vehicle->GetActorLocation());
-		if (VehicleGrid != It.Key())
+		if (VehiclesAtIntersection.Num() == 0)
 		{
 			It.RemoveCurrent();
 		}
 	}
 }
 
-bool UVehicleManager::IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle) const
+bool UVehicleManager::IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle, EGridDirection EntryDir) const
 {
-	const AVehicleActor* const* Occupant = IntersectionLocks.Find(Pos);
-	if (!Occupant || !(*Occupant))
+	const TMap<TObjectPtr<AVehicleActor>, EGridDirection>* VehiclesAtPos = IntersectionLocks.Find(Pos);
+	if (!VehiclesAtPos || VehiclesAtPos->Num() == 0)
 	{
 		return false;
 	}
-	return *Occupant != AskingVehicle;
+
+	for (const auto& Pair : *VehiclesAtPos)
+	{
+		const AVehicleActor* ExistingVehicle = Pair.Key;
+		const EGridDirection ExistingDir = Pair.Value;
+
+		if (!ExistingVehicle || ExistingVehicle == AskingVehicle)
+		{
+			continue;
+		}
+
+		// Only block if the entry directions are perpendicular (crossing paths)
+		// Same direction: same lane, no conflict
+		// Opposite direction: opposing lanes, no conflict
+		if (GridDirectionUtils::ArePerpendicular(ExistingDir, EntryDir))
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
-void UVehicleManager::AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle)
+void UVehicleManager::AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir)
 {
-	if (!Vehicle)
+	if (!Vehicle || EntryDir == EGridDirection::None)
 	{
 		return;
 	}
 
-	AVehicleActor** Existing = IntersectionLocks.Find(Pos);
-	if (!Existing || !(*Existing) || *Existing == Vehicle)
-	{
-		IntersectionLocks.Add(Pos, Vehicle);
-	}
+	TMap<TObjectPtr<AVehicleActor>, EGridDirection>& VehiclesAtPos = IntersectionLocks.FindOrAdd(Pos);
+	VehiclesAtPos.Add(Vehicle, EntryDir);
 }
 
 bool UVehicleManager::IsIntersection(const FGridVector& Pos) const
@@ -899,7 +981,9 @@ void UVehicleManager::DebugDrawIntersections() const
 		}
 
 		const FVector WorldPos = GM->GridToWorld(IntersectionPos);
-		const FColor DrawColor = IntersectionLocks.Contains(IntersectionPos) ? FColor::Red : FColor::Orange;
+		const TMap<TObjectPtr<AVehicleActor>, EGridDirection>* VehiclesAtPos = IntersectionLocks.Find(IntersectionPos);
+		const bool bLocked = VehiclesAtPos && VehiclesAtPos->Num() > 0;
+		const FColor DrawColor = bLocked ? FColor::Red : FColor::Orange;
 
 		DrawDebugBox(World, WorldPos + FVector(0, 0, 150), FVector(40, 40, 20),
 			DrawColor, false, 0.1f, 0, 2.0f);

@@ -1,3 +1,50 @@
+## 2026-06-02
+
+### 双向车道与驾驶方向配置
+
+- 在 `CityFlowGameTypes.h` 中添加 `ECityFlowDrivingSide` 枚举（`RightHand` 右舵 / `LeftHand` 左舵）
+- 在 `ACityFlowGameMode` 中添加 `DrivingSide` 和 `LaneOffsetFactor`（默认 0.2）属性，可在蓝图中配置
+- GameMode 在模拟开始时通过 `SetDrivingSide()` / `SetLaneOffsetFactor()` 将驾驶配置传递给 `UVehicleManager`
+
+### BuildSplinePath 车道偏移
+
+- 生成所有样条点位置和切线方向后，`BuildSplinePath` 对每个点施加垂直偏移
+- 偏移 = `CellSize × LaneOffsetFactor`，方向 = 切线的右垂直方向（`(Tangent.Y, -Tangent.X, 0)`）
+- 右舵：`+RightPerp × Offset`；左舵：`−RightPerp × Offset`
+- 新增 `GridDirectionUtils::DirectionFromWorldVector()` 和 `ArePerpendicular()` 辅助函数
+
+### 方向感知交叉口锁（v0.4）
+
+- 将 `IntersectionLocks` 从 `TMap<FGridVector, AVehicleActor*>` 改为 `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>>` — 支持同一交叉口多车辆同时存在，并追踪进入方向
+- `IsIntersectionLockedByOther(Pos, AskingVehicle, EntryDir)`：仅在进入方向垂直（交叉路径）时阻塞；同向和对向车辆可同时通过
+- `AcquireIntersectionLock(Pos, Vehicle, EntryDir)`：以进入网格方向注册车辆
+- `VehicleActor::TickMovementSpline` 通过 `GridDirectionUtils::DirectionFromWorldVector` 从 `VelocityDirection` 推导进入方向
+- 更新 `UpdateIntersectionLocks()`、`DebugDrawIntersections()`、`ClearAllVehicles()` 适配新数据结构
+
+### TDD 更新
+
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节（双向车道偏移 + 方向感知交叉口锁）和第 2.11 节（GameMode 新增属性）
+
+### 弯道感知切线缩放（v0.4）
+
+- `BuildSplinePath` 改为输出独立的 `OutArriveTangentLengths` / `OutLeaveTangentLengths` 每点乘数
+- 通过叉积判断左右转（`CrossZ > 0` = 右转），修复了符号 Bug
+- 右舵：右转 → 外侧大弯 → `1.0 + LaneOffsetFactor`；左转 → 内侧小弯 → `1.0 - LaneOffsetFactor`
+- 左舵：镜像反向
+- 连续弯道：上一个弯道出口点的 leave 乘数覆盖为当前弯道的 TurnMult
+- 基准切线长度从 `CellSize * 0.5` 改为 `CellSize`
+
+### SetSplinePath 手柄打断重构
+
+- 第一步：`AddSplineWorldPoint` + `SetTangentAtSplinePoint` 建统一切线样条
+- 第二步：`SetSplinePointType(i, CurveCustomTangent)` 打断全点手柄联动
+- 第三步：通过 `SplineCurves.Position.Points[i]` 按段覆盖 — 对 `LMult ≠ 1.0` 的段 `(i, i+1)`，将 `Points[i].LeaveTangent` 和 `Points[i+1].ArriveTangent` 设为相同缩放值，保证曲线变形对称
+- 第四步：`UpdateSpline()` 应用
+
+### TDD 文档更新
+
+- 将 TDD.md 和 TDD_Chinese.md 第 2.6 节重写为 v0.4 版本，完整记录弯道检测、arrive/leave 分离切线、手柄打断 + 按段覆盖方案
+
 ## 2026-06-01
 
 ### 车辆样条运动（v0.2）— 今日较早

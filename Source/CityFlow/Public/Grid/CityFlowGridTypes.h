@@ -149,4 +149,35 @@ namespace GridDirectionUtils
 		default:                    return EGridDirection::None;
 		}
 	}
+
+	/** Determine dominant grid direction from a world direction vector (X/Y only, Z ignored). */
+	static EGridDirection DirectionFromWorldVector(const FVector& WorldDir)
+	{
+		if (WorldDir.IsNearlyZero())
+		{
+			return EGridDirection::None;
+		}
+
+		const float AbsX = FMath::Abs(WorldDir.X);
+		const float AbsY = FMath::Abs(WorldDir.Y);
+
+		if (AbsX >= AbsY)
+		{
+			return WorldDir.X > 0.0f ? EGridDirection::Right : EGridDirection::Left;
+		}
+		else
+		{
+			return WorldDir.Y > 0.0f ? EGridDirection::Down : EGridDirection::Up;
+		}
+	}
+
+	/** Returns true if the two grid directions are perpendicular (e.g. Up and Left). */
+	static bool ArePerpendicular(EGridDirection A, EGridDirection B)
+	{
+		if (A == EGridDirection::None || B == EGridDirection::None)
+		{
+			return false;
+		}
+		return A != B && A != GetOpposite(B);
+	}
 }

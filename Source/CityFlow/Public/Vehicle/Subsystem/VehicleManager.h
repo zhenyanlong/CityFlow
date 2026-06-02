@@ -6,6 +6,7 @@
 #include "Grid/CityFlowGridTypes.h"
 #include "Vehicle/Types/CityFlowVehicleTypes.h"
 #include "Vehicle/Types/VehicleDataAsset.h"
+#include "GameMode/Types/CityFlowGameTypes.h"
 #include "VehicleManager.generated.h"
 
 class AVehicleActor;
@@ -38,18 +39,27 @@ public:
 	void ClearAllVehicles();
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
+	void SetDrivingSide(ECityFlowDrivingSide Side) { DrivingSide = Side; }
+
+	UFUNCTION(BlueprintCallable, Category = "Vehicle")
+	void SetLaneOffsetFactor(float Factor) { LaneOffsetFactor = FMath::Clamp(Factor, 0.0f, 0.45f); }
+
+	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	AVehicleActor* SpawnVehicle(class ABuilding* Origin, class ABuilding* Destination);
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	bool BuildPath(const FGridVector& Start, const FGridVector& End, TArray<FGridVector>& OutPath) const;
 
-	TArray<FVector> BuildSplinePath(const TArray<FGridVector>& Path, TArray<FVector>& OutTangentDirs) const;
+	TArray<FVector> BuildSplinePath(const TArray<FGridVector>& Path,
+		TArray<FVector>& OutTangentDirs,
+		TArray<float>& OutArriveTangentLengths,
+		TArray<float>& OutLeaveTangentLengths) const;
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
-	bool IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle) const;
+	bool IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle, EGridDirection EntryDir) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
-	void AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle);
+	void AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir);
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	const TArray<AVehicleActor*>& GetActiveVehicles() const { return ActiveVehicles; }
@@ -102,8 +112,7 @@ private:
 	UPROPERTY()
 	TArray<AVehicleActor*> ArrivedVehicles;
 
-	UPROPERTY()
-	TMap<FGridVector, AVehicleActor*> IntersectionLocks;
+	TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>> IntersectionLocks;
 
 	UPROPERTY()
 	TMap<FGridVector, AVehicleActor*> VehicleGridMap;
@@ -120,6 +129,9 @@ private:
 
 	TArray<FVehicleSpawnEntry> CachedSpawnEntries;
 	float TotalSpawnWeight = 0.0f;
+
+	ECityFlowDrivingSide DrivingSide = ECityFlowDrivingSide::RightHand;
+	float LaneOffsetFactor = 0.2f;
 
 	static constexpr float CONGESTION_CHECK_INTERVAL = 1.0f;
 };

@@ -87,6 +87,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Grid")
 	float DefaultCellSize = 200.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Vehicle")
+	ECityFlowDrivingSide DrivingSide = ECityFlowDrivingSide::RightHand;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Vehicle", meta = (ClampMin = "0.0", ClampMax = "0.45"))
+	float LaneOffsetFactor = 0.2f;
+
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|Events")
 	FOnGamePhaseChanged OnGamePhaseChanged;
 

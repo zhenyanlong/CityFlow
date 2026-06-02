@@ -39,43 +39,84 @@ void AVehicleActor::BeginPlay()
 	Super::BeginPlay();
 }
 
-void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArray<FVector>& TangentDirs)
+void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArray<FVector>& TangentDirs,
+	const TArray<float>& ArriveTangentLengths, const TArray<float>& LeaveTangentLengths,
+	float DefaultTangentLength)
 {
 	PathSpline->ClearSplinePoints();
 	PathSpline->SetWorldLocation(FVector::ZeroVector);
 
-	for (const FVector& Pt : WorldPoints)
+	const int32 NumPts = WorldPoints.Num();
+	if (NumPts < 2 || TangentDirs.Num() != NumPts)
 	{
-		PathSpline->AddSplineWorldPoint(Pt);
+		return;
 	}
 
-	const int32 NumPts = PathSpline->GetNumberOfSplinePoints();
-	if (NumPts >= 2 && TangentDirs.Num() == NumPts)
+	const bool bHasLeave = (LeaveTangentLengths.Num() == NumPts);
+
+	float BaseTangentLen = DefaultTangentLength;
+	if (BaseTangentLen <= 0.0f)
 	{
-		float TangentLen = 100.0f;
-		if (UWorld* World = GetWorld())
+		if (UWorld* W = GetWorld())
 		{
-			if (UGridManager* GM = World->GetSubsystem<UGridManager>())
+			if (UGridManager* GM = W->GetSubsystem<UGridManager>())
 			{
-				TangentLen = GM->GetCellSize() * 0.5f;
+				BaseTangentLen = GM->GetCellSize();
 			}
 		}
-
-		for (int32 i = 0; i < NumPts; ++i)
+		if (BaseTangentLen <= 0.0f)
 		{
-			const FVector Tangent = TangentDirs[i].GetSafeNormal() * TangentLen;
-			PathSpline->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local);
+			BaseTangentLen = 100.0f;
 		}
 	}
+
+	// Step 1: Old way — add points and set uniform tangents (both arrive & leave = same)
+	for (int32 i = 0; i < NumPts; ++i)
+	{
+		PathSpline->AddSplineWorldPoint(WorldPoints[i]);
+	}
+	for (int32 i = 0; i < NumPts; ++i)
+	{
+		const FVector Tangent = TangentDirs[i].GetSafeNormal() * BaseTangentLen;
+		PathSpline->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local);
+	}
+
+	// Step 2: Break handle linkage — set all points to CurveCustomTangent
+	for (int32 i = 0; i < NumPts; ++i)
+	{
+		PathSpline->SetSplinePointType(i, ESplinePointType::CurveCustomTangent, false);
+	}
+	PathSpline->UpdateSpline();
+
+	// Step 3: Override per-segment tangents for turn curves
+	// For each pair (i, i+1), both the leave tangent of point i
+	// and the arrive tangent of point i+1 are scaled by the same multiplier,
+	// taken from point i's LeaveTangentLength (LMult).
+	// This ensures the curve segment between entry/exit offsets is symmetric.
+	FInterpCurveVector& PosCurve = PathSpline->SplineCurves.Position;
+	for (int32 i = 0; i < NumPts - 1; ++i)
+	{
+		const float LMult = bHasLeave ? LeaveTangentLengths[i] : 1.0f;
+		if (FMath::IsNearlyEqual(LMult, 1.0f))
+		{
+			continue;
+		}
+
+		const FVector DirI   = TangentDirs[i].GetSafeNormal();
+		const FVector DirI1  = TangentDirs[i + 1].GetSafeNormal();
+
+		// Leave tangent of point i   — faces toward point i+1
+		PosCurve.Points[i].LeaveTangent = DirI * BaseTangentLen * LMult;
+		// Arrive tangent of point i+1 — faces toward point i
+		PosCurve.Points[i + 1].ArriveTangent = DirI1 * BaseTangentLen * LMult;
+	}
+	PathSpline->UpdateSpline();
 
 	CurrentSplineDistance = 0.0f;
 	CurrentSpeed = 0.0f;
 	MovementState = EVehicleMovementState::Moving;
 
-	if (WorldPoints.Num() > 0)
-	{
-		SetActorLocation(WorldPoints[0] + FVector(0, 0, VehicleZOffset));
-	}
+	SetActorLocation(WorldPoints[0] + FVector(0, 0, VehicleZOffset));
 }
 
 void AVehicleActor::SetDestination(ABuilding* InDestination)
@@ -151,12 +192,16 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Left)) ++ConnCount;
 				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
 
-				if (ConnCount >= 3 && VM->IsIntersectionLockedByOther(AheadGrid, this))
+				if (ConnCount >= 3)
 				{
-					MovementState = EVehicleMovementState::WaitingIntersection;
-					WaitingIntersectionPos = AheadGrid;
-					IntersectionWaitTimer = IntersectionWaitTime;
-					return;
+					const EGridDirection EntryDir = GridDirectionUtils::DirectionFromWorldVector(VelocityDirection);
+					if (VM->IsIntersectionLockedByOther(AheadGrid, this, EntryDir))
+					{
+						MovementState = EVehicleMovementState::WaitingIntersection;
+						WaitingIntersectionPos = AheadGrid;
+						IntersectionWaitTimer = IntersectionWaitTime;
+						return;
+					}
 				}
 			}
 		}
@@ -203,7 +248,8 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
 			if (ConnCount >= 3)
 			{
-				VM->AcquireIntersectionLock(NewGrid, this);
+				const EGridDirection EntryDir = GridDirectionUtils::DirectionFromWorldVector(VelocityDirection);
+				VM->AcquireIntersectionLock(NewGrid, this, EntryDir);
 			}
 		}
 	}

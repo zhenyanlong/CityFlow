@@ -426,25 +426,44 @@ Higher-scored points execute first within the batch. This steers branches toward
 
 ### 2.6 Vehicle AI: A\* Pathfinding & Spline-Based Movement
 
-#### Implementation Status: ✅ Implemented — v0.3 turn-offset approach
+#### Implementation Status: ✅ Implemented — v0.4 bidirectional with turn-aware tangent scaling
 
 **VehicleActor** (`AVehicleActor`) is a Blueprintable `AActor` with a `UStaticMeshComponent` vehicle body and a `USplineComponent` (`PathSpline`) that stores the complete world-space path from origin to destination. The `PathSpline` uses absolute transform (not attached to the moving root), ensuring world-space queries remain correct as the vehicle moves.
 
-**Spline-based movement model:** The vehicle maintains a `CurrentSplineDistance` float. Each frame, `TickMovementSpline(DeltaTime)` advances this distance by `MoveSpeed * DeltaTime`, queries the spline for the world-space position (`GetLocationAtDistanceAlongSpline`) and direction (`GetDirectionAtDistanceAlongSpline`), and updates the actor's location and rotation. When `CurrentSplineDistance >= SplineLength`, the vehicle arrives. This part is working correctly.
+**Spline-based movement model:** The vehicle maintains a `CurrentSplineDistance` float. Each frame, `TickMovementSpline(DeltaTime)` advances this distance by `MoveSpeed * DeltaTime`, queries the spline for the world-space position (`GetLocationAtDistanceAlongSpline`) and direction (`GetDirectionAtDistanceAlongSpline`), and updates the actor's location and rotation. When `CurrentSplineDistance >= SplineLength`, the vehicle arrives.
 
-**Path construction (`BuildSplinePath`) — v0.3 turn-offset approach:**
-Processes the raw A\* path (all cells preserved) in a single pass, outputting both spline points and per-point tangent directions:
-- **First cell:** adds `cell_center` with tangent toward next cell.
+**Path construction (`BuildSplinePath`) — v0.4 turn-offset with arrive/leave separation:**
+Processes the raw A\* path (all cells preserved) in a single pass, outputting spline points, per-point tangent directions, and **separate arrive/leave tangent length multipliers**:
+- **First cell:** adds `cell_center`, tangent toward next cell, both multipliers = 1.0.
 - **Turn cells:** replaces each turn with offset points:
-  - Entry offset: `cell_center - EntryDir * CellSize/2`, tangent = `EntryDir` (toward center)
-  - Exit offset: `cell_center + ExitDir * CellSize/2`, tangent = `ExitDir` (away from center)
-  - Consecutive turns skip the entry offset (prevents duplicate points at cell boundaries).
-- **Straight cells:** adds `cell_center` with tangent = forward direction; acts as a turn-sequence separator.
-- **Last cell:** adds `cell_center` with tangent from previous cell direction.
+  - Entry offset: `cell_center - EntryDir * CellSize/2`, tangent = `EntryDir`; in non-consecutive turns: arrive=1.0, leave=TurnMult.
+  - Exit offset: `cell_center + ExitDir * CellSize/2`, tangent = `ExitDir`; arrive=TurnMult, leave=1.0 (may be overridden by next consecutive turn).
+  - Consecutive turns: skip the entry offset; instead, update the previous exit point's leave multiplier to the current turn's TurnMult.
+- **Straight cells:** adds `cell_center`, tangent=forward direction, both multipliers=1.0 (resets turn sequence).
+- **Last cell:** adds `cell_center`, both multipliers=1.0.
 
-`SetSplinePath(Points, TangentDirs)` sets each spline point's arrive/leave tangents to `TangentDir * CellSize/2` via `SetTangentAtSplinePoint`, ensuring tangents are orthogonal to the grid (no diagonal skew) and short enough to prevent over-bending.
+**Turn direction detection & scaling (v0.4):**
+- Uses cross-product Z component: `CrossZ = EntryDir.X × ExitDir.Y - EntryDir.Y × ExitDir.X`
+  - `CrossZ > 0` → right turn; `CrossZ < 0` → left turn.
+- `bRightHand == bIsRightTurn` → outside (long bend) → `TurnMult = 1.0 + LaneOffsetFactor`
+- `bRightHand != bIsRightTurn` → inside (short bend) → `TurnMult = 1.0 - LaneOffsetFactor`
 
-**Design rationale:** Entry offset tangents pull the spline toward the cell center; exit offset tangents push it away. Combined with half-cell offset positions, the spline curves tightly through corners. Consecutive turns share their boundary via the exit-only approach, avoiding duplicate points that cause spline knotting.
+**Tangent control in `SetSplinePath` — handle-break approach (v0.4):**
+1. Build spline the old way: `AddSplineWorldPoint` all points, `SetTangentAtSplinePoint` uniform tangents at `CellSize` length.
+2. Break handle linkage: set every point type to `ESplinePointType::CurveCustomTangent` via `SetSplinePointType(i, CurveCustomTangent, false)` then `UpdateSpline()`.
+3. Per-segment override via `SplineCurves.Position.Points[i]`: for each segment `(i, i+1)` where `LeaveTangentLengths[i] ≠ 1.0`:
+   - `Points[i].LeaveTangent = TangentDir[i] * CellSize * LMult`
+   - `Points[i+1].ArriveTangent = TangentDir[i+1] * CellSize * LMult`
+   - Both handles share the same multiplier, ensuring symmetric curve segment deformation.
+4. Final `UpdateSpline()` to apply.
+
+**Bidirectional Lane Offset (v0.4):**
+- After generating all spline points and tangent directions, `BuildSplinePath` applies a perpendicular offset to every point.
+- Offset distance = `CellSize × LaneOffsetFactor` (configurable, default 0.2).
+- Right perpendicular = `(TangentDir.Y, -TangentDir.X, 0.0)` — rotate tangent 90° clockwise in XY plane.
+- Right-hand driving (`ECityFlowDrivingSide::RightHand`): points offset by `+RightPerp × Offset`
+- Left-hand driving (`ECityFlowDrivingSide::LeftHand`): points offset by `−RightPerp × Offset`
+- Configuration: `ACityFlowGameMode::DrivingSide` and `LaneOffsetFactor` passed to `UVehicleManager` via `SetDrivingSide()` / `SetLaneOffsetFactor()` at simulation start.
 
 **Vehicle Spawning:** `UVehicleManager::SpawnVehicle(Origin, Destination)` picks doorway connection points, runs A\* via `BuildPath()`, calls `BuildSplinePath()` to produce the world-space point array, spawns the vehicle, snaps to the first spline point, and calls `Vehicle->SetSplinePath(Points)`.
 
@@ -453,13 +472,15 @@ Processes the raw A\* path (all cells preserved) in a single pass, outputting bo
 - Cost = 1 per step (uniform); heuristic = Manhattan distance.
 - Algorithm: standard A\* with `TMap<FGridVector, FAStarNode>` for open/closed sets.
 
-**Intersection Occupation:**
+**Intersection Occupation (bidirectional, v0.4):**
 - An intersection is any road cell with ≥ 3 connected directions.
-- `TMap<FGridVector, AVehicleActor*> IntersectionLocks` serves as a simple mutex.
-- **Pre-move check:** Each tick, before advancing along the spline, the vehicle looks ahead by `CellSize * 0.5` and converts to grid position. If that cell is a locked intersection owned by another vehicle, the vehicle enters `WaitingIntersection` state and retries after `IntersectionWaitTime`.
-- **Lock acquisition:** After moving, if the vehicle's current grid cell is an intersection, it calls `VehicleManager::AcquireIntersectionLock()` to claim it.
-- **Lock release:** `UpdateIntersectionLocks()` releases locks for vehicles that have left the intersection cell.
-- This grid-position-based approach eliminates the need for explicit "intersection entry/exit" waypoints.
+- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>> IntersectionLocks`: each intersection cell maps to a set of `(Vehicle, EntryGridDirection)` pairs.
+- **Direction-aware conflict check:** Before entering an intersection, the vehicle's entry grid direction (derived from `GridDirectionUtils::DirectionFromWorldVector(VelocityDirection)`) is compared against existing occupants:
+  - Same direction → no conflict (same lane, same direction)
+  - Opposite direction → no conflict (opposing bidirectional lanes)
+  - Perpendicular direction → **conflict** (crossing paths); vehicle enters `WaitingIntersection`
+- **Lock acquisition:** After moving onto an intersection cell, vehicle registers `(this, EntryDir)` in the intersection's occupant set.
+- **Lock release:** `UpdateIntersectionLocks()` removes vehicles that have left the intersection cell or are no longer active.
 
 **Congestion Detection:**
 - Each tick, `UpdateCongestion()` maps world positions to grid cells.
@@ -619,6 +640,8 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 - `GameWidgetClass` / `EvaluationWidgetClass` — UMG widget classes
 - `TotalRoadBudget`, `LSystemBudgetShare` — budget split
 - `SimulationDuration`, `DefaultBuildingCount`, `DefaultGridWidth/Height/CellSize`
+- `DrivingSide` — `ECityFlowDrivingSide` (RightHand / LeftHand), controls lane side for bidirectional traffic
+- `LaneOffsetFactor` — float (0.0~0.45, default 0.2), fraction of CellSize to offset spline path from road center
 
 **Events:** `OnGamePhaseChanged`, `OnPlanningPhaseEnd`, `OnSimulationPhaseEnd`
 

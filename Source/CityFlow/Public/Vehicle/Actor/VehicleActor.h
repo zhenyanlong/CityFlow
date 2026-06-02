@@ -22,7 +22,9 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
-	void SetSplinePath(const TArray<FVector>& WorldPoints, const TArray<FVector>& TangentDirs);
+	void SetSplinePath(const TArray<FVector>& WorldPoints, const TArray<FVector>& TangentDirs,
+		const TArray<float>& ArriveTangentLengths, const TArray<float>& LeaveTangentLengths,
+		float DefaultTangentLength = -1.0f);
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetDestination(class ABuilding* InDestination);

@@ -1,3 +1,50 @@
+## 2026-06-02
+
+### Bidirectional Lanes & Driving Side Configuration
+
+- Added `ECityFlowDrivingSide` enum (`RightHand` / `LeftHand`) to `CityFlowGameTypes.h`
+- Added `DrivingSide` and `LaneOffsetFactor` (default 0.2) properties to `ACityFlowGameMode`, Blueprint-configurable
+- GameMode passes driving config to `UVehicleManager` via `SetDrivingSide()` / `SetLaneOffsetFactor()` on simulation start
+
+### Lane Offset in BuildSplinePath
+
+- After generating all spline point positions and tangent directions, `BuildSplinePath` applies a perpendicular offset to every point
+- Offset = `CellSize × LaneOffsetFactor`, direction = right perpendicular of tangent (`(Tangent.Y, -Tangent.X, 0)`)
+- Right-hand driving: `+RightPerp × Offset`; left-hand driving: `−RightPerp × Offset`
+- Added `GridDirectionUtils::DirectionFromWorldVector()` and `ArePerpendicular()` helpers
+
+### Direction-Aware Intersection Lock (v0.4)
+
+- Changed `IntersectionLocks` from `TMap<FGridVector, AVehicleActor*>` to `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>>` — supports multiple vehicles at same intersection with entry direction tracking
+- `IsIntersectionLockedByOther(Pos, AskingVehicle, EntryDir)`: only blocks when entry directions are perpendicular (crossing paths); same-direction and opposite-direction vehicles pass through simultaneously
+- `AcquireIntersectionLock(Pos, Vehicle, EntryDir)`: registers vehicle with its entry grid direction
+- `VehicleActor::TickMovementSpline` derives entry grid direction from `VelocityDirection` via `GridDirectionUtils::DirectionFromWorldVector`
+- Updated `UpdateIntersectionLocks()`, `DebugDrawIntersections()`, and `ClearAllVehicles()` for new data structure
+
+### TDD Updates
+
+- Updated TDD.md and TDD_Chinese.md sections 2.6 (bidirectional lane offset + direction-aware intersection lock) and 2.11 (GameMode new properties)
+
+### Turn-Aware Tangent Scaling (v0.4)
+
+- Changed `BuildSplinePath` to output separate `OutArriveTangentLengths` / `OutLeaveTangentLengths` per point
+- Turn direction detection via cross-product (`CrossZ > 0` = right turn), corrected sign bug
+- Right-hand driving: right turn → outside long bend → `1.0 + LaneOffsetFactor`; left turn → inside short bend → `1.0 - LaneOffsetFactor`
+- Left-hand driving: inversely mirrored
+- Consecutive turns: previous turn's exit point's leave multiplier updated to current turn's TurnMult
+- Base tangent length changed from `CellSize * 0.5` to `CellSize` (longer handles for better curve control)
+
+### SetSplinePath Handle-Break Refactoring
+
+- Step 1: build spline with uniform tangents via `AddSplineWorldPoint` + `SetTangentAtSplinePoint`
+- Step 2: break handle linkage by setting all points to `ESplinePointType::CurveCustomTangent`
+- Step 3: per-segment override via `SplineCurves.Position.Points[i]` — for each segment `(i, i+1)` with `LMult ≠ 1.0`, set `Points[i].LeaveTangent` and `Points[i+1].ArriveTangent` to the same scaled tangent, ensuring symmetric curve deformation
+- Step 4: final `UpdateSpline()` to apply
+
+### TDD Documentation Refresh
+
+- Rewrote TDD.md and TDD_Chinese.md section 2.6 to v0.4, documenting turn detection, arrive/leave tangent separation, and the handle-break+per-segment override approach
+
 ## 2026-06-01
 
 ### Vehicle Spline-Based Movement (v0.2) — earlier today
