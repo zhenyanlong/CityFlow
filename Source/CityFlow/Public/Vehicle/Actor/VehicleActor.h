@@ -22,7 +22,7 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
-	void SetSplinePath(const TArray<FVector>& WorldPoints);
+	void SetSplinePath(const TArray<FVector>& WorldPoints, const TArray<FVector>& TangentDirs);
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetDestination(class ABuilding* InDestination);
@@ -64,6 +64,12 @@ public:
 	float MoveSpeed = 600.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
+	float Acceleration = 800.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
+	float DecelerationDistance = 200.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
 	float WaypointReachedThreshold = 50.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
@@ -90,6 +96,7 @@ private:
 	EVehicleMovementState MovementState = EVehicleMovementState::Idle;
 	FVector VelocityDirection = FVector::ZeroVector;
 	float CurrentSplineDistance = 0.0f;
+	float CurrentSpeed = 0.0f;
 
 	TObjectPtr<ABuilding> Destination;
 

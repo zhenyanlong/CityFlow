@@ -294,7 +294,8 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 		return nullptr;
 	}
 
-	TArray<FVector> SplinePoints = BuildSplinePath(Path);
+	TArray<FVector> SplineTangentDirs;
+	TArray<FVector> SplinePoints = BuildSplinePath(Path, SplineTangentDirs);
 	if (SplinePoints.Num() == 0)
 	{
 		UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: spline path is empty"));
@@ -332,7 +333,7 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 
 	Vehicle->Origin = Origin;
 	Vehicle->SetDestination(Destination);
-	Vehicle->SetSplinePath(SplinePoints);
+	Vehicle->SetSplinePath(SplinePoints, SplineTangentDirs);
 
 	ActiveVehicles.Add(Vehicle);
 	OnVehicleSpawned.Broadcast(Vehicle);
@@ -360,9 +361,10 @@ static FVector GridDeltaToWorldDir(const FGridVector& Delta)
 	return FVector(static_cast<float>(Delta.X), static_cast<float>(Delta.Y), 0.0f).GetSafeNormal();
 }
 
-TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path) const
+TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path, TArray<FVector>& OutTangentDirs) const
 {
 	TArray<FVector> AllPoints;
+	OutTangentDirs.Reset();
 	if (Path.Num() == 0)
 	{
 		return AllPoints;
@@ -379,10 +381,15 @@ TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path
 	if (Path.Num() == 1)
 	{
 		AllPoints.Add(GM->GridToWorld(Path[0]));
+		OutTangentDirs.Add(FVector::ForwardVector);
 		return AllPoints;
 	}
 
+	const FVector StartTangentDir = GridDeltaToWorldDir(Path[1] - Path[0]);
 	AllPoints.Add(GM->GridToWorld(Path[0]));
+	OutTangentDirs.Add(StartTangentDir);
+
+	bool bPreviousWasTurn = false;
 
 	for (int32 i = 1; i < Path.Num() - 1; ++i)
 	{
@@ -398,19 +405,30 @@ TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path
 		if (bIsTurn)
 		{
 			const FVector Center = GM->GridToWorld(Curr);
-			const FVector EntryDir = GridDeltaToWorldDir(EntryDelta);
 			const FVector ExitDir = GridDeltaToWorldDir(ExitDelta);
 
-			AllPoints.Add(Center - EntryDir * HalfCell);
+			if (!bPreviousWasTurn)
+			{
+				const FVector EntryDir = GridDeltaToWorldDir(EntryDelta);
+				AllPoints.Add(Center - EntryDir * HalfCell);
+				OutTangentDirs.Add(EntryDir);
+			}
+
 			AllPoints.Add(Center + ExitDir * HalfCell);
+			OutTangentDirs.Add(ExitDir);
 		}
 		else
 		{
 			AllPoints.Add(GM->GridToWorld(Curr));
+			OutTangentDirs.Add(GridDeltaToWorldDir(ExitDelta));
 		}
+
+		bPreviousWasTurn = bIsTurn;
 	}
 
+	const FVector EndTangentDir = GridDeltaToWorldDir(Path.Last() - Path[Path.Num() - 2]);
 	AllPoints.Add(GM->GridToWorld(Path.Last()));
+	OutTangentDirs.Add(EndTangentDir);
 
 	return AllPoints;
 }

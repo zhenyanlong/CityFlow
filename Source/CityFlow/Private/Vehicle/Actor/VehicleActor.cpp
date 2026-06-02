@@ -39,7 +39,7 @@ void AVehicleActor::BeginPlay()
 	Super::BeginPlay();
 }
 
-void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints)
+void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArray<FVector>& TangentDirs)
 {
 	PathSpline->ClearSplinePoints();
 	PathSpline->SetWorldLocation(FVector::ZeroVector);
@@ -49,7 +49,27 @@ void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints)
 		PathSpline->AddSplineWorldPoint(Pt);
 	}
 
+	const int32 NumPts = PathSpline->GetNumberOfSplinePoints();
+	if (NumPts >= 2 && TangentDirs.Num() == NumPts)
+	{
+		float TangentLen = 100.0f;
+		if (UWorld* World = GetWorld())
+		{
+			if (UGridManager* GM = World->GetSubsystem<UGridManager>())
+			{
+				TangentLen = GM->GetCellSize() * 0.5f;
+			}
+		}
+
+		for (int32 i = 0; i < NumPts; ++i)
+		{
+			const FVector Tangent = TangentDirs[i].GetSafeNormal() * TangentLen;
+			PathSpline->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local);
+		}
+	}
+
 	CurrentSplineDistance = 0.0f;
+	CurrentSpeed = 0.0f;
 	MovementState = EVehicleMovementState::Moving;
 
 	if (WorldPoints.Num() > 0)
@@ -142,13 +162,19 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		}
 	}
 
-	CurrentSplineDistance += MoveSpeed * DeltaTime;
+	{
+		const float RemainingDist = SplineLength - CurrentSplineDistance;
+		const float SpeedRatio = (DecelerationDistance > 0.0f)
+			? FMath::Min(RemainingDist / DecelerationDistance, 1.0f)
+			: 1.0f;
+		const float TargetSpeed = MoveSpeed * SpeedRatio;
+		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetSpeed, DeltaTime, Acceleration);
+	}
+
+	CurrentSplineDistance += FMath::Min(CurrentSpeed * DeltaTime, SplineLength - CurrentSplineDistance);
 
 	if (CurrentSplineDistance >= SplineLength)
 	{
-		CurrentSplineDistance = SplineLength;
-		const FVector EndPos = PathSpline->GetLocationAtDistanceAlongSpline(SplineLength, ESplineCoordinateSpace::World);
-		SetActorLocation(EndPos + FVector(0, 0, VehicleZOffset));
 		HandleArrival();
 		return;
 	}

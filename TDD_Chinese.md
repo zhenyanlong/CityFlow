@@ -194,12 +194,15 @@ AGridPlaceableActor  (Abstract)          ← 状态管理 + 统一 API
   - 采样 13 个世界空间点，生成平滑弧线。
 
 **当前方案（v0.3，已重构）：**
-- `BuildSplinePath()` 基于 A\* 路径（经 `SmoothPath` 保留转弯点）生成样条点。
-- 路径点均为格子中心。首尾点直接使用格子中心。
+- `BuildSplinePath()` 基于 A\* 路径（经 `SmoothPath` 保留转弯点）生成样条点和对应的切线方向。
+- 返回等长的 `TArray<FVector>` 切线方向数组，由 `SetSplinePath` 用于设置精确的样条切线。
+- 直道格子中心也包含在输出中 —— 作为连续弯道序列之间的分隔符。
 - **转弯点偏移：** 每个转弯点替换为两个偏移点：
-  - EntryOffset = `center - EntryDir * CellSize/2`（向来的方向回退半格）
-  - ExitOffset = `center + ExitDir * CellSize/2`（向下一格方向偏移半格）
-- USplineComponent 在两个偏移点间自动插值产生平滑曲线，消除转角锯齿问题。
+  - EntryOffset = `center - EntryDir * CellSize/2`（向来的方向回退半格），切线 = `EntryDir`
+  - ExitOffset = `center + ExitDir * CellSize/2`（向下一格方向偏移半格），切线 = `ExitDir`
+- **连续弯道处理：** 背靠背的弯道序列中，仅首个弯道添加完整的 entry+exit 点对；后续弯道仅添加 exit 偏移点。防止偏移点在格子边界处重复。
+- 直道格输出 `cell_center`，切线 = 路径前进方向。
+- `SetSplinePath(Points, TangentDirs)` 直接使用切线方向，将样条点切线设为 `TangentDir * CellSize/2`。
 - `ARoadTile::GetSplinePath()` 从未被使用，保留供未来参考。
 
 ---
@@ -430,16 +433,18 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 **基于样条的运动模型：** 车辆维护一个 `CurrentSplineDistance` 浮点数。每帧 `TickMovementSpline(DeltaTime)` 将此距离推进 `MoveSpeed * DeltaTime`，从样条查询世界空间位置（`GetLocationAtDistanceAlongSpline`）和方向（`GetDirectionAtDistanceAlongSpline`），并更新 Actor 的位置和旋转。当 `CurrentSplineDistance >= SplineLength` 时车辆到达。这部分工作正常。
 
 **路径构建（`BuildSplinePath`）— v0.3 转弯偏移方案：**
-对平滑后 A\* 路径（仅含方向变化处的格子中心）做单次遍历：
-- **首格：** 直接添加 `cell_center`。
-- **转弯格：** 将每个转弯点替换为两个偏移点：
-  - `EntryOffset = cell_center - EntryDir * CellSize/2`（向来的方向回退半格）
-  - `ExitOffset = cell_center + ExitDir * CellSize/2`（向下一格方向偏移半格）
-- **末格：** 直接添加 `cell_center`。
+对平滑后 A\* 路径（仅含方向变化处的格子中心）做单次遍历，同步输出样条点和每点的切线方向：
+- **首格：** 添加 `cell_center`，切线朝向下一格。
+- **转弯格：** 将每个弯道替换为偏移点：
+  - 入口偏移：`cell_center - EntryDir * CellSize/2`，切线 = `EntryDir`（指向格子中心）
+  - 出口偏移：`cell_center + ExitDir * CellSize/2`，切线 = `ExitDir`（远离格子中心）
+  - 连续弯道跳过入口偏移点（防止点重复导致样条打结）。
+- **直道格：** 添加 `cell_center`，切线 = 前进方向；作为弯道序列间的分隔符。
+- **末格：** 添加 `cell_center`，切线方向从上一格指向自身。
 
-USplineComponent 在两个偏移点之间平滑插值，在转角处产生自然弧线。直线段直接使用格子中心，无冗余中间点。
+`SetSplinePath(Points, TangentDirs)` 通过 `SetTangentAtSplinePoint` 将每个样条点的入/出切线设为 `TangentDir * CellSize/2`，确保切线方向与格网正交（无斜对角偏斜）且长度足够短以防止过度弯曲。
 
-**设计原理：** 通过将路径在转角处向内拉半格距离，样条自动产生圆滑弧线替代锐角转弯。无需逐块贝塞尔曲线或密集采样——样条组件自身的插值特性自然地完成曲线平滑。
+**设计原理：** 入口偏移点的切线将样条拉向格子中心；出口偏移点的切线将其推出。配合半格偏移的位置，样条紧贴转角曲线。连续弯道通过仅保留出口点共享边界，避免重合点导致样条打结畸变。
 
 **车辆生成：** `UVehicleManager::SpawnVehicle(Origin, Destination)` 选取出入口连接点，通过 `BuildPath()` 运行 A\*，调用 `BuildSplinePath()` 生成世界空间点数组，生成车辆，吸附到第一个样条点，调用 `Vehicle->SetSplinePath(Points)`。
 

@@ -20,6 +20,17 @@
 - Added `GridDeltaToWorldDir()` helper for grid-delta-to-world-direction conversion
 - Updated TDD.md and TDD_Chinese.md sections 2.3 and 2.6 to document v0.3 approach
 
+### Spline Tangent Control & Consecutive Turn Fix
+
+- **Bug: default auto tangents too long** — overrode tangents via `SetTangentAtSplinePoint`, length = `CellSize * 0.5`, direction from neighboring spline points
+- **Bug: consecutive turns cause spline knotting** — preceding turn's exit offset and next turn's entry offset collide at the shared cell boundary. Fix: added `bPreviousWasTurn` flag; in a consecutive turn sequence, only the first turn outputs entry+exit offsets, subsequent turns output exit offset only.
+- **Bug: tangent direction skews diagonal on consecutive turns** — tangents computed from world positions of offset points go diagonal (e.g. `(exit_B, exit_C)` vector is diagonal). Fix: `BuildSplinePath` now outputs a parallel `TArray<FVector> OutTangentDirs` with grid-orthogonal directions per point:
+  - Entry offset: tangent = `EntryDir` (toward cell center)
+  - Exit offset: tangent = `ExitDir` (away from cell center, orthogonal to grid)
+  - Straight cell centers: tangent = path-forward direction (also included to act as turn-sequence separators)
+- `SetSplinePath(Points, TangentDirs)` sets tangents directly from the provided directions
+- Updated TDD.md and TDD_Chinese.md 2.3 and 2.6 with full tangent direction and consecutive turn documentation
+
 ### Code Cleanup
 
 - Cleaned up unused `PopCount` from RoadTile.cpp, removed `#include "Grid/RoadTile.h"` from VehicleManager.cpp

@@ -194,12 +194,15 @@ This approach avoids race conditions between `OnPreviewValidChanged`, `OnEnterPr
   - Sampled into 13 world-space points for a smooth arcing curve.
 
 **Current approach (v0.3, refactored):**
-- `BuildSplinePath()` generates spline points from the A\* path (via `SmoothPath` which retains turning points).
-- All path points are cell centers. First and last points use cell centers directly.
+- `BuildSplinePath()` generates spline points and corresponding tangent directions from the A\* path (via `SmoothPath` which retains turning points).
+- Returns a parallel `TArray<FVector>` of tangent directions (one per point) used by `SetSplinePath` to set exact spline tangents.
+- Straight cell centers are included in the output — they serve as separators between consecutive turn sequences.
 - **Turn offset:** each turning point is replaced by two offset points:
-  - EntryOffset = `center - EntryDir * CellSize/2` (half-cell offset back toward the incoming direction)
-  - ExitOffset = `center + ExitDir * CellSize/2` (half-cell offset toward the next cell direction)
-- USplineComponent naturally interpolates between the two offset points, producing smooth curves at corners and eliminating jagged turns.
+  - EntryOffset = `center - EntryDir * CellSize/2` (half-cell offset back toward the incoming direction), tangent = `EntryDir`
+  - ExitOffset = `center + ExitDir * CellSize/2` (half-cell offset toward the next cell direction), tangent = `ExitDir`
+- **Consecutive turns:** a sequence of back-to-back turns (no straight cells between them) only gets a full entry+exit pair from the *first* turn; subsequent turns only add an exit offset. This prevents offset-point duplication at shared cell boundaries.
+- Straight cells output `cell_center` with tangent = path-forward direction.
+- `SetSplinePath(Points, TangentDirs)` uses the provided tangent directions directly, setting each spline point's tangent to `TangentDir * CellSize/2`.
 - `ARoadTile::GetSplinePath()` has never been used; retained for future reference.
 
 ---
@@ -430,16 +433,18 @@ Higher-scored points execute first within the batch. This steers branches toward
 **Spline-based movement model:** The vehicle maintains a `CurrentSplineDistance` float. Each frame, `TickMovementSpline(DeltaTime)` advances this distance by `MoveSpeed * DeltaTime`, queries the spline for the world-space position (`GetLocationAtDistanceAlongSpline`) and direction (`GetDirectionAtDistanceAlongSpline`), and updates the actor's location and rotation. When `CurrentSplineDistance >= SplineLength`, the vehicle arrives. This part is working correctly.
 
 **Path construction (`BuildSplinePath`) — v0.3 turn-offset approach:**
-Processes the smoothed A\* path (cell centers at direction changes) in a single pass:
-- **First cell:** adds `cell_center` directly.
-- **Turn cells:** replaces each turn point with two offset points:
-  - `EntryOffset = cell_center - EntryDir * CellSize/2` (half-cell back toward incoming)
-  - `ExitOffset = cell_center + ExitDir * CellSize/2` (half-cell toward next)
-- **Last cell:** adds `cell_center` directly.
+Processes the smoothed A\* path (cell centers at direction changes) in a single pass, outputting both spline points and per-point tangent directions:
+- **First cell:** adds `cell_center` with tangent toward next cell.
+- **Turn cells:** replaces each turn with offset points:
+  - Entry offset: `cell_center - EntryDir * CellSize/2`, tangent = `EntryDir` (toward center)
+  - Exit offset: `cell_center + ExitDir * CellSize/2`, tangent = `ExitDir` (away from center)
+  - Consecutive turns skip the entry offset (prevents duplicate points at cell boundaries).
+- **Straight cells:** adds `cell_center` with tangent = forward direction; acts as a turn-sequence separator.
+- **Last cell:** adds `cell_center` with tangent from previous cell direction.
 
-USplineComponent interpolates smoothly between the two offset points, producing a natural curve at corners. Straight segments use cell centers directly with no redundant intermediate points.
+`SetSplinePath(Points, TangentDirs)` sets each spline point's arrive/leave tangents to `TangentDir * CellSize/2` via `SetTangentAtSplinePoint`, ensuring tangents are orthogonal to the grid (no diagonal skew) and short enough to prevent over-bending.
 
-**Design rationale:** By pulling the path slightly inward at corners (half-cell offset), the spline creates a rounded arc instead of a sharp angle. This eliminates the need for per-tile Bézier curves or dense sampling — the spline component's own interpolation handles the curve naturally.
+**Design rationale:** Entry offset tangents pull the spline toward the cell center; exit offset tangents push it away. Combined with half-cell offset positions, the spline curves tightly through corners. Consecutive turns share their boundary via the exit-only approach, avoiding duplicate points that cause spline knotting.
 
 **Vehicle Spawning:** `UVehicleManager::SpawnVehicle(Origin, Destination)` picks doorway connection points, runs A\* via `BuildPath()`, calls `BuildSplinePath()` to produce the world-space point array, spawns the vehicle, snaps to the first spline point, and calls `Vehicle->SetSplinePath(Points)`.
 

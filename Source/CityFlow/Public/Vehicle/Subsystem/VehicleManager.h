@@ -43,8 +43,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	bool BuildPath(const FGridVector& Start, const FGridVector& End, TArray<FGridVector>& OutPath) const;
 
-	UFUNCTION(BlueprintPure, Category = "Vehicle")
-	TArray<FVector> BuildSplinePath(const TArray<FGridVector>& Path) const;
+	TArray<FVector> BuildSplinePath(const TArray<FGridVector>& Path, TArray<FVector>& OutTangentDirs) const;
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	bool IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle) const;

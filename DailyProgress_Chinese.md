@@ -20,6 +20,17 @@
 - 添加 `GridDeltaToWorldDir()` 辅助函数，用于网格增量到世界方向的转换
 - 更新 TDD.md 和 TDD_Chinese.md 第 2.3 和 2.6 节，记录 v0.3 方案
 
+### 样条切线控制 & 连续弯道修复
+
+- **Bug: 默认自动切线过长** — 通过 `SetTangentAtSplinePoint` 覆写切线，长度 = `CellSize * 0.5`
+- **Bug: 连续弯道导致样条打结** — 前一个弯道的 exit offset 和后一个弯道的 entry offset 重合在格子边界。修复：添加 `bPreviousWasTurn` 标记；连续弯道序列中仅首个弯道输出 entry+exit，后续弯道仅输出 exit offset
+- **Bug: 连续弯道切线方向斜对角偏斜** — 从偏移点世界位置计算的切线方向为斜对角线（如 `exit_B→exit_C` 向量）。修复：`BuildSplinePath` 现在同步输出 `TArray<FVector> OutTangentDirs`，每点使用格网正交方向：
+  - 入口偏移：切线 = `EntryDir`（指向格子中心）
+  - 出口偏移：切线 = `ExitDir`（远离格子中心，与格网正交）
+  - 直道格子中心：切线 = 路径前进方向（同时作为弯道序列分隔符）
+- `SetSplinePath(Points, TangentDirs)` 直接使用提供的切线方向设置样条切线
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.3 和 2.6 节，完整记录切线方向与连续弯道文档
+
 ### 代码清理
 
 - 清理 RoadTile.cpp 中未使用的 `PopCount`，移除 VehicleManager.cpp 中 `#include "Grid/RoadTile.h"`
