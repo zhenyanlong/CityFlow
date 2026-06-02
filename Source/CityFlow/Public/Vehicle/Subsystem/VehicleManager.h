@@ -84,10 +84,6 @@ private:
 	void CollectOriginDestinations(TArray<class ABuilding*>& OutOrigins, TArray<class ABuilding*>& OutDestinations) const;
 
 	TArray<FGridVector> FindRoadPath(const FGridVector& Start, const FGridVector& End) const;
-	bool CanPathBetween(const FGridVector& A, const FGridVector& B, uint8 MaskA) const;
-
-	TArray<FGridVector> SmoothPath(const TArray<FGridVector>& RawPath) const;
-
 	void UpdateCongestion();
 	void UpdateIntersectionLocks();
 

@@ -244,16 +244,17 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 		return nullptr;
 	}
 
-	TArray<FGridVector> OriginDoorways = Origin->GetDoorwayWorldPositions();
-
 	FGridVector StartPos;
+	FGridVector StartBuildingCell;
 	bool bFoundStart = false;
-	for (const FGridVector& Dw : OriginDoorways)
+	for (const FBuildingDoorway& Dw : Origin->Doorways)
 	{
+		const FGridVector ConnPt = Origin->GetDoorwayConnectionPoint(Dw);
 		UGridManager* GM = GetGridManager();
-		if (GM && GM->GetCellType(Dw) == ECellType::Road)
+		if (GM && GM->GetCellType(ConnPt) == ECellType::Road)
 		{
-			StartPos = Dw;
+			StartPos = ConnPt;
+			StartBuildingCell = Origin->GetGridPosition() + Origin->TransformLocalPosition(Dw.RelativePosition);
 			bFoundStart = true;
 			break;
 		}
@@ -265,16 +266,17 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 		return nullptr;
 	}
 
-	TArray<FGridVector> DestDoorways = Destination->GetDoorwayWorldPositions();
-
 	FGridVector EndPos;
+	FGridVector EndBuildingCell;
 	bool bFoundEnd = false;
-	for (const FGridVector& Dw : DestDoorways)
+	for (const FBuildingDoorway& Dw : Destination->Doorways)
 	{
+		const FGridVector ConnPt = Destination->GetDoorwayConnectionPoint(Dw);
 		UGridManager* GM = GetGridManager();
-		if (GM && GM->GetCellType(Dw) == ECellType::Road)
+		if (GM && GM->GetCellType(ConnPt) == ECellType::Road)
 		{
-			EndPos = Dw;
+			EndPos = ConnPt;
+			EndBuildingCell = Destination->GetGridPosition() + Destination->TransformLocalPosition(Dw.RelativePosition);
 			bFoundEnd = true;
 			break;
 		}
@@ -293,6 +295,9 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 			StartPos.X, StartPos.Y, EndPos.X, EndPos.Y);
 		return nullptr;
 	}
+
+	Path.Insert(StartBuildingCell, 0);
+	Path.Add(EndBuildingCell);
 
 	TArray<FVector> SplineTangentDirs;
 	TArray<FVector> SplinePoints = BuildSplinePath(Path, SplineTangentDirs);
@@ -346,13 +351,7 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 
 bool UVehicleManager::BuildPath(const FGridVector& Start, const FGridVector& End, TArray<FGridVector>& OutPath) const
 {
-	TArray<FGridVector> RawPath = FindRoadPath(Start, End);
-	if (RawPath.Num() == 0)
-	{
-		return false;
-	}
-
-	OutPath = SmoothPath(RawPath);
+	OutPath = FindRoadPath(Start, End);
 	return OutPath.Num() > 0;
 }
 
@@ -554,63 +553,6 @@ TArray<FGridVector> UVehicleManager::FindRoadPath(const FGridVector& Start, cons
 	}
 
 	return {};
-}
-
-TArray<FGridVector> UVehicleManager::SmoothPath(const TArray<FGridVector>& RawPath) const
-{
-	if (RawPath.Num() <= 2)
-	{
-		return RawPath;
-	}
-
-	TArray<FGridVector> Smoothed;
-	Smoothed.Add(RawPath[0]);
-
-	UGridManager* GM = GetGridManager();
-	if (!GM)
-	{
-		return RawPath;
-	}
-
-	for (int32 i = 1; i < RawPath.Num() - 1; ++i)
-	{
-		const FGridVector& Prev = RawPath[i - 1];
-		const FGridVector& Curr = RawPath[i];
-		const FGridVector& Next = RawPath[i + 1];
-
-		const bool bDirectionChanged =
-			(Curr.X - Prev.X != Next.X - Curr.X) ||
-			(Curr.Y - Prev.Y != Next.Y - Curr.Y);
-
-		if (bDirectionChanged)
-		{
-			Smoothed.Add(Curr);
-		}
-	}
-
-	Smoothed.Add(RawPath.Last());
-	return Smoothed;
-}
-
-bool UVehicleManager::CanPathBetween(const FGridVector& A, const FGridVector& B, uint8 MaskA) const
-{
-	if (B.X == A.X && B.Y == A.Y - 1)
-	{
-		return (MaskA & static_cast<uint8>(EGridDirection::Up)) != 0;
-	}
-	if (B.X == A.X && B.Y == A.Y + 1)
-	{
-		return (MaskA & static_cast<uint8>(EGridDirection::Down)) != 0;
-	}
-	if (B.X == A.X - 1 && B.Y == A.Y)
-	{
-		return (MaskA & static_cast<uint8>(EGridDirection::Left)) != 0;
-	}
-	if (B.X == A.X + 1 && B.Y == A.Y)
-	{
-		return (MaskA & static_cast<uint8>(EGridDirection::Right)) != 0;
-	}
-	return false;
 }
 
 void UVehicleManager::UpdateCongestion()
