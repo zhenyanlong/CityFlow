@@ -36,6 +36,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Road")
 	void UpdateAppearance();
 
+	UFUNCTION(BlueprintCallable, Category = "Road|Spline")
+	bool GetSplinePath(EGridDirection EntryDir, EGridDirection ExitDir, TArray<FVector>& OutWorldPoints) const;
+
 	virtual void UpdatePreviewAppearance(const FGridVector& GridPos) override;
 
 	virtual void OnEnterPlaced_Implementation() override;

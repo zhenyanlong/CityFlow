@@ -2,6 +2,20 @@
 #include "Grid/GridManager.h"
 #include "Components/StaticMeshComponent.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogRoadTile, Log, All);
+
+static FVector GetDirectionLocalVector(EGridDirection Dir)
+{
+	switch (Dir)
+	{
+	case EGridDirection::Up:    return FVector(0.0f, -1.0f, 0.0f);
+	case EGridDirection::Down:  return FVector(0.0f, 1.0f, 0.0f);
+	case EGridDirection::Left:  return FVector(-1.0f, 0.0f, 0.0f);
+	case EGridDirection::Right: return FVector(1.0f, 0.0f, 0.0f);
+	default:                    return FVector::ZeroVector;
+	}
+}
+
 ARoadTile::ARoadTile()
 {
 	PlaceableType = EPlaceableType::Road;
@@ -234,4 +248,22 @@ void ARoadTile::RestoreMeshMaterials(UStaticMesh* Mesh)
 			MeshComponent->SetMaterial(i, (*Cached)[i]);
 		}
 	}
+}
+
+bool ARoadTile::GetSplinePath(EGridDirection EntryDir, EGridDirection ExitDir, TArray<FVector>& OutWorldPoints) const
+{
+	OutWorldPoints.Empty();
+
+	UGridManager* GM = GetGridManager();
+	if (!GM || !GM->IsGridInitialized())
+	{
+		return false;
+	}
+
+	const float HalfCell = GM->GetCellSize() / 2.0f;
+	const FTransform& ActorXf = GetActorTransform();
+
+	OutWorldPoints.Add(ActorXf.TransformPosition(GetDirectionLocalVector(EntryDir) * HalfCell));
+	OutWorldPoints.Add(ActorXf.TransformPosition(GetDirectionLocalVector(ExitDir) * HalfCell));
+	return true;
 }

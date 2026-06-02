@@ -1,3 +1,34 @@
+## 2026-06-01
+
+### 车辆样条运动（v0.2）— 今日较早
+
+- 将基于航点的 `FVehicleMovementPlan` 替换为 `AVehicleActor` 上的 `USplineComponent`（`PathSpline`），存储从起点到终点的完整世界空间路径
+- `TickMovementSpline()` 每帧沿样条推进 `CurrentSplineDistance`，查询世界位置/方向，更新 Actor 位置/旋转——运动模型工作正常
+- 简化交叉口锁系统：车辆提前 `CellSize * 0.5` 前瞻检查，在交叉口格获取锁，离开后释放；`IsIntersectionLockedByOther()` 和 `AcquireIntersectionLock()` 作为公开 API
+- `ARoadTile::GetSplinePath()` 存在但**未被 VehicleManager 使用**——经过多次调试迭代后，逐块样条方案已被放弃
+
+### 路径算法重构（v0.3）：转弯偏移样条构建
+
+- 重写 VehicleManager 中的 `BuildSplinePath()`：将边中点方案替换为转弯偏移策略
+- A\* 路径（经 `SmoothPath`）提供方向变化处的格子中心
+- 每个转弯点被替换为两个半格偏移点：
+  - `EntryOffset = center - EntryDir * CellSize/2`（向来时方向回退半格）
+  - `ExitOffset = center + ExitDir * CellSize/2`（向下一格方向偏移半格）
+- USplineComponent 在两个偏移点之间自然插值，在转角处产生平滑弧线——消除转角锯齿问题
+- **修正：** 将 EntryOffset 符号从 `+ EntryDir` 改为 `- EntryDir`——`EntryDir = Curr - Prev` 指向转弯格本身，入口偏移应回退到来的方向
+- 移除废弃的 `GetEdgeMidpoint()` 和 `GetDirectionFromDelta()` 静态辅助函数
+- 添加 `GridDeltaToWorldDir()` 辅助函数，用于网格增量到世界方向的转换
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.3 和 2.6 节，记录 v0.3 方案
+
+### 代码清理
+
+- 清理 RoadTile.cpp 中未使用的 `PopCount`，移除 VehicleManager.cpp 中 `#include "Grid/RoadTile.h"`
+
+### Bug 修复
+
+- 修复 UE 5.6 上 DeveloperSettings `GetSectionText()` 编译错误（重命名为 `GetSectionDescription()`，添加 `#if WITH_EDITOR` 守卫）
+- 修复 `BuildSplinePath` 首/末格仅返回 1 个点的问题（恢复 `GetOpposite` 方向补全，后续改为显式首/中/末格逻辑）
+
 ## 2026-05-31
 
 ### 车辆生成系统（v0.1，通过初步调试）

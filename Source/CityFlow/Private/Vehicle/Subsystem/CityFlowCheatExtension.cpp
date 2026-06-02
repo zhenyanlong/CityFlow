@@ -219,8 +219,10 @@ void UCityFlowCheatExtension::CF_ShowVehicleStats()
 		if (V)
 		{
 			const FString StateStr = StaticEnum<EVehicleMovementState>()->GetNameStringByValue(static_cast<int64>(V->GetMovementState()));
-			UE_LOG(LogCityFlowCheat, Log, TEXT("  [%d] %s | State: %s | WP: %d/%d | Speed: %.0f"),
-				i, *V->GetName(), *StateStr, V->GetCurrentWaypointIndex(), V->GetMovementPlan().Waypoints.Num(), V->GetMoveSpeed());
+			const USplineComponent* Spline = V->GetPathSpline();
+			const int32 SplinePts = Spline ? Spline->GetNumberOfSplinePoints() : 0;
+			UE_LOG(LogCityFlowCheat, Log, TEXT("  [%d] %s | State: %s | SplinePts: %d | Speed: %.0f"),
+				i, *V->GetName(), *StateStr, SplinePts, V->GetMoveSpeed());
 		}
 	}
 }

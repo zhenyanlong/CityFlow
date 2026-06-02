@@ -1,3 +1,34 @@
+## 2026-06-01
+
+### Vehicle Spline-Based Movement (v0.2) — earlier today
+
+- Replaced waypoint-based `FVehicleMovementPlan` with `USplineComponent` on `AVehicleActor` (`PathSpline`), storing the complete world-space path from origin to destination
+- `TickMovementSpline()` advances `CurrentSplineDistance` along the spline each frame, queries world position/direction, updates actor location/rotation — movement model is working
+- Simplified intersection lock system: vehicles check ahead by `CellSize * 0.5`, acquire lock when on intersection cell, release when departed; `IsIntersectionLockedByOther()` and `AcquireIntersectionLock()` as public API
+- `ARoadTile::GetSplinePath()` exists but is **not used** by VehicleManager — per-tile spline approach discarded after multiple debugging iterations
+
+### Path Algorithm Refactoring (v0.3): Turn-Offset Spline Construction
+
+- Rewrote `BuildSplinePath()` in VehicleManager: replaced the edge-midpoint approach with a turn-offset strategy
+- A* path (via `SmoothPath`) provides cell centers at direction-change points
+- At each turning point, the single cell center is replaced by two half-cell offset points:
+  - `EntryOffset = center - EntryDir * CellSize/2` (offset back toward incoming cell)
+  - `ExitOffset = center + ExitDir * CellSize/2` (offset toward next cell)
+- USplineComponent naturally interpolates between the two offset points, producing smooth rounded curves at corners — eliminating the jagged-turn problem
+- **Fix:** Corrected EntryOffset sign from `+ EntryDir` to `- EntryDir` — `EntryDir = Curr - Prev` points toward the turn cell, so the incoming offset should go back toward the previous cell
+- Removed obsolete `GetEdgeMidpoint()` and `GetDirectionFromDelta()` static helpers
+- Added `GridDeltaToWorldDir()` helper for grid-delta-to-world-direction conversion
+- Updated TDD.md and TDD_Chinese.md sections 2.3 and 2.6 to document v0.3 approach
+
+### Code Cleanup
+
+- Cleaned up unused `PopCount` from RoadTile.cpp, removed `#include "Grid/RoadTile.h"` from VehicleManager.cpp
+
+### Bug Fixes
+
+- Fixed DeveloperSettings `GetSectionText()` compilation error on UE 5.6 (renamed to `GetSectionDescription()` with `#if WITH_EDITOR` guard)
+- Fixed `BuildSplinePath` returning only 1 point for first/last cells (restored `GetOpposite` direction completion, later replaced with explicit first/middle/last logic)
+
 ## 2026-05-31
 
 ### Vehicle Spawn System (v0.1, preliminary debug passed)

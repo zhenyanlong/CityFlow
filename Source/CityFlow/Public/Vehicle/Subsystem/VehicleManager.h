@@ -44,7 +44,13 @@ public:
 	bool BuildPath(const FGridVector& Start, const FGridVector& End, TArray<FGridVector>& OutPath) const;
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
-	FVehicleMovementPlan BuildMovementPlan(const TArray<FGridVector>& Path) const;
+	TArray<FVector> BuildSplinePath(const TArray<FGridVector>& Path) const;
+
+	UFUNCTION(BlueprintPure, Category = "Vehicle")
+	bool IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Vehicle")
+	void AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle);
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	const TArray<AVehicleActor*>& GetActiveVehicles() const { return ActiveVehicles; }
@@ -85,8 +91,6 @@ private:
 
 	void UpdateCongestion();
 	void UpdateIntersectionLocks();
-
-	FGridVector FindIntersectionEntryPoint(const FGridVector& IntersectionPos, const AVehicleActor* Vehicle) const;
 
 	bool IsIntersection(const FGridVector& Pos) const;
 	bool IsOccupiedByVehicle(const FGridVector& GridPos) const;

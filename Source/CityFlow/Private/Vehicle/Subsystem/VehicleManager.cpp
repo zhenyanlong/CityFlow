@@ -294,10 +294,10 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 		return nullptr;
 	}
 
-	FVehicleMovementPlan Plan = BuildMovementPlan(Path);
-	if (!Plan.IsValid())
+	TArray<FVector> SplinePoints = BuildSplinePath(Path);
+	if (SplinePoints.Num() == 0)
 	{
-		UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: movement plan is invalid"));
+		UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: spline path is empty"));
 		return nullptr;
 	}
 
@@ -332,13 +332,13 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 
 	Vehicle->Origin = Origin;
 	Vehicle->SetDestination(Destination);
-	Vehicle->SetMovementPlan(Plan);
+	Vehicle->SetSplinePath(SplinePoints);
 
 	ActiveVehicles.Add(Vehicle);
 	OnVehicleSpawned.Broadcast(Vehicle);
 
-	UE_LOG(LogVehicleManager, Log, TEXT("Spawned vehicle %s [%s]: (%d,%d) → (%d,%d), %d waypoints"),
-		*Vehicle->GetName(), *VehicleClass->GetName(), StartPos.X, StartPos.Y, EndPos.X, EndPos.Y, Plan.Waypoints.Num());
+	UE_LOG(LogVehicleManager, Log, TEXT("Spawned vehicle %s [%s]: (%d,%d) → (%d,%d), %d spline points"),
+		*Vehicle->GetName(), *VehicleClass->GetName(), StartPos.X, StartPos.Y, EndPos.X, EndPos.Y, SplinePoints.Num());
 
 	return Vehicle;
 }
@@ -355,46 +355,64 @@ bool UVehicleManager::BuildPath(const FGridVector& Start, const FGridVector& End
 	return OutPath.Num() > 0;
 }
 
-FVehicleMovementPlan UVehicleManager::BuildMovementPlan(const TArray<FGridVector>& Path) const
+static FVector GridDeltaToWorldDir(const FGridVector& Delta)
 {
-	FVehicleMovementPlan Plan;
+	return FVector(static_cast<float>(Delta.X), static_cast<float>(Delta.Y), 0.0f).GetSafeNormal();
+}
+
+TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path) const
+{
+	TArray<FVector> AllPoints;
 	if (Path.Num() == 0)
 	{
-		return Plan;
+		return AllPoints;
 	}
 
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
-		return Plan;
+		return AllPoints;
 	}
 
-	for (int32 i = 0; i < Path.Num(); ++i)
+	const float HalfCell = GM->GetCellSize() * 0.5f;
+
+	if (Path.Num() == 1)
 	{
-		const FGridVector& GridPos = Path[i];
-		const FVector WorldPos = GM->GridToWorld(GridPos);
-
-		FVehicleWaypoint Waypoint(WorldPos);
-
-		if (IsIntersection(GridPos))
-		{
-			Waypoint.bIsIntersectionEntry = true;
-		}
-
-		if (i > 0 && IsIntersection(Path[i - 1]))
-		{
-			Waypoint.bIsIntersectionExit = true;
-		}
-
-		Plan.Waypoints.Add(Waypoint);
+		AllPoints.Add(GM->GridToWorld(Path[0]));
+		return AllPoints;
 	}
 
-	if (Plan.Waypoints.Num() > 1)
+	AllPoints.Add(GM->GridToWorld(Path[0]));
+
+	for (int32 i = 1; i < Path.Num() - 1; ++i)
 	{
-		Plan.Waypoints.Last().bIsIntersectionEntry = false;
+		const FGridVector& Prev = Path[i - 1];
+		const FGridVector& Curr = Path[i];
+		const FGridVector& Next = Path[i + 1];
+
+		const FGridVector EntryDelta = Curr - Prev;
+		const FGridVector ExitDelta = Next - Curr;
+
+		const bool bIsTurn = (EntryDelta.X != ExitDelta.X) || (EntryDelta.Y != ExitDelta.Y);
+
+		if (bIsTurn)
+		{
+			const FVector Center = GM->GridToWorld(Curr);
+			const FVector EntryDir = GridDeltaToWorldDir(EntryDelta);
+			const FVector ExitDir = GridDeltaToWorldDir(ExitDelta);
+
+			AllPoints.Add(Center - EntryDir * HalfCell);
+			AllPoints.Add(Center + ExitDir * HalfCell);
+		}
+		else
+		{
+			AllPoints.Add(GM->GridToWorld(Curr));
+		}
 	}
 
-	return Plan;
+	AllPoints.Add(GM->GridToWorld(Path.Last()));
+
+	return AllPoints;
 }
 
 TArray<FGridVector> UVehicleManager::FindRoadPath(const FGridVector& Start, const FGridVector& End) const
@@ -621,66 +639,52 @@ void UVehicleManager::UpdateCongestion()
 
 void UVehicleManager::UpdateIntersectionLocks()
 {
+	UGridManager* GM = GetGridManager();
+	if (!GM)
+	{
+		return;
+	}
+
 	for (auto It = IntersectionLocks.CreateIterator(); It; ++It)
 	{
 		AVehicleActor* Vehicle = It.Value();
-		if (!Vehicle || Vehicle->GetMovementState() == EVehicleMovementState::Arrived)
+		if (!Vehicle || !ActiveVehicles.Contains(Vehicle) ||
+			Vehicle->GetMovementState() == EVehicleMovementState::Arrived)
 		{
 			It.RemoveCurrent();
 			continue;
 		}
 
-		if (Vehicle->GetMovementState() != EVehicleMovementState::WaitingIntersection)
+		const FGridVector VehicleGrid = GM->WorldToGrid(Vehicle->GetActorLocation());
+		if (VehicleGrid != It.Key())
 		{
-			const UGridManager* GM = GetGridManager();
-			if (GM)
-			{
-				const FGridVector VehicleGridPos = GM->WorldToGrid(Vehicle->GetActorLocation());
-				if (!(It.Key() == VehicleGridPos))
-				{
-					It.RemoveCurrent();
-				}
-			}
-		}
-	}
-
-	for (AVehicleActor* Vehicle : ActiveVehicles)
-	{
-		if (!Vehicle)
-		{
-			continue;
-		}
-
-		if (Vehicle->GetMovementState() == EVehicleMovementState::WaitingIntersection)
-		{
-			const UGridManager* GM = GetGridManager();
-			if (!GM)
-			{
-				continue;
-			}
-
-			const FVehicleMovementPlan& Plan = Vehicle->GetMovementPlan();
-			const FVehicleWaypoint* CurrentWp = Plan.GetCurrentWaypoint();
-			if (!CurrentWp || !CurrentWp->bIsIntersectionEntry)
-			{
-				continue;
-			}
-
-			const FGridVector IntersectionPos = GM->WorldToGrid(CurrentWp->Position);
-
-			AVehicleActor** OccupyingVehicle = IntersectionLocks.Find(IntersectionPos);
-			if (!OccupyingVehicle || !(*OccupyingVehicle) || (*OccupyingVehicle) == Vehicle)
-			{
-				IntersectionLocks.Add(IntersectionPos, Vehicle);
-				Vehicle->SetWaitingForIntersection(false);
-			}
+			It.RemoveCurrent();
 		}
 	}
 }
 
-FGridVector UVehicleManager::FindIntersectionEntryPoint(const FGridVector& IntersectionPos, const AVehicleActor* Vehicle) const
+bool UVehicleManager::IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle) const
 {
-	return IntersectionPos;
+	const AVehicleActor* const* Occupant = IntersectionLocks.Find(Pos);
+	if (!Occupant || !(*Occupant))
+	{
+		return false;
+	}
+	return *Occupant != AskingVehicle;
+}
+
+void UVehicleManager::AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle)
+{
+	if (!Vehicle)
+	{
+		return;
+	}
+
+	AVehicleActor** Existing = IntersectionLocks.Find(Pos);
+	if (!Existing || !(*Existing) || *Existing == Vehicle)
+	{
+		IntersectionLocks.Add(Pos, Vehicle);
+	}
 }
 
 bool UVehicleManager::IsIntersection(const FGridVector& Pos) const
@@ -884,21 +888,33 @@ void UVehicleManager::DebugDrawPaths() const
 			continue;
 		}
 
-		const FVehicleMovementPlan& Plan = Vehicle->GetMovementPlan();
+		const USplineComponent* Spline = Vehicle->GetPathSpline();
+		if (!Spline || Spline->GetNumberOfSplinePoints() < 2)
+		{
+			continue;
+		}
+
 		const FColor PathColor = FColor::MakeFromColorTemperature(
 			FMath::Frac(static_cast<float>(Vehicle->GetUniqueID()) * 0.1f) * 1000.0f + 2000.0f);
 
-		for (int32 i = 0; i < Plan.Waypoints.Num() - 1; ++i)
+		const float TotalLength = Spline->GetSplineLength();
+		const int32 NumSegments = FMath::CeilToInt32(TotalLength / 60.0f);
+		FVector PrevPos = Spline->GetLocationAtDistanceAlongSpline(0.0f, ESplineCoordinateSpace::World);
+
+		for (int32 i = 1; i <= NumSegments; ++i)
 		{
-			DrawDebugLine(World, Plan.Waypoints[i].Position + FVector(0, 0, 100),
-				Plan.Waypoints[i + 1].Position + FVector(0, 0, 100),
+			const float Dist = (static_cast<float>(i) / NumSegments) * TotalLength;
+			const FVector CurrPos = Spline->GetLocationAtDistanceAlongSpline(Dist, ESplineCoordinateSpace::World);
+			DrawDebugLine(World, PrevPos + FVector(0, 0, 100), CurrPos + FVector(0, 0, 100),
 				PathColor, false, 0.1f, 0, 2.0f);
+			PrevPos = CurrPos;
 		}
 
-		for (int32 i = 0; i < Plan.Waypoints.Num(); ++i)
+		for (int32 i = 0; i <= NumSegments; ++i)
 		{
-			DrawDebugPoint(World, Plan.Waypoints[i].Position + FVector(0, 0, 80),
-				15.0f, FColor::Yellow, false, 0.1f);
+			const float Dist = (static_cast<float>(i) / NumSegments) * TotalLength;
+			const FVector Pt = Spline->GetLocationAtDistanceAlongSpline(Dist, ESplineCoordinateSpace::World);
+			DrawDebugPoint(World, Pt + FVector(0, 0, 80), 12.0f, FColor::Yellow, false, 0.1f);
 		}
 
 		DrawDebugSphere(World, Vehicle->GetActorLocation() + FVector(0, 0, 120), 25.0f, 8,

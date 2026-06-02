@@ -179,20 +179,28 @@ This allows the player to see exactly which road mesh configuration will appear 
 
 This approach avoids race conditions between `OnPreviewValidChanged`, `OnEnterPreview`, and `UpdatePreviewAppearance` that would cause materials to randomly flip between preview/invalid/original states.
 
-#### Internal Spline Management (Hybrid Strategy)
+#### Internal Spline Management (Hybrid Strategy) — ⚠️ Needs Refactoring
 
-To avoid the performance cost of pre-generating large numbers of spline components, an **on-demand** approach is used:
+> **Current status:** `ARoadTile::GetSplinePath()` exists but is **not used by VehicleManager**. The spline path generation has been iterated on multiple times and has known issues — see 2.6 for the current (simplified) path construction approach. This section documents the intended design.
 
-- **Straight / Corner segments** — Use a single, bidirectional `USplineComponent`. Vehicles choose the parameterised start and end points based on their travel direction.
-- **Complex intersections (T-Junction / Cross)** — No spline component is pre-placed. Instead, a `TMap<FPathKey, TArray<FVector>>` cache is stored. When a vehicle requests a turning path (e.g., enter from **Down**, exit from **Left**):
-  - If the cache misses, Bézier curve points are calculated on the fly:
-    - Straight-through → 2 points
-    - Turning → 3 points
-  - Result is cached and the point array is returned.
+`ARoadTile::GetSplinePath(EntryDir, ExitDir)` computes a smooth path through the tile from the entry edge midpoint to the exit edge midpoint. No spline component is stored on the road tile — all computation is on-the-fly with no persistent state.
 
-Vehicles move by interpolating along the point array (or a temporary lightweight spline is created on demand) and it is destroyed after exiting.
+**Path computation (intended design):**
+- **Straight-through (opposite directions):** Returns 2 world-space points: `[entry_edge_midpoint, exit_edge_midpoint]`. The vehicle's own spline interpolates linearly between them.
+- **Turning (perpendicular or any non-opposite directions):** Computes a quadratic Bézier curve in local space:
+  - P0 = entry edge midpoint
+  - P1 = P0 + P2 (outer corner of the two edges, NOT the cell center)
+  - P2 = exit edge midpoint
+  - Sampled into 13 world-space points for a smooth arcing curve.
 
-> This strategy reduces the total number of spline components from **O(tile count × direction combinations)** to **O(vehicle count)**, greatly lowering memory and spawning overhead.
+**Current approach (v0.3, refactored):**
+- `BuildSplinePath()` generates spline points from the A\* path (via `SmoothPath` which retains turning points).
+- All path points are cell centers. First and last points use cell centers directly.
+- **Turn offset:** each turning point is replaced by two offset points:
+  - EntryOffset = `center - EntryDir * CellSize/2` (half-cell offset back toward the incoming direction)
+  - ExitOffset = `center + ExitDir * CellSize/2` (half-cell offset toward the next cell direction)
+- USplineComponent naturally interpolates between the two offset points, producing smooth curves at corners and eliminating jagged turns.
+- `ARoadTile::GetSplinePath()` has never been used; retained for future reference.
 
 ---
 
@@ -413,15 +421,27 @@ Higher-scored points execute first within the batch. This steers branches toward
 
 ---
 
-### 2.6 Vehicle AI: A\* Pathfinding & Waypoint-Based Movement
+### 2.6 Vehicle AI: A\* Pathfinding & Spline-Based Movement
 
-#### Implementation Status: ✅ Implemented
+#### Implementation Status: ✅ Implemented — v0.3 turn-offset approach
 
-**VehicleActor** (`AVehicleActor`) is a Blueprintable `AActor` with a `UStaticMeshComponent` root. It can be subclassed in Blueprint for different vehicle types (cars, trucks, etc.).
+**VehicleActor** (`AVehicleActor`) is a Blueprintable `AActor` with a `UStaticMeshComponent` vehicle body and a `USplineComponent` (`PathSpline`) that stores the complete world-space path from origin to destination. The `PathSpline` uses absolute transform (not attached to the moving root), ensuring world-space queries remain correct as the vehicle moves.
 
-**Core movement model:** Vehicles follow a pre-computed `FVehicleMovementPlan` — a sequence of world-space `FVehicleWaypoint` structs derived from the A\* grid path. Each frame, the vehicle interpolates toward its current waypoint at `MoveSpeed`. When within `WaypointReachedThreshold`, it advances to the next waypoint. Arrival at the final waypoint broadcasts `OnVehicleArrived`.
+**Spline-based movement model:** The vehicle maintains a `CurrentSplineDistance` float. Each frame, `TickMovementSpline(DeltaTime)` advances this distance by `MoveSpeed * DeltaTime`, queries the spline for the world-space position (`GetLocationAtDistanceAlongSpline`) and direction (`GetDirectionAtDistanceAlongSpline`), and updates the actor's location and rotation. When `CurrentSplineDistance >= SplineLength`, the vehicle arrives. This part is working correctly.
 
-**Vehicle Spawning:** `UVehicleManager::SpawnVehicle(Origin, Destination)` picks doorway connection points from both buildings, runs A\* through `BuildPath()`, converts the result to a movement plan, and spawns a vehicle using `PickRandomVehicleClass()` which selects from the spawn table by weighted random. The spawned `AVehicleActor` subclass already has its own mesh, speed, and other properties configured directly in its Blueprint.
+**Path construction (`BuildSplinePath`) — v0.3 turn-offset approach:**
+Processes the smoothed A\* path (cell centers at direction changes) in a single pass:
+- **First cell:** adds `cell_center` directly.
+- **Turn cells:** replaces each turn point with two offset points:
+  - `EntryOffset = cell_center - EntryDir * CellSize/2` (half-cell back toward incoming)
+  - `ExitOffset = cell_center + ExitDir * CellSize/2` (half-cell toward next)
+- **Last cell:** adds `cell_center` directly.
+
+USplineComponent interpolates smoothly between the two offset points, producing a natural curve at corners. Straight segments use cell centers directly with no redundant intermediate points.
+
+**Design rationale:** By pulling the path slightly inward at corners (half-cell offset), the spline creates a rounded arc instead of a sharp angle. This eliminates the need for per-tile Bézier curves or dense sampling — the spline component's own interpolation handles the curve naturally.
+
+**Vehicle Spawning:** `UVehicleManager::SpawnVehicle(Origin, Destination)` picks doorway connection points, runs A\* via `BuildPath()`, calls `BuildSplinePath()` to produce the world-space point array, spawns the vehicle, snaps to the first spline point, and calls `Vehicle->SetSplinePath(Points)`.
 
 **A\* Pathfinding:**
 - Nodes = road cells (`ECellType::Road`); edges = `ConnectedMask` direction bits.
@@ -432,8 +452,10 @@ Higher-scored points execute first within the batch. This steers branches toward
 **Intersection Occupation:**
 - An intersection is any road cell with ≥ 3 connected directions.
 - `TMap<FGridVector, AVehicleActor*> IntersectionLocks` serves as a simple mutex.
-- Vehicles approaching an intersection waypoint wait if it's occupied.
-- After `IntersectionWaitTime` timeout, they retry.
+- **Pre-move check:** Each tick, before advancing along the spline, the vehicle looks ahead by `CellSize * 0.5` and converts to grid position. If that cell is a locked intersection owned by another vehicle, the vehicle enters `WaitingIntersection` state and retries after `IntersectionWaitTime`.
+- **Lock acquisition:** After moving, if the vehicle's current grid cell is an intersection, it calls `VehicleManager::AcquireIntersectionLock()` to claim it.
+- **Lock release:** `UpdateIntersectionLocks()` releases locks for vehicles that have left the intersection cell.
+- This grid-position-based approach eliminates the need for explicit "intersection entry/exit" waypoints.
 
 **Congestion Detection:**
 - Each tick, `UpdateCongestion()` maps world positions to grid cells.
@@ -462,9 +484,9 @@ Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `Ve
 | State | Description |
 |---|---|
 | `Idle` | Initial or error state |
-| `Moving` | Following waypoint plan |
+| `Moving` | Following spline path |
 | `WaitingCongestion` | Stopped due to lead vehicle proximity |
-| `WaitingIntersection` | Waiting for intersection lock |
+| `WaitingIntersection` | Waiting for intersection lock; auto-retries after timeout |
 | `Arrived` | Reached destination; broadcasts event |
 
 ---

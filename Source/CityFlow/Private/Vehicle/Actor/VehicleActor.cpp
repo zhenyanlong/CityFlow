@@ -1,10 +1,10 @@
 #include "Vehicle/Actor/VehicleActor.h"
-#include "Grid/Building.h"
+#include "Vehicle/Subsystem/VehicleManager.h"
+#include "Grid/GridManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
-#include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVehicleActor, Log, All);
 
@@ -20,6 +20,12 @@ AVehicleActor::AVehicleActor()
 	VehicleMesh->SetupAttachment(VehicleRoot);
 	VehicleMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	PathSpline = CreateDefaultSubobject<USplineComponent>(TEXT("PathSpline"));
+	PathSpline->SetAbsolute(true, true, true);
+	PathSpline->SetWorldLocation(FVector::ZeroVector);
+	PathSpline->SetVisibility(false);
+	PathSpline->SetHiddenInGame(true);
+
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> FallbackCube(TEXT("/Engine/BasicShapes/Cube"));
 	if (FallbackCube.Succeeded())
 	{
@@ -33,23 +39,22 @@ void AVehicleActor::BeginPlay()
 	Super::BeginPlay();
 }
 
-void AVehicleActor::SetMovementPlan(const FVehicleMovementPlan& Plan)
+void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints)
 {
-	MovementPlan = Plan;
-	MovementPlan.Reset();
+	PathSpline->ClearSplinePoints();
+	PathSpline->SetWorldLocation(FVector::ZeroVector);
 
-	if (MovementPlan.IsValid())
+	for (const FVector& Pt : WorldPoints)
 	{
-		const FVehicleWaypoint* FirstWp = MovementPlan.GetCurrentWaypoint();
-		if (FirstWp)
-		{
-			SetActorLocation(FirstWp->Position + FVector(0, 0, VehicleZOffset));
-		}
-		MovementState = EVehicleMovementState::Moving;
+		PathSpline->AddSplineWorldPoint(Pt);
 	}
-	else
+
+	CurrentSplineDistance = 0.0f;
+	MovementState = EVehicleMovementState::Moving;
+
+	if (WorldPoints.Num() > 0)
 	{
-		MovementState = EVehicleMovementState::Idle;
+		SetActorLocation(WorldPoints[0] + FVector(0, 0, VehicleZOffset));
 	}
 }
 
@@ -65,7 +70,7 @@ void AVehicleActor::Tick(float DeltaTime)
 	switch (MovementState)
 	{
 	case EVehicleMovementState::Moving:
-		TickMovementSimple(DeltaTime);
+		TickMovementSpline(DeltaTime);
 		break;
 	case EVehicleMovementState::WaitingIntersection:
 		IntersectionWaitTimer -= DeltaTime;
@@ -82,58 +87,99 @@ void AVehicleActor::Tick(float DeltaTime)
 	}
 }
 
-void AVehicleActor::TickMovementSimple(float DeltaTime)
+void AVehicleActor::TickMovementSpline(float DeltaTime)
 {
-	if (MovementPlan.IsComplete())
+	if (PathSpline->GetNumberOfSplinePoints() < 2)
+	{
+		return;
+	}
+
+	const float SplineLength = PathSpline->GetSplineLength();
+	if (CurrentSplineDistance >= SplineLength)
 	{
 		HandleArrival();
 		return;
 	}
 
-	const FVehicleWaypoint* CurrentWp = MovementPlan.GetCurrentWaypoint();
-	if (!CurrentWp)
+	UWorld* World = GetWorld();
+	if (!World)
 	{
-		HandleArrival();
 		return;
 	}
 
-	const FVector TargetPos = CurrentWp->Position + FVector(0, 0, VehicleZOffset);
-	const FVector CurrentPos = GetActorLocation();
-	const FVector ToTarget = TargetPos - CurrentPos;
-	const float Distance = ToTarget.Size();
+	UGridManager* GM = World->GetSubsystem<UGridManager>();
+	UVehicleManager* VM = World->GetSubsystem<UVehicleManager>();
 
-	if (Distance <= WaypointReachedThreshold)
+	if (GM && VM)
 	{
-		MovementPlan.Advance();
-		if (MovementPlan.IsComplete())
+		const float CellSize = GM->GetCellSize();
+		const float LookAhead = CellSize * 0.5f;
+		const float LookDist = FMath::Min(CurrentSplineDistance + LookAhead, SplineLength - 1.0f);
+
+		const FVector AheadPos = PathSpline->GetLocationAtDistanceAlongSpline(LookDist, ESplineCoordinateSpace::World);
+		const FGridVector AheadGrid = GM->WorldToGrid(AheadPos);
+		const FGridVector CurrentGrid = GM->WorldToGrid(GetActorLocation());
+
+		if (AheadGrid != CurrentGrid)
 		{
-			HandleArrival();
-			return;
+			const FGridCell& AheadCell = GM->GetCell(AheadGrid);
+			if (AheadCell.Type == ECellType::Road)
+			{
+				int32 ConnCount = 0;
+				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Up)) ++ConnCount;
+				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Down)) ++ConnCount;
+				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Left)) ++ConnCount;
+				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
+
+				if (ConnCount >= 3 && VM->IsIntersectionLockedByOther(AheadGrid, this))
+				{
+					MovementState = EVehicleMovementState::WaitingIntersection;
+					WaitingIntersectionPos = AheadGrid;
+					IntersectionWaitTimer = IntersectionWaitTime;
+					return;
+				}
+			}
 		}
+	}
+
+	CurrentSplineDistance += MoveSpeed * DeltaTime;
+
+	if (CurrentSplineDistance >= SplineLength)
+	{
+		CurrentSplineDistance = SplineLength;
+		const FVector EndPos = PathSpline->GetLocationAtDistanceAlongSpline(SplineLength, ESplineCoordinateSpace::World);
+		SetActorLocation(EndPos + FVector(0, 0, VehicleZOffset));
+		HandleArrival();
 		return;
 	}
 
-	const float EffectiveSpeed = MoveSpeed * CurrentWp->Speed;
-	const FVector MoveDir = ToTarget.GetSafeNormal();
+	const FVector NewPos = PathSpline->GetLocationAtDistanceAlongSpline(CurrentSplineDistance, ESplineCoordinateSpace::World);
+	const FVector MoveDir = PathSpline->GetDirectionAtDistanceAlongSpline(CurrentSplineDistance, ESplineCoordinateSpace::World);
+
 	if (!MoveDir.IsNearlyZero())
 	{
 		VelocityDirection = MoveDir;
-		VehicleRoot->SetWorldRotation(FRotator(0.0, MoveDir.Rotation().Yaw, 0.0));
+		VehicleRoot->SetWorldRotation(MoveDir.Rotation());
 	}
 
-	FVector NewPos = CurrentPos + MoveDir * EffectiveSpeed * DeltaTime;
+	SetActorLocation(NewPos + FVector(0, 0, VehicleZOffset));
 
-	if (FVector::Dist(NewPos, TargetPos) <= WaypointReachedThreshold)
+	if (GM && VM)
 	{
-		NewPos = TargetPos;
-	}
-
-	SetActorLocation(NewPos);
-
-	if (CurrentWp->bIsIntersectionEntry && Distance < WaypointReachedThreshold * 4.0f)
-	{
-		MovementState = EVehicleMovementState::WaitingIntersection;
-		IntersectionWaitTimer = IntersectionWaitTime;
+		const FGridVector NewGrid = GM->WorldToGrid(GetActorLocation());
+		const FGridCell& Cell = GM->GetCell(NewGrid);
+		if (Cell.Type == ECellType::Road)
+		{
+			int32 ConnCount = 0;
+			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Up)) ++ConnCount;
+			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Down)) ++ConnCount;
+			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Left)) ++ConnCount;
+			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
+			if (ConnCount >= 3)
+			{
+				VM->AcquireIntersectionLock(NewGrid, this);
+			}
+		}
 	}
 }
 
@@ -166,33 +212,6 @@ void AVehicleActor::SetWaitingForIntersection(bool bWaiting)
 		IntersectionWaitTimer = IntersectionWaitTime;
 	}
 	else
-	{
-		if (MovementState == EVehicleMovementState::WaitingIntersection)
-		{
-			MovementState = EVehicleMovementState::Moving;
-		}
-	}
-}
-
-bool AVehicleActor::NeedsIntersectionLock(const FGridVector& IntersectionPos) const
-{
-	if (MovementPlan.IsComplete())
-	{
-		return false;
-	}
-
-	const FVehicleWaypoint* Wp = MovementPlan.GetCurrentWaypoint();
-	if (!Wp)
-	{
-		return false;
-	}
-
-	return Wp->bIsIntersectionEntry;
-}
-
-void AVehicleActor::NotifyIntersectionCleared(const FGridVector& IntersectionPos)
-{
-	if (WaitingIntersectionPos == IntersectionPos)
 	{
 		if (MovementState == EVehicleMovementState::WaitingIntersection)
 		{

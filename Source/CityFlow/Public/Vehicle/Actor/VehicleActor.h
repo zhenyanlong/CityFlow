@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
+#include "Components/SplineComponent.h"
 #include "Vehicle/Types/CityFlowVehicleTypes.h"
 #include "VehicleActor.generated.h"
 
@@ -21,7 +22,7 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
-	void SetMovementPlan(const FVehicleMovementPlan& Plan);
+	void SetSplinePath(const TArray<FVector>& WorldPoints);
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetDestination(class ABuilding* InDestination);
@@ -33,10 +34,10 @@ public:
 	EVehicleMovementState GetMovementState() const { return MovementState; }
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
-	const FVehicleMovementPlan& GetMovementPlan() const { return MovementPlan; }
+	float GetSplineDistance() const { return CurrentSplineDistance; }
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
-	int32 GetCurrentWaypointIndex() const { return MovementPlan.CurrentWaypointIndex; }
+	class USplineComponent* GetPathSpline() const { return PathSpline; }
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	float GetMoveSpeed() const { return MoveSpeed; }
@@ -56,11 +57,11 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> VehicleMesh;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
-	float MoveSpeed = 600.0f;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<USplineComponent> PathSpline;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
-	float MinFollowDistance = 200.0f;
+	float MoveSpeed = 600.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
 	float WaypointReachedThreshold = 50.0f;
@@ -74,14 +75,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Debug")
 	FLinearColor DebugColor = FLinearColor(0.8f, 0.2f, 0.2f, 1.0f);
 
-	void AssignPathId(int32 PathId) { AssignedPathId = PathId; }
-	int32 GetPathId() const { return AssignedPathId; }
-
 	void SetWaitingForIntersection(bool bWaiting);
 	bool IsWaitingForIntersection() const { return MovementState == EVehicleMovementState::WaitingIntersection; }
-
-	bool NeedsIntersectionLock(const FGridVector& IntersectionPos) const;
-	void NotifyIntersectionCleared(const FGridVector& IntersectionPos);
 
 	class ABuilding* Origin = nullptr;
 
@@ -89,15 +84,14 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-	void TickMovementSimple(float DeltaTime);
+	void TickMovementSpline(float DeltaTime);
 	void HandleArrival();
 
-	FVehicleMovementPlan MovementPlan;
 	EVehicleMovementState MovementState = EVehicleMovementState::Idle;
 	FVector VelocityDirection = FVector::ZeroVector;
+	float CurrentSplineDistance = 0.0f;
 
 	TObjectPtr<ABuilding> Destination;
-	int32 AssignedPathId = -1;
 
 	FGridVector WaitingIntersectionPos;
 	float IntersectionWaitTimer = 0.0f;

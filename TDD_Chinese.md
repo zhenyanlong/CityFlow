@@ -179,20 +179,28 @@ AGridPlaceableActor  (Abstract)          ← 状态管理 + 统一 API
 
 此方案避免了 `OnPreviewValidChanged`、`OnEnterPreview` 和 `UpdatePreviewAppearance` 之间材质随机翻转的竞态问题。
 
-#### 内部样条管理（混合策略）
+#### 内部样条管理（混合策略）— ⚠️ 需要重构
 
-为避免预生成大量样条组件的性能开销，采用**按需生成**的方式：
+> **当前状态：** `ARoadTile::GetSplinePath()` 存在但**未被 VehicleManager 使用**。样条路径生成经过多次迭代调试后仍有已知问题——当前简化的路径构建方式见 2.6。本节记录预期的设计目标。
 
-- **直道 / 转角路段** — 使用单个双向 `USplineComponent`。车辆根据行驶方向选择参数化的起点和终点。
-- **复杂交叉口（T 型路口 / 十字路口）** — 不预置样条组件。取而代之的是存储一个 `TMap<FPathKey, TArray<FVector>>` 缓存。当车辆请求转弯路径（如从**下方**进入、从**左侧**离开）时：
-  - 若缓存未命中，则实时计算贝塞尔曲线点：
-    - 直行通过 → 2 个点
-    - 转弯 → 3 个点
-  - 结果缓存后返回点数组。
+`ARoadTile::GetSplinePath(EntryDir, ExitDir)` 计算从入口边中点到出口边中点的平滑路径。路块上不保存样条组件——全部实时计算，无持久状态。
 
-车辆沿点数组插值移动（或按需创建临时轻量样条），离开后即销毁。
+**路径计算（预期设计）：**
+- **直行通过（对向）：** 返回 2 个世界空间点：`[入口边中点, 出口边中点]`。车辆自身的样条在两点间线性插值。
+- **转弯（垂直或任意非对向）：** 在本地空间计算二次贝塞尔曲线：
+  - P0 = 入口边中点
+  - P1 = P0 + P2（两边外角，**非格子中心**）
+  - P2 = 出口边中点
+  - 采样 13 个世界空间点，生成平滑弧线。
 
-> 该策略将样条组件总数从 **O(地块数 × 方向组合数)** 降低到 **O(车辆数)**，大幅减少内存和生成开销。
+**当前方案（v0.3，已重构）：**
+- `BuildSplinePath()` 基于 A\* 路径（经 `SmoothPath` 保留转弯点）生成样条点。
+- 路径点均为格子中心。首尾点直接使用格子中心。
+- **转弯点偏移：** 每个转弯点替换为两个偏移点：
+  - EntryOffset = `center - EntryDir * CellSize/2`（向来的方向回退半格）
+  - ExitOffset = `center + ExitDir * CellSize/2`（向下一格方向偏移半格）
+- USplineComponent 在两个偏移点间自动插值产生平滑曲线，消除转角锯齿问题。
+- `ARoadTile::GetSplinePath()` 从未被使用，保留供未来参考。
 
 ---
 
@@ -413,15 +421,27 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 
 ---
 
-### 2.6 车辆 AI：A\* 寻路与航点运动
+### 2.6 车辆 AI：A\* 寻路与样条运动
 
-#### 实现状态：✅ 已实现
+#### 实现状态：✅ 已实现 — v0.3 转弯偏移方案
 
-`AVehicleActor` 是一个可蓝图化的 `AActor`，根组件为 `UStaticMeshComponent`。可在蓝图中子类化以实现不同车辆类型。
+`AVehicleActor` 是一个可蓝图化的 `AActor`，包含 `UStaticMeshComponent` 车身和 `USplineComponent`（`PathSpline`），后者存储从起点到终点的完整世界空间路径。`PathSpline` 使用绝对变换（未挂载到移动中的根组件），确保车辆移动时世界空间查询保持正确。
 
-**核心运动模型：** 车辆沿预计算的 `FVehicleMovementPlan`（由 A\* 网格路径派生的世界空间 `FVehicleWaypoint` 序列）移动。每帧以 `MoveSpeed` 向当前航点插值。距航点在 `WaypointReachedThreshold` 内时推进至下一航点。到达终点时广播 `OnVehicleArrived`。
+**基于样条的运动模型：** 车辆维护一个 `CurrentSplineDistance` 浮点数。每帧 `TickMovementSpline(DeltaTime)` 将此距离推进 `MoveSpeed * DeltaTime`，从样条查询世界空间位置（`GetLocationAtDistanceAlongSpline`）和方向（`GetDirectionAtDistanceAlongSpline`），并更新 Actor 的位置和旋转。当 `CurrentSplineDistance >= SplineLength` 时车辆到达。这部分工作正常。
 
-**车辆生成：** `UVehicleManager::SpawnVehicle(Origin, Destination)` 选取两个建筑的出入口连接点，通过 `BuildPath()` 运行 A\*，将结果转为运动计划，然后通过 `PickRandomVehicleClass()` 从生成表中按权重随机选取车辆子类进行生成。生成的 `AVehicleActor` 子类已在其蓝图中配置了自身的 Mesh、速度和其它属性。
+**路径构建（`BuildSplinePath`）— v0.3 转弯偏移方案：**
+对平滑后 A\* 路径（仅含方向变化处的格子中心）做单次遍历：
+- **首格：** 直接添加 `cell_center`。
+- **转弯格：** 将每个转弯点替换为两个偏移点：
+  - `EntryOffset = cell_center - EntryDir * CellSize/2`（向来的方向回退半格）
+  - `ExitOffset = cell_center + ExitDir * CellSize/2`（向下一格方向偏移半格）
+- **末格：** 直接添加 `cell_center`。
+
+USplineComponent 在两个偏移点之间平滑插值，在转角处产生自然弧线。直线段直接使用格子中心，无冗余中间点。
+
+**设计原理：** 通过将路径在转角处向内拉半格距离，样条自动产生圆滑弧线替代锐角转弯。无需逐块贝塞尔曲线或密集采样——样条组件自身的插值特性自然地完成曲线平滑。
+
+**车辆生成：** `UVehicleManager::SpawnVehicle(Origin, Destination)` 选取出入口连接点，通过 `BuildPath()` 运行 A\*，调用 `BuildSplinePath()` 生成世界空间点数组，生成车辆，吸附到第一个样条点，调用 `Vehicle->SetSplinePath(Points)`。
 
 **A\* 寻路：**
 - 节点 = 道路格（`ECellType::Road`）；边 = `ConnectedMask` 方向位。
@@ -431,7 +451,10 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 **交叉口占用：**
 - 交叉口 = 任意 ≥ 3 个连接方向的道路格。
 - `TMap<FGridVector, AVehicleActor*> IntersectionLocks` 作为简单互斥锁。
-- 接近被占交叉口的车辆等待；`IntersectionWaitTime` 超时后重试。
+- **移动前检查：** 每帧在沿样条推进之前，车辆向前看 `CellSize * 0.5` 并转为网格坐标。若该格为另一车辆持有的锁定交叉口，则进入 `WaitingIntersection` 状态，`IntersectionWaitTime` 后重试。
+- **锁获取：** 移动后，若车辆当前网格格是交叉口，调用 `VehicleManager::AcquireIntersectionLock()` 获取锁。
+- **锁释放：** `UpdateIntersectionLocks()` 为已离开交叉口格的车辆释放锁。
+- 此基于网格位置的方案消除了对显式"交叉口入口/出口"航点的需求。
 
 **拥堵检测：**
 - 每帧 `UpdateCongestion()` 将世界位置映射到网格格。
@@ -458,9 +481,9 @@ struct FVehicleSpawnEntry
 | 状态 | 描述 |
 |---|---|
 | `Idle` | 初始或错误状态 |
-| `Moving` | 沿航点计划移动 |
+| `Moving` | 沿样条路径移动 |
 | `WaitingCongestion` | 前方车辆过近 |
-| `WaitingIntersection` | 等待交叉口锁 |
+| `WaitingIntersection` | 等待交叉口锁；超时自动重试 |
 | `Arrived` | 到达终点 |
 
 ---

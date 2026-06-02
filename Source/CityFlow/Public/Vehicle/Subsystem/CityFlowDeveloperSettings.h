@@ -13,7 +13,9 @@ class CITYFLOW_API UCityFlowDeveloperSettings : public UDeveloperSettings
 
 public:
 	virtual FName GetCategoryName() const override { return TEXT("Project"); }
-	virtual FText GetSectionText() const override { return NSLOCTEXT("CityFlow", "CityFlowSettingsSection", "CityFlow"); }
+#if WITH_EDITOR
+	virtual FText GetSectionDescription() const override { return NSLOCTEXT("CityFlow", "CityFlowSettingsSection", "CityFlow"); }
+#endif
 
 	UPROPERTY(Config, EditAnywhere, Category = "Grid", meta = (ClampMin = "10", ClampMax = "100"))
 	int32 DefaultGridWidth = 24;
