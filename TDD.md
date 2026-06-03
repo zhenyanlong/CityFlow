@@ -545,21 +545,34 @@ Scoring starts on `StartScoring()` (called by GameMode on Simulation begin) and 
 
 #### CityFlowPawn
 
-A `ACharacter` subclass configured for top-down free-flight control:
+A `ACharacter` subclass configured for top-down free-flight control with orientation-based movement:
 
 | Feature | Implementation |
 |---|---|
 | Movement mode | `MOVE_Flying` (gravity-free, any-axis movement) |
-| Input | `Enhanced Input` → `IA_Move` (Action, ValueType Axis2D) |
-| Movement direction | Derived from camera rotation via `GetControlRotation()` — WASD moves relative to the current camera view |
-| Configurable (Blueprint) | `MoveSpeed` |
-| Camera setup | Handled entirely in Blueprint: add `USpringArmComponent` + `UCameraComponent` as child components; the character auto-possesses and becomes the view target |
+| Input | `Enhanced Input` → `IA_Move` (Axis2D), `IA_Look` (Axis2D), `IA_Zoom` (Axis1D), `IA_Alt` (Digital) |
+| Movement direction | Derived from `CameraYaw` (set by Blueprint from camera orientation) — WASD moves relative to the player's facing direction, not the live camera rotation |
+| Camera orientation | `CameraYaw` (BlueprintReadWrite, float) — Blueprint updates this each tick from the live camera yaw; `Move()` builds `FRotator(0, CameraYaw, 0)` for forward/right vectors |
+| Alt + Mouse look | `IA_Alt` + `IA_Look` — holding Alt sets `bAltHeld = true`, switches to `FInputModeGameOnly()` (captures mouse), and drives `AddControllerYawInput()` from mouse delta (yaw only in C++; pitch handled in Blueprint). Releasing Alt restores `FInputModeGameAndUI` + mouse cursor |
+| Scroll wheel zoom | `IA_Zoom` adjusts `TargetSpringArmLength` (clamped [Min, Max]). Blueprint reads this variable each tick to drive spring arm length interpolation |
+| Configurable (Blueprint) | `MoveSpeed`, `LookSensitivity`, `ZoomSpeed`, `MinSpringArmLength`, `MaxSpringArmLength`, `DefaultCameraPitch`, `MinCameraPitch`, `MaxCameraPitch` |
+| Camera setup | Handled in Blueprint: `USpringArmComponent` + `UCameraComponent` as child components; spring arm uses `bUsePawnControlRotation = true`; character auto-possesses |
+
+**Key variables maintained by C++ for Blueprint consumption:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `CameraYaw` | 0 | Current facing yaw — Blueprint updates from camera; `Move()` computes movement from this |
+| `TargetSpringArmLength` | 10000 | Desired spring arm length — Blueprint reads and interpolates toward this |
+| `DefaultCameraPitch` | -60 | Initial camera pitch set on BeginPlay via `SetControlRotation` |
+| `MinCameraPitch` | -80 | Minimum camera pitch (most top-down) |
+| `MaxCameraPitch` | -30 | Maximum camera pitch (most horizontal) |
 
 #### CityFlowPlayerController
 
 | Feature | Implementation |
 |---|---|
-| Cursor | `bShowMouseCursor = true` |
+| Cursor | `bShowMouseCursor = true` (managed by Pawn: hidden during Alt, restored on release) |
 | Preview system | Spawns a preview actor on `BeginPlay`; follows cursor via `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()`; each tick calls `SetPreviewPlacementValid()` for validity, then `UpdatePreviewAppearance()` to let `ARoadTile` show the predicted mesh in preview |
 | Placement | `IA_PlaceItem` (left mouse button) → `Started`/`Triggered`/`Completed` events → `TryPlaceAtCursor()` helper with `LastPlacedGridPos` deduplication for drag-to-place |
 | Removal | `IA_RemoveItem` (right mouse button) → `Started`/`Triggered`/`Completed` events → `TryRemoveAtCursor()` helper with `LastRemovedGridPos` deduplication for drag-to-remove. Looks up the actor from `Cell.RoadActor` in the grid instead of relying on collision hit. |

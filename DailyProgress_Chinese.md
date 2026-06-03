@@ -1,3 +1,18 @@
+## 2026-06-03
+
+### 玩家摄像机与移动重构
+
+- 重构 `ACityFlowPawn::Move()`，使用 `CameraYaw`（蓝图更新的朝向 yaw）替代 `GetControlRotation()` 计算移动方向
+- 新增 `IA_Look`、`IA_Zoom`、`IA_Alt` Enhanced Input Action 用于摄像机控制
+- 实现 Alt+鼠标视角控制：按住 Alt 切换为 `FInputModeGameOnly()`（捕获鼠标），松开恢复 `FInputModeGameAndUI` + 光标用于放置
+- 实现 `Look()`，仅通过 `AddControllerYawInput()` 控制 yaw（pitch 控制移交蓝图，避免 SpringArm/ControlRotation 冲突）
+- 实现 `Zoom()`，通过滚轮调整 `TargetSpringArmLength`（Clamp [300, 20000]，默认 10000）
+- 在 `BeginPlay()` 中通过 `SetControlRotation` 设置初始 controller pitch 为 `DefaultCameraPitch`（-60°）
+- 新增 `MinCameraPitch`（-80°）和 `MaxCameraPitch`（-30°）属性供蓝图驱动 pitch 钳位
+- 修复鼠标 delta 未进入 Enhanced Input 的问题：在 Alt 按下/松开时切换输入模式
+- 修复 pitch 抖动问题：将事后 `SetControlRotation` 钳位改为预钳位 delta 方案（后简化为蓝图全权处理 pitch）
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.8 节，记录完整的摄像机/移动架构
+
 ## 2026-06-02
 
 ### 双向车道与驾驶方向配置

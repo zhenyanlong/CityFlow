@@ -542,21 +542,34 @@ struct FVehicleSpawnEntry
 
 #### CityFlowPawn
 
-基于 `ACharacter` 的子类，配置为俯视角自由飞行控制：
+基于 `ACharacter` 的子类，配置为俯视角自由飞行控制，移动方向基于朝向：
 
 | 功能 | 实现 |
 |---|---|
 | 移动模式 | `MOVE_Flying`（无重力，全轴向移动） |
-| 输入 | `Enhanced Input` → `IA_Move`（Action，ValueType Axis2D） |
-| 移动方向 | 通过 `GetControlRotation()` 从摄像机朝向推导 —— WASD 相对于当前镜头视角移动 |
-| 蓝图可配置 | `MoveSpeed` |
-| 摄像机设置 | 完全在蓝图中处理：添加 `USpringArmComponent` + `UCameraComponent` 作为子组件；角色自动接管并成为视角目标 |
+| 输入 | `Enhanced Input` → `IA_Move`（Axis2D）、`IA_Look`（Axis2D）、`IA_Zoom`（Axis1D）、`IA_Alt`（Digital） |
+| 移动方向 | 从 `CameraYaw` 推导（由蓝图从摄像机朝向更新）—— WASD 相对于玩家朝向移动，而非实时摄像机视角 |
+| 摄像机朝向 | `CameraYaw`（BlueprintReadWrite, float）—— 蓝图每帧从摄像机 yaw 更新此变量；`Move()` 构建 `FRotator(0, CameraYaw, 0)` 计算前/右向量 |
+| Alt + 鼠标视角 | `IA_Alt` + `IA_Look` —— 按住 Alt 时设 `bAltHeld = true`，切换输入模式为 `FInputModeGameOnly()`（捕获鼠标），通过鼠标 delta 驱动 `AddControllerYawInput()`（C++ 仅控制 yaw；pitch 在蓝图中处理）。松开 Alt 恢复 `FInputModeGameAndUI` + 鼠标光标 |
+| 滚轮缩放 | `IA_Zoom` 调整 `TargetSpringArmLength`（Clamp 到 [Min, Max]）。蓝图每帧读取此变量以驱动 spring arm 长度插值 |
+| 蓝图可配置 | `MoveSpeed`、`LookSensitivity`、`ZoomSpeed`、`MinSpringArmLength`、`MaxSpringArmLength`、`DefaultCameraPitch`、`MinCameraPitch`、`MaxCameraPitch` |
+| 摄像机设置 | 在蓝图中处理：`USpringArmComponent` + `UCameraComponent` 作为子组件；spring arm 使用 `bUsePawnControlRotation = true`；角色自动接管 |
+
+**C++ 维护供蓝图使用的关键变量：**
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `CameraYaw` | 0 | 当前朝向 yaw —— 蓝图从摄像机更新；`Move()` 从此计算移动方向 |
+| `TargetSpringArmLength` | 10000 | Spring arm 目标长度 —— 蓝图读取并向此值插值 |
+| `DefaultCameraPitch` | -60 | BeginPlay 时通过 `SetControlRotation` 设置的初始摄像机俯仰角 |
+| `MinCameraPitch` | -80 | 最小俯仰角（最俯视） |
+| `MaxCameraPitch` | -30 | 最大俯仰角（最平视） |
 
 #### CityFlowPlayerController
 
 | 功能 | 实现 |
 |---|---|
-| 光标 | `bShowMouseCursor = true` |
+| 光标 | `bShowMouseCursor = true`（由 Pawn 管理：Alt 期间隐藏，松开恢复） |
 | 预览系统 | `BeginPlay` 时生成预览 Actor；通过 `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()` 跟随光标；每帧通过 `SetPreviewPlacementValid()` 更新有效性，然后调用 `UpdatePreviewAppearance()` 让 `ARoadTile` 在预览中显示预测的 mesh |
 | 放置 | `IA_PlaceItem`（鼠标左键）→ `Started`/`Triggered`/`Completed` 事件 → `TryPlaceAtCursor()` 辅助函数，通过 `LastPlacedGridPos` 去重实现拖拽连续放置 |
 | 删除 | `IA_RemoveItem`（鼠标右键）→ `Started`/`Triggered`/`Completed` 事件 → `TryRemoveAtCursor()` 辅助函数，通过 `LastRemovedGridPos` 去重实现拖拽连续删除。从网格 `Cell.RoadActor` 查找 Actor，不依赖碰撞命中。 |

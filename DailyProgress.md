@@ -1,3 +1,18 @@
+## 2026-06-03
+
+### Player Camera & Movement Refactor
+
+- Refactored `ACityFlowPawn::Move()` to use `CameraYaw` (Blueprint-updated facing yaw) instead of `GetControlRotation()` for movement direction computation
+- Added `IA_Look`, `IA_Zoom`, `IA_Alt` Enhanced Input actions for camera control
+- Implemented Alt+Mouse look: holding Alt switches to `FInputModeGameOnly()` (captures mouse), releasing restores `FInputModeGameAndUI` + cursor for placement
+- Implemented `Look()` with yaw-only `AddControllerYawInput()` (pitch control delegated to Blueprint to avoid SpringArm/ControlRotation fighting)
+- Implemented `Zoom()` via scroll wheel adjusting `TargetSpringArmLength` (clamped [300, 20000], default 10000)
+- Set initial controller pitch to `DefaultCameraPitch` (-60°) in `BeginPlay()` via `SetControlRotation`
+- Added `MinCameraPitch` (-80°) and `MaxCameraPitch` (-30°) properties for Blueprint-driven pitch clamping
+- Fixed mouse delta not reaching Enhanced Input by switching input mode on Alt press/release
+- Fixed pitch jitter by replacing post-clamp `SetControlRotation` with pre-clamp delta approach (later simplified to Blueprint-only pitch)
+- Updated TDD.md and TDD_Chinese.md section 2.8 with full camera/movement architecture
+
 ## 2026-06-02
 
 ### Bidirectional Lanes & Driving Side Configuration

@@ -29,6 +29,10 @@ void ACityFlowPawn::BeginPlay()
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
+		FRotator InitialRot = PC->GetControlRotation();
+		InitialRot.Pitch = DefaultCameraPitch;
+		PC->SetControlRotation(InitialRot);
+
 		if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
 		{
 			if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
@@ -52,6 +56,22 @@ void ACityFlowPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		{
 			EnhancedInput->BindAction(IA_Move, ETriggerEvent::Triggered, this, &ACityFlowPawn::Move);
 		}
+
+		if (IA_Look)
+		{
+			EnhancedInput->BindAction(IA_Look, ETriggerEvent::Triggered, this, &ACityFlowPawn::Look);
+		}
+
+		if (IA_Zoom)
+		{
+			EnhancedInput->BindAction(IA_Zoom, ETriggerEvent::Triggered, this, &ACityFlowPawn::Zoom);
+		}
+
+		if (IA_Alt)
+		{
+			EnhancedInput->BindAction(IA_Alt, ETriggerEvent::Started, this, &ACityFlowPawn::OnAltPressed);
+			EnhancedInput->BindAction(IA_Alt, ETriggerEvent::Completed, this, &ACityFlowPawn::OnAltReleased);
+		}
 	}
 }
 
@@ -63,10 +83,58 @@ void ACityFlowPawn::Move(const FInputActionValue& Value)
 		return;
 	}
 
-	const FRotator CameraRotation = GetControlRotation();
-	const FVector Forward = FRotationMatrix(CameraRotation).GetScaledAxis(EAxis::X);
-	const FVector Right = FRotationMatrix(CameraRotation).GetScaledAxis(EAxis::Y);
+	const FRotator YawRotation(0.0f, CameraYaw, 0.0f);
+	const FVector Forward = FRotationMatrix(YawRotation).GetScaledAxis(EAxis::X);
+	const FVector Right = FRotationMatrix(YawRotation).GetScaledAxis(EAxis::Y);
 
 	AddMovementInput(Forward, Input.Y);
 	AddMovementInput(Right, Input.X);
+}
+
+void ACityFlowPawn::Look(const FInputActionValue& Value)
+{
+	if (!bAltHeld)
+	{
+		return;
+	}
+
+	const FVector2D Input = Value.Get<FVector2D>();
+	if (!FMath::IsNearlyZero(Input.X))
+	{
+		AddControllerYawInput(Input.X * LookSensitivity);
+	}
+	// Pitch control handled in Blueprint.
+}
+
+void ACityFlowPawn::Zoom(const FInputActionValue& Value)
+{
+	const float WheelDelta = Value.Get<float>();
+	TargetSpringArmLength = FMath::Clamp(
+		TargetSpringArmLength - WheelDelta * ZoomSpeed,
+		MinSpringArmLength,
+		MaxSpringArmLength);
+}
+
+void ACityFlowPawn::OnAltPressed()
+{
+	bAltHeld = true;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->bShowMouseCursor = false;
+		PC->SetInputMode(FInputModeGameOnly());
+	}
+}
+
+void ACityFlowPawn::OnAltReleased()
+{
+	bAltHeld = false;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->bShowMouseCursor = true;
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(InputMode);
+	}
 }
