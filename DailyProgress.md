@@ -1,3 +1,29 @@
+## 2026-06-04
+
+### Vehicle Congestion & Forward Probe Refactor
+
+- Enabled `VehicleMesh` collision (`QueryOnly`) for physical forward vehicle detection
+- Implemented `PerformForwardProbe()` with unified `SweepMultiByChannel` (ECC_GameTraceChannel1) + intersection-lock lookup via pre-stored `PathIntersectionCells`
+- Added `SetPathIntersections()` to pre-compute intersection cells from the A\* grid path at spawn time
+- Added `DirectionFromGridDelta()` to `GridDirectionUtils` for axis-aligned entry direction derivation (replaced `DirectionFromWorldVector` for intersection locks)
+- Changed `IntersectionLocks` from `TMap<Vehicle*, EGridDirection>` to `TMap<Vehicle*, FIntersectionOccupant{EntryDir, ExitDir}>`
+- Added `IsIntersectionLockedByOther(Pos, Self)` simplified occupancy check
+- Removed `WaitingIntersection` state — all stopping unified under `WaitingCongestion` with smooth deceleration by `StartDeceleration=2500`
+- Simplified `TickMovementSpline`: single priority-based flow (probe → brake or advance)
+- Added `IsBuildingBlocked()` to prevent spawning from buildings still occupied by departing vehicles
+- Added Blueprint-configurable probe parameters: `ForwardProbeRadius`, `ForwardProbeDistance`, `SelfAvoidOffset`, `ProbeVerticalOffset`, `SafeDistanceMin`, `SafeDistanceSeconds`, `StartAcceleration`, `StartDeceleration`
+- Added `bDebugDrawProbe` with chain-of-spheres visualization for the sweep volume
+
+### Intersection Lock — ⚠️ UNRESOLVED BUG
+
+- Despite the unified forward-probe architecture and pre-stored `PathIntersectionCells`, intersection locks do not reliably prevent multi-vehicle entry
+- Vehicles still ignore locks under certain conditions; suspected root causes include `UpdateIntersectionLocks` release timing in `VehicleManager::Tick` (after all actors) and the simplified occupancy-only `IsIntersectionLockedByOther` lacking direction-aware path-crossing logic
+- Direction-aware bidirectional conflict rules need a full redesign in the next session
+
+### TDD Updates
+
+- Updated TDD.md and TDD_Chinese.md sections 2.6 (Intersection Occupation v0.5, Movement State Machine v0.5) with known bug documented
+
 ## 2026-06-03
 
 ### Player Camera & Movement Refactor

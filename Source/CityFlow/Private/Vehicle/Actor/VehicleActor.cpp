@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
+#include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVehicleActor, Log, All);
 
@@ -18,7 +19,7 @@ AVehicleActor::AVehicleActor()
 
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
 	VehicleMesh->SetupAttachment(VehicleRoot);
-	VehicleMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	VehicleMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
 	PathSpline = CreateDefaultSubobject<USplineComponent>(TEXT("PathSpline"));
 	PathSpline->SetAbsolute(true, true, true);
@@ -117,6 +118,14 @@ void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArr
 	MovementState = EVehicleMovementState::Moving;
 
 	SetActorLocation(WorldPoints[0] + FVector(0, 0, VehicleZOffset));
+
+	if (UWorld* W = GetWorld())
+	{
+		if (UGridManager* GridMgr = W->GetSubsystem<UGridManager>())
+		{
+			PreviousGridPosition = GridMgr->WorldToGrid(WorldPoints[0]);
+		}
+	}
 }
 
 void AVehicleActor::SetDestination(ABuilding* InDestination)
@@ -131,16 +140,8 @@ void AVehicleActor::Tick(float DeltaTime)
 	switch (MovementState)
 	{
 	case EVehicleMovementState::Moving:
-		TickMovementSpline(DeltaTime);
-		break;
-	case EVehicleMovementState::WaitingIntersection:
-		IntersectionWaitTimer -= DeltaTime;
-		if (IntersectionWaitTimer <= 0.0f)
-		{
-			MovementState = EVehicleMovementState::Moving;
-		}
-		break;
 	case EVehicleMovementState::WaitingCongestion:
+		TickMovementSpline(DeltaTime);
 		break;
 	case EVehicleMovementState::Arrived:
 	case EVehicleMovementState::Idle:
@@ -162,60 +163,46 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		return;
 	}
 
-	UWorld* World = GetWorld();
-	if (!World)
+	// =========================================================
+	//  Unified forward probe: physical sweep AND intersection-
+	//  lock check merged into one pass. Any obstacle ahead
+	//  triggers a smooth brake via WaitingCongestion.
+	// =========================================================
+	PerformForwardProbe();
+
+	if (bFrontVehicleTooClose)
 	{
+		MovementState = EVehicleMovementState::WaitingCongestion;
+		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, 0.0f, DeltaTime, StartDeceleration);
+		if (CurrentSpeed < 1.0f) { CurrentSpeed = 0.0f; }
+		if (!VelocityDirection.IsNearlyZero())
+		{
+			VehicleRoot->SetWorldRotation(VelocityDirection.Rotation());
+		}
 		return;
 	}
 
-	UGridManager* GM = World->GetSubsystem<UGridManager>();
-	UVehicleManager* VM = World->GetSubsystem<UVehicleManager>();
-
-	if (GM && VM)
+	// Obstacle cleared — resume
+	if (MovementState == EVehicleMovementState::WaitingCongestion)
 	{
-		const float CellSize = GM->GetCellSize();
-		const float LookAhead = CellSize * 0.5f;
-		const float LookDist = FMath::Min(CurrentSplineDistance + LookAhead, SplineLength - 1.0f);
-
-		const FVector AheadPos = PathSpline->GetLocationAtDistanceAlongSpline(LookDist, ESplineCoordinateSpace::World);
-		const FGridVector AheadGrid = GM->WorldToGrid(AheadPos);
-		const FGridVector CurrentGrid = GM->WorldToGrid(GetActorLocation());
-
-		if (AheadGrid != CurrentGrid)
-		{
-			const FGridCell& AheadCell = GM->GetCell(AheadGrid);
-			if (AheadCell.Type == ECellType::Road)
-			{
-				int32 ConnCount = 0;
-				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Up)) ++ConnCount;
-				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Down)) ++ConnCount;
-				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Left)) ++ConnCount;
-				if (AheadCell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
-
-				if (ConnCount >= 3)
-				{
-					const EGridDirection EntryDir = GridDirectionUtils::DirectionFromWorldVector(VelocityDirection);
-					if (VM->IsIntersectionLockedByOther(AheadGrid, this, EntryDir))
-					{
-						MovementState = EVehicleMovementState::WaitingIntersection;
-						WaitingIntersectionPos = AheadGrid;
-						IntersectionWaitTimer = IntersectionWaitTime;
-						return;
-					}
-				}
-			}
-		}
+		MovementState = EVehicleMovementState::Moving;
 	}
 
+	// =========================================================
+	//  Speed computation: terminal deceleration + start boost
+	// =========================================================
 	{
 		const float RemainingDist = SplineLength - CurrentSplineDistance;
 		const float SpeedRatio = (DecelerationDistance > 0.0f)
-			? FMath::Min(RemainingDist / DecelerationDistance, 1.0f)
-			: 1.0f;
-		const float TargetSpeed = MoveSpeed * SpeedRatio;
-		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, TargetSpeed, DeltaTime, Acceleration);
+			? FMath::Min(RemainingDist / DecelerationDistance, 1.0f) : 1.0f;
+		const float BaseTarget = MoveSpeed * SpeedRatio;
+		const float Accel = (BaseTarget > CurrentSpeed + 100.0f) ? StartAcceleration : Acceleration;
+		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, BaseTarget, DeltaTime, Accel);
 	}
 
+	// =========================================================
+	//  Advance spline position
+	// =========================================================
 	CurrentSplineDistance += FMath::Min(CurrentSpeed * DeltaTime, SplineLength - CurrentSplineDistance);
 
 	if (CurrentSplineDistance >= SplineLength)
@@ -235,6 +222,15 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 
 	SetActorLocation(NewPos + FVector(0, 0, VehicleZOffset));
 
+	UWorld* World = GetWorld();
+	UGridManager* GM = World ? World->GetSubsystem<UGridManager>() : nullptr;
+	UVehicleManager* VM = World ? World->GetSubsystem<UVehicleManager>() : nullptr;
+
+	PreviousGridPosition = GM ? GM->WorldToGrid(NewPos) : FGridVector();
+
+	// =========================================================
+	//  Acquire intersection lock (entered intersection cell)
+	// =========================================================
 	if (GM && VM)
 	{
 		const FGridVector NewGrid = GM->WorldToGrid(GetActorLocation());
@@ -248,9 +244,166 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
 			if (ConnCount >= 3)
 			{
-				const EGridDirection EntryDir = GridDirectionUtils::DirectionFromWorldVector(VelocityDirection);
-				VM->AcquireIntersectionLock(NewGrid, this, EntryDir);
+				const float CellSize = GM->GetCellSize();
+				const float ExitLookDist = FMath::Min(CurrentSplineDistance + CellSize, SplineLength - 1.0f);
+				const FVector ExitPos = PathSpline->GetLocationAtDistanceAlongSpline(ExitLookDist, ESplineCoordinateSpace::World);
+				const FGridVector ExitGrid = GM->WorldToGrid(ExitPos);
+				const EGridDirection EntryDir = GridDirectionUtils::DirectionFromGridDelta(NewGrid - PreviousGridPosition);
+				const EGridDirection ExitDir = (ExitGrid != NewGrid)
+					? GridDirectionUtils::DirectionFromGridDelta(ExitGrid - NewGrid)
+					: EGridDirection::None;
+				VM->AcquireIntersectionLock(NewGrid, this, EntryDir, ExitDir);
 			}
+		}
+	}
+}
+
+void AVehicleActor::SetPathIntersections(const TArray<FGridVector>& GridPath)
+{
+	PathIntersectionCells.Reset();
+
+	UWorld* World = GetWorld();
+	UGridManager* GM = World ? World->GetSubsystem<UGridManager>() : nullptr;
+	if (!GM) { return; }
+
+	for (const FGridVector& Cell : GridPath)
+	{
+		if (GM->GetCellType(Cell) != ECellType::Road) { continue; }
+
+		int32 ConnCount = 0;
+		const FGridCell& C = GM->GetCell(Cell);
+		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Up))    ++ConnCount;
+		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Down))  ++ConnCount;
+		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Left))  ++ConnCount;
+		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
+
+		if (ConnCount >= 3)
+		{
+			PathIntersectionCells.Add(Cell);
+		}
+	}
+}
+
+void AVehicleActor::PerformForwardProbe()
+{
+	FrontVehicle.Reset();
+	FrontVehicleDistance = 0.0f;
+	bFrontVehicleTooClose = false;
+
+	if (VelocityDirection.IsNearlyZero())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	UGridManager* GM = World ? World->GetSubsystem<UGridManager>() : nullptr;
+	UVehicleManager* VM = World ? World->GetSubsystem<UVehicleManager>() : nullptr;
+	if (!GM || !VM)
+	{
+		return;
+	}
+
+	const FVector MyDir = VelocityDirection.GetSafeNormal();
+	const FVector BasePos = GetActorLocation() + FVector(0, 0, ProbeVerticalOffset);
+	const FVector ProbeStart = BasePos + MyDir * SelfAvoidOffset;
+	const FVector ProbeEnd = ProbeStart + MyDir * ForwardProbeDistance;
+	const FCollisionShape ProbeShape = FCollisionShape::MakeSphere(ForwardProbeRadius);
+
+	// ---- Physical sphere sweep ----
+	FCollisionQueryParams QueryParams;
+	QueryParams.bTraceComplex = false;
+	QueryParams.AddIgnoredActor(this);
+
+	TArray<FHitResult> Hits;
+	World->SweepMultiByChannel(Hits, ProbeStart, ProbeEnd, FQuat::Identity,
+		ECC_GameTraceChannel1, ProbeShape, QueryParams);
+
+	AVehicleActor* ClosestVehicle = nullptr;
+	float ClosestDist = ForwardProbeDistance;
+
+	for (const FHitResult& Hit : Hits)
+	{
+		AVehicleActor* OtherVehicle = Cast<AVehicleActor>(Hit.GetActor());
+		if (!OtherVehicle || OtherVehicle == this) { continue; }
+
+		const float ProjDist = FVector::DotProduct(Hit.ImpactPoint - ProbeStart, MyDir);
+		if (ProjDist > 0.0f && ProjDist < ClosestDist)
+		{
+			ClosestDist = ProjDist;
+			ClosestVehicle = OtherVehicle;
+		}
+	}
+
+	// ---- Path intersection lookup: pre-stored from A* grid data ----
+	for (const FGridVector& InterCell : PathIntersectionCells)
+	{
+		const FVector CellWorldPos = GM->GridToWorld(InterCell);
+		const FVector ToCell = CellWorldPos - ProbeStart;
+		const float CellDist = FVector::DotProduct(ToCell, MyDir);
+
+		if (CellDist <= 0.0f || CellDist > ForwardProbeDistance) { continue; }
+
+		if (!VM->IsIntersectionLockedByOther(InterCell, this)) { continue; }
+
+		if (CellDist < ClosestDist)
+		{
+			ClosestDist = CellDist;
+			ClosestVehicle = nullptr; // Virtual obstacle, no physical vehicle
+		}
+	}
+
+	// ---- Combine results ----
+	if (ClosestDist < ForwardProbeDistance)
+	{
+		FrontVehicle        = ClosestVehicle;
+		FrontVehicleDistance = ClosestDist;
+
+		if (ClosestVehicle)
+		{
+			// Physical vehicle: maintain safe following distance
+			const float SafeDist = FMath::Max(SafeDistanceMin, CurrentSpeed * SafeDistanceSeconds);
+			bFrontVehicleTooClose = (FrontVehicleDistance <= SafeDist);
+		}
+		else
+		{
+			// Virtual obstacle (locked intersection): always stop
+			bFrontVehicleTooClose = true;
+		}
+	}
+
+	// ---- Debug drawing ----
+	if (bDebugDrawProbe)
+	{
+		DrawDebugSphere(World, ProbeStart, 10.0f, 8, FColor::Green, false, -1.0f, 0, 2.0f);
+
+		const int32 NumSegments = FMath::Max(1, FMath::CeilToInt(ForwardProbeDistance / ForwardProbeRadius));
+		for (int32 i = 0; i <= NumSegments; ++i)
+		{
+			const float Alpha = static_cast<float>(i) / NumSegments;
+			const FVector Pos = FMath::Lerp(ProbeStart, ProbeEnd, Alpha);
+			const FColor SphereColor = (i == NumSegments) ? FColor::Cyan : FColor(0, 128, 128);
+			DrawDebugSphere(World, Pos, ForwardProbeRadius, 12, SphereColor, false, -1.0f, 0, 0.5f);
+		}
+		DrawDebugLine(World, ProbeStart, ProbeEnd, FColor::Cyan, false, -1.0f, 0, 1.0f);
+
+		if (ClosestVehicle || ClosestDist < ForwardProbeDistance)
+		{
+			const float DebugSafeDist = FMath::Max(SafeDistanceMin, CurrentSpeed * SafeDistanceSeconds);
+			const FVector SafeBoundaryPos = ProbeStart + MyDir * DebugSafeDist;
+			DrawDebugSphere(World, SafeBoundaryPos, 15.0f, 8, FColor::Yellow, false, -1.0f, 0, 2.0f);
+
+			const FColor VehColor = bFrontVehicleTooClose ? FColor::Red : FColor::Orange;
+			if (ClosestVehicle)
+			{
+				DrawDebugLine(World, ProbeStart, ClosestVehicle->GetActorLocation(), VehColor, false, -1.0f, 0, 2.0f);
+				DrawDebugSphere(World, ClosestVehicle->GetActorLocation(), 30.0f, 8, VehColor, false, -1.0f, 0, 2.0f);
+			}
+
+			const FVector MidPt = ProbeStart + MyDir * (ClosestDist * 0.5f);
+			DrawDebugString(World, MidPt + FVector(0, 0, 100.0f),
+				FString::Printf(TEXT("%.0f / %.0f%s"), ClosestDist, DebugSafeDist,
+					ClosestVehicle ? TEXT("") : TEXT(" INT")),
+				nullptr, VehColor, 0.0f, true);
 		}
 	}
 }
@@ -278,16 +431,6 @@ void AVehicleActor::SetDebugColor(FLinearColor Color)
 
 void AVehicleActor::SetWaitingForIntersection(bool bWaiting)
 {
-	if (bWaiting)
-	{
-		MovementState = EVehicleMovementState::WaitingIntersection;
-		IntersectionWaitTimer = IntersectionWaitTime;
-	}
-	else
-	{
-		if (MovementState == EVehicleMovementState::WaitingIntersection)
-		{
-			MovementState = EVehicleMovementState::Moving;
-		}
-	}
+	// Deprecated: WaitingIntersection state is no longer used.
+	// All stopping is now handled by the unified forward probe.
 }

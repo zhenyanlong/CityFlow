@@ -471,15 +471,15 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 - 节点 = 道路格（`ECellType::Road`）；边 = `ConnectedMask` 方向位。
 - 代价 = 每步 1（均匀）；启发式 = 曼哈顿距离。
 
-**交叉口占用（双向，v0.4）：**
+**交叉口占用（v0.5 — ⚠️ Bug：锁不生效）：**
 - 交叉口 = 任意 ≥ 3 个连接方向的道路格。
-- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>> IntersectionLocks`：每个交叉口格映射到一组 `(Vehicle, EntryGridDirection)` 对。
-- **方向感知冲突检查：** 进入交叉口之前，车辆的进入网格方向（通过 `GridDirectionUtils::DirectionFromWorldVector(VelocityDirection)` 获得）与已有占用者比较：
-  - 同向 → 不冲突（同车道同向）
-  - 反向 → 不冲突（对向双向车道）
-  - 垂直方向 → **冲突**（交叉路径）；车辆进入 `WaitingIntersection`
-- **锁获取：** 移动至交叉口格后，车辆注册 `(this, EntryDir)` 到该交叉口的占用者集合。
-- **锁释放：** `UpdateIntersectionLocks()` 移除已离开交叉口格或不再活跃的车辆。
+- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>> IntersectionLocks`：每个交叉口格映射到一组 `(Vehicle, {EntryDir, ExitDir})` 对。
+- **入口方向推导：** 改用 `GridDirectionUtils::DirectionFromGridDelta(航点增量)` 替代世界速度向量，即使在样条弯道段也能保证轴对齐方向。
+- **占用者追踪：** `FIntersectionOccupant` 存储车辆的 `(EntryDir, ExitDir)` 对 —— 为未来的方向感知路径交叉逻辑做准备。
+- **锁获取：** 车辆在交叉口格上时每帧调用 `AcquireIntersectionLock(pos, this, EntryDir, ExitDir)`。
+- **锁释放：** `UpdateIntersectionLocks()` 移除 `WorldToGrid` 位置不再匹配锁格键的车辆。
+- **前向探测集成：** `PerformForwardProbe()` 遍历预存的 `PathIntersectionCells`（A\* 路径上的交叉口格，生成时通过 `SetPathIntersections()` 注入）。探测范围内的每个交叉口格通过 `IsIntersectionLockedByOther()` 检查 —— 若被其他车辆占用，则视为虚拟障碍，触发 `WaitingCongestion` 刹车。
+- **⚠️ 已知问题（2026-06-04）：** 交叉口锁机制无法可靠防止两车同时进入同一个交叉口。尽管采用了统一前向探测方案和预存交叉口格数据，车辆在特定条件下仍然无视锁。怀疑根因涉及 `UpdateIntersectionLocks` 释放时序以及探测使用的简化版 `IsIntersectionLockedByOther`（仅判断占用，缺少方向感知路径交叉逻辑）。方向感知双向冲突规则需要完全重新设计。
 
 **拥堵检测：**
 - 每帧 `UpdateCongestion()` 将世界位置映射到网格格。
@@ -506,10 +506,21 @@ struct FVehicleSpawnEntry
 | 状态 | 描述 |
 |---|---|
 | `Idle` | 初始或错误状态 |
-| `Moving` | 沿样条路径移动 |
-| `WaitingCongestion` | 前方车辆过近 |
-| `WaitingIntersection` | 等待交叉口锁；超时自动重试 |
+| `Moving` | 沿样条路径移动；每帧执行前向探测 |
+| `WaitingCongestion` | 前方车辆过近或前方交叉口被锁停；障碍清除后自动恢复 |
+| `WaitingIntersection` | **v0.5 已废弃** — 被统一拥堵模型替代；枚举值保留以兼容 |
 | `Arrived` | 到达终点 |
+
+**v0.5 运动流控：**
+```
+TickMovementSpline:
+  1. PerformForwardProbe() — 统一物理扫描 + 交叉口锁检查（通过 PathIntersectionCells）
+  2. 若 bFrontVehicleTooClose → WaitingCongestion → 减速到 0（StartDeceleration=2500） → return（不推进）
+  3. 若 WaitingCongestion 且障碍清除 → Moving
+  4. 计算速度（终点减速 + 起步加速 via StartAcceleration=2000 / Acceleration=800）
+  5. 推进样条位置
+  6. 若在交叉口格上 → AcquireIntersectionLock()
+```
 
 ---
 

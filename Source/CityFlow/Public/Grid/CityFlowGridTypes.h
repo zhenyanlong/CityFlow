@@ -171,6 +171,16 @@ namespace GridDirectionUtils
 		}
 	}
 
+	/** Determine grid direction from a grid delta (must be axis-aligned). */
+	static EGridDirection DirectionFromGridDelta(const FGridVector& Delta)
+	{
+		if (Delta.X > 0) return EGridDirection::Right;
+		if (Delta.X < 0) return EGridDirection::Left;
+		if (Delta.Y > 0) return EGridDirection::Down;
+		if (Delta.Y < 0) return EGridDirection::Up;
+		return EGridDirection::None;
+	}
+
 	/** Returns true if the two grid directions are perpendicular (e.g. Up and Left). */
 	static bool ArePerpendicular(EGridDirection A, EGridDirection B)
 	{

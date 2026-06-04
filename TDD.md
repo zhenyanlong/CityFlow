@@ -472,15 +472,15 @@ Processes the raw A\* path (all cells preserved) in a single pass, outputting sp
 - Cost = 1 per step (uniform); heuristic = Manhattan distance.
 - Algorithm: standard A\* with `TMap<FGridVector, FAStarNode>` for open/closed sets.
 
-**Intersection Occupation (bidirectional, v0.4):**
+**Intersection Occupation (v0.5 — ⚠️ BUG: not blocking):**
 - An intersection is any road cell with ≥ 3 connected directions.
-- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>> IntersectionLocks`: each intersection cell maps to a set of `(Vehicle, EntryGridDirection)` pairs.
-- **Direction-aware conflict check:** Before entering an intersection, the vehicle's entry grid direction (derived from `GridDirectionUtils::DirectionFromWorldVector(VelocityDirection)`) is compared against existing occupants:
-  - Same direction → no conflict (same lane, same direction)
-  - Opposite direction → no conflict (opposing bidirectional lanes)
-  - Perpendicular direction → **conflict** (crossing paths); vehicle enters `WaitingIntersection`
-- **Lock acquisition:** After moving onto an intersection cell, vehicle registers `(this, EntryDir)` in the intersection's occupant set.
-- **Lock release:** `UpdateIntersectionLocks()` removes vehicles that have left the intersection cell or are no longer active.
+- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>> IntersectionLocks`: each intersection cell maps to a set of `(Vehicle, {EntryDir, ExitDir})` pairs.
+- **Entry direction derivation:** Uses `GridDirectionUtils::DirectionFromGridDelta(WaypointDelta)` instead of world velocity, ensuring axis-aligned direction even on curved spline segments.
+- **Occupant tracking:** `FIntersectionOccupant` stores the vehicle's `(EntryDir, ExitDir)` pair — intended for future direction-aware path-crossing logic.
+- **Lock acquisition:** Vehicle calls `AcquireIntersectionLock(pos, this, EntryDir, ExitDir)` each frame while on an intersection cell.
+- **Lock release:** `UpdateIntersectionLocks()` removes vehicles whose `WorldToGrid` position no longer matches the lock's cell key.
+- **Forward-probe integration:** `PerformForwardProbe()` in `AVehicleActor` walks the pre-stored `PathIntersectionCells` (intersection cells along the A\* path, injected at spawn via `SetPathIntersections()`). Each intersection cell within the probe range is checked via `IsIntersectionLockedByOther()` — if locked by another vehicle, it is treated as a virtual obstacle and triggers `WaitingCongestion` brake.
+- **⚠️ Known issue (2026-06-04):** The intersection lock mechanism does not reliably prevent two vehicles from entering the same intersection. Despite the unified forward-probe approach and pre-stored intersection cell data, vehicles still ignore locks under certain conditions — suspected root cause involves the `UpdateIntersectionLocks` release timing and the probe's simplified `IsIntersectionLockedByOther` (occupancy-only, lacks direction-aware path-crossing logic). Direction-aware bidirectional conflict rules need a complete redesign.
 
 **Congestion Detection:**
 - Each tick, `UpdateCongestion()` maps world positions to grid cells.
@@ -504,15 +504,26 @@ struct FVehicleSpawnEntry
 
 Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `VehicleMesh`, `MoveSpeed`, `DebugColor`, etc. directly in its Blueprint defaults — no DataAsset-driven property override is needed.
 
-#### Vehicle Movement State Machine
+#### Vehicle Movement State Machine (v0.5)
 
 | State | Description |
 |---|---|
 | `Idle` | Initial or error state |
-| `Moving` | Following spline path |
-| `WaitingCongestion` | Stopped due to lead vehicle proximity |
-| `WaitingIntersection` | Waiting for intersection lock; auto-retries after timeout |
+| `Moving` | Following spline path; forward probe runs each frame |
+| `WaitingCongestion` | Stopped due to front vehicle or locked intersection ahead; resumes automatically when obstacle clears |
+| `WaitingIntersection` | **Deprecated in v0.5** — replaced by unified congestion model; enum value retained for compatibility |
 | `Arrived` | Reached destination; broadcasts event |
+
+**v0.5 movement flow:**
+```
+TickMovementSpline:
+  1. PerformForwardProbe() — unified physical sweep + intersection-lock check via PathIntersectionCells
+  2. if bFrontVehicleTooClose → WaitingCongestion → decelerate to 0 (StartDeceleration=2500) → return (don't advance)
+  3. if WaitingCongestion and obstacle cleared → Moving
+  4. Compute speed (terminal deceleration + start boost via StartAcceleration=2000 / Acceleration=800)
+  5. Advance spline position
+  6. if on intersection cell → AcquireIntersectionLock()
+```
 
 ---
 

@@ -37,10 +37,21 @@ void UVehicleManager::Tick(float DeltaTime)
 		TArray<ABuilding*> Origins, Destinations;
 		CollectOriginDestinations(Origins, Destinations);
 
-		if (Origins.Num() == 0 || Destinations.Num() == 0)
+		// Filter out origins blocked by a vehicle that hasn't left the building cell
+		TArray<ABuilding*> UnblockedOrigins;
+		UnblockedOrigins.Reserve(Origins.Num());
+		for (ABuilding* OriginBld : Origins)
 		{
-			UE_LOG(LogVehicleManager, Warning, TEXT("Cannot spawn: Origins=%d, Destinations=%d"),
-				Origins.Num(), Destinations.Num());
+			if (!IsBuildingBlocked(OriginBld))
+			{
+				UnblockedOrigins.Add(OriginBld);
+			}
+		}
+
+		if (UnblockedOrigins.Num() == 0 || Destinations.Num() == 0)
+		{
+			UE_LOG(LogVehicleManager, Warning, TEXT("Cannot spawn: UnblockedOrigins=%d, Destinations=%d"),
+				UnblockedOrigins.Num(), Destinations.Num());
 		}
 		else
 		{
@@ -51,7 +62,7 @@ void UVehicleManager::Tick(float DeltaTime)
 				ShuffledDest.Swap(i, j);
 			}
 
-			ABuilding* Origin = Origins[FMath::RandRange(0, Origins.Num() - 1)];
+			ABuilding* Origin = UnblockedOrigins[FMath::RandRange(0, UnblockedOrigins.Num() - 1)];
 
 			bool bSpawned = false;
 			for (ABuilding* Dest : ShuffledDest)
@@ -69,7 +80,7 @@ void UVehicleManager::Tick(float DeltaTime)
 
 			if (!bSpawned)
 			{
-				for (ABuilding* OtherOrigin : Origins)
+				for (ABuilding* OtherOrigin : UnblockedOrigins)
 				{
 					if (!OtherOrigin || OtherOrigin == Origin)
 					{
@@ -94,7 +105,7 @@ void UVehicleManager::Tick(float DeltaTime)
 			if (!bSpawned)
 			{
 				UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: all %d origin × %d destination pairs failed"),
-					Origins.Num(), Destinations.Num());
+					UnblockedOrigins.Num(), Destinations.Num());
 			}
 		}
 	}
@@ -343,6 +354,9 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 
 	const float TangentLen = GM->GetCellSize();
 	Vehicle->SetSplinePath(SplinePoints, SplineTangentDirs, SplineArriveLengths, SplineLeaveLengths, TangentLen);
+
+	// Store intersections along the path for forward-probe lookup
+	Vehicle->SetPathIntersections(Path);
 
 	ActiveVehicles.Add(Vehicle);
 	OnVehicleSpawned.Broadcast(Vehicle);
@@ -662,7 +676,7 @@ void UVehicleManager::UpdateIntersectionLocks()
 
 	for (auto It = IntersectionLocks.CreateIterator(); It; ++It)
 	{
-		TMap<TObjectPtr<AVehicleActor>, EGridDirection>& VehiclesAtIntersection = It.Value();
+		TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>& VehiclesAtIntersection = It.Value();
 
 		for (auto VehIt = VehiclesAtIntersection.CreateIterator(); VehIt; ++VehIt)
 		{
@@ -688,28 +702,17 @@ void UVehicleManager::UpdateIntersectionLocks()
 	}
 }
 
-bool UVehicleManager::IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle, EGridDirection EntryDir) const
+bool UVehicleManager::IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* Self) const
 {
-	const TMap<TObjectPtr<AVehicleActor>, EGridDirection>* VehiclesAtPos = IntersectionLocks.Find(Pos);
-	if (!VehiclesAtPos || VehiclesAtPos->Num() == 0)
+	const TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>* Occupants = IntersectionLocks.Find(Pos);
+	if (!Occupants || Occupants->Num() == 0)
 	{
 		return false;
 	}
 
-	for (const auto& Pair : *VehiclesAtPos)
+	for (const auto& Pair : *Occupants)
 	{
-		const AVehicleActor* ExistingVehicle = Pair.Key;
-		const EGridDirection ExistingDir = Pair.Value;
-
-		if (!ExistingVehicle || ExistingVehicle == AskingVehicle)
-		{
-			continue;
-		}
-
-		// Only block if the entry directions are perpendicular (crossing paths)
-		// Same direction: same lane, no conflict
-		// Opposite direction: opposing lanes, no conflict
-		if (GridDirectionUtils::ArePerpendicular(ExistingDir, EntryDir))
+		if (Pair.Key && Pair.Key != Self)
 		{
 			return true;
 		}
@@ -718,15 +721,16 @@ bool UVehicleManager::IsIntersectionLockedByOther(const FGridVector& Pos, const 
 	return false;
 }
 
-void UVehicleManager::AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir)
+void UVehicleManager::AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir, EGridDirection ExitDir)
 {
 	if (!Vehicle || EntryDir == EGridDirection::None)
 	{
 		return;
 	}
 
-	TMap<TObjectPtr<AVehicleActor>, EGridDirection>& VehiclesAtPos = IntersectionLocks.FindOrAdd(Pos);
-	VehiclesAtPos.Add(Vehicle, EntryDir);
+	const FIntersectionOccupant NewOcc(EntryDir, ExitDir);
+	TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>& VehiclesAtPos = IntersectionLocks.FindOrAdd(Pos);
+	VehiclesAtPos.FindOrAdd(Vehicle) = NewOcc;
 }
 
 bool UVehicleManager::IsIntersection(const FGridVector& Pos) const
@@ -771,6 +775,44 @@ bool UVehicleManager::IsOccupiedByVehicle(const FGridVector& GridPos) const
 			}
 		}
 	}
+	return false;
+}
+
+bool UVehicleManager::IsBuildingBlocked(ABuilding* Building) const
+{
+	if (!Building)
+	{
+		return false;
+	}
+
+	const FGridVector BuildingAnchor = Building->GetGridPosition();
+	const FVector2D BSize = Building->GetEffectiveBuildingSize();
+	const int32 SizeX = FMath::Max(1, FMath::RoundToInt(BSize.X));
+	const int32 SizeY = FMath::Max(1, FMath::RoundToInt(BSize.Y));
+
+	UGridManager* GM = GetGridManager();
+	if (!GM)
+	{
+		return false;
+	}
+
+	for (const AVehicleActor* Vehicle : ActiveVehicles)
+	{
+		if (!Vehicle || Vehicle->Origin != Building)
+		{
+			continue;
+		}
+
+		const FGridVector VehicleGrid = GM->WorldToGrid(Vehicle->GetActorLocation());
+		const FGridVector LocalPos = VehicleGrid - BuildingAnchor;
+
+		if (LocalPos.X >= 0 && LocalPos.X < SizeX &&
+			LocalPos.Y >= 0 && LocalPos.Y < SizeY)
+		{
+			return true;
+		}
+	}
+
 	return false;
 }
 
@@ -981,7 +1023,7 @@ void UVehicleManager::DebugDrawIntersections() const
 		}
 
 		const FVector WorldPos = GM->GridToWorld(IntersectionPos);
-		const TMap<TObjectPtr<AVehicleActor>, EGridDirection>* VehiclesAtPos = IntersectionLocks.Find(IntersectionPos);
+		const TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>* VehiclesAtPos = IntersectionLocks.Find(IntersectionPos);
 		const bool bLocked = VehiclesAtPos && VehiclesAtPos->Num() > 0;
 		const FColor DrawColor = bLocked ? FColor::Red : FColor::Orange;
 

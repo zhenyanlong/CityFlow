@@ -29,6 +29,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetDestination(class ABuilding* InDestination);
 
+	/** Feed the A* grid path so the vehicle knows which intersection cells it will cross. */
+	void SetPathIntersections(const TArray<FGridVector>& GridPath);
+
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	class ABuilding* GetDestination() const { return Destination; }
 
@@ -43,6 +46,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	float GetMoveSpeed() const { return MoveSpeed; }
+
+	UFUNCTION(BlueprintPure, Category = "Vehicle")
+	float GetCurrentSpeed() const { return CurrentSpeed; }
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	FVector GetVelocityDirection() const { return VelocityDirection; }
@@ -80,11 +86,37 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
 	float VehicleZOffset = 30.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Collision")
+	float ForwardProbeRadius = 50.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Collision")
+	float ForwardProbeDistance = 500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Collision")
+	float SelfAvoidOffset = 150.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Collision")
+	float ProbeVerticalOffset = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Collision")
+	float SafeDistanceMin = 150.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Collision")
+	float SafeDistanceSeconds = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
+	float StartAcceleration = 2000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
+	float StartDeceleration = 2500.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Debug")
 	FLinearColor DebugColor = FLinearColor(0.8f, 0.2f, 0.2f, 1.0f);
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Debug")
+	bool bDebugDrawProbe = false;
+
 	void SetWaitingForIntersection(bool bWaiting);
-	bool IsWaitingForIntersection() const { return MovementState == EVehicleMovementState::WaitingIntersection; }
 
 	class ABuilding* Origin = nullptr;
 
@@ -100,8 +132,15 @@ private:
 	float CurrentSplineDistance = 0.0f;
 	float CurrentSpeed = 0.0f;
 
+	FGridVector PreviousGridPosition;
+
 	TObjectPtr<ABuilding> Destination;
 
-	FGridVector WaitingIntersectionPos;
-	float IntersectionWaitTimer = 0.0f;
+	TWeakObjectPtr<AVehicleActor> FrontVehicle;
+	float FrontVehicleDistance = 0.0f;
+	bool bFrontVehicleTooClose = false;
+
+	TArray<FGridVector> PathIntersectionCells;
+
+	void PerformForwardProbe();
 };

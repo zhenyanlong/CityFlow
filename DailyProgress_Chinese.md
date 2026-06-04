@@ -1,3 +1,29 @@
+## 2026-06-04
+
+### 车辆拥堵与前向探测重构
+
+- 启用 `VehicleMesh` 碰撞（`QueryOnly`）用于物理前车检测
+- 实现 `PerformForwardProbe()`：统一 `SweepMultiByChannel`（ECC_GameTraceChannel1）+ 通过预存 `PathIntersectionCells` 查交叉口锁
+- 新增 `SetPathIntersections()`：在生成时从 A\* 网格路径预计算交叉口格
+- 在 `GridDirectionUtils` 中新增 `DirectionFromGridDelta()`：用轴对齐的网格增量推导入口方向（替代 `DirectionFromWorldVector` 用于交叉口锁）
+- `IntersectionLocks` 从 `TMap<Vehicle*, EGridDirection>` 改为 `TMap<Vehicle*, FIntersectionOccupant{EntryDir, ExitDir}>`
+- 新增 `IsIntersectionLockedByOther(Pos, Self)` 简化版占用检查
+- 移除 `WaitingIntersection` 状态 — 全部停车统一为 `WaitingCongestion`，通过 `StartDeceleration=2500` 平滑减速
+- 简化 `TickMovementSpline`：单一优先级流控（探测 → 刹车或前进）
+- 新增 `IsBuildingBlocked()`：防止从仍有未驶出车辆的建筑生成新车
+- 新增蓝图可配置探测参数：`ForwardProbeRadius`、`ForwardProbeDistance`、`SelfAvoidOffset`、`ProbeVerticalOffset`、`SafeDistanceMin`、`SafeDistanceSeconds`、`StartAcceleration`、`StartDeceleration`
+- 新增 `bDebugDrawProbe`：用链式球体可视化扫描体积
+
+### 交叉口锁 — ⚠️ 未解决 Bug
+
+- 尽管采用了统一前向探测架构和预存 `PathIntersectionCells`，交叉口锁仍然无法可靠防止多车同时进入
+- 特定条件下车辆仍无视锁；怀疑根因包括 `UpdateIntersectionLocks` 在 `VehicleManager::Tick`（所有 Actor 之后）的释放时序，以及简化版 `IsIntersectionLockedByOther` 缺少方向感知路径交叉逻辑
+- 方向感知双向冲突规则需要在下个会话完全重新设计
+
+### TDD 更新
+
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节（交叉口占用 v0.5、运动状态机 v0.5），已记录已知 Bug
+
 ## 2026-06-03
 
 ### 玩家摄像机与移动重构

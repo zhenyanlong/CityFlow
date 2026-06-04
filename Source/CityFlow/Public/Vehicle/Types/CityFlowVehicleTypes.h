@@ -117,6 +117,17 @@ struct CITYFLOW_API FIntersectionLock
 	}
 };
 
+/** Stores (EntryDir, ExitDir) for an occupant of an intersection cell. */
+struct FIntersectionOccupant
+{
+	EGridDirection EntryDir = EGridDirection::None;
+	EGridDirection ExitDir  = EGridDirection::None;
+
+	FIntersectionOccupant() = default;
+	FIntersectionOccupant(EGridDirection InEntry, EGridDirection InExit)
+		: EntryDir(InEntry), ExitDir(InExit) {}
+};
+
 USTRUCT()
 struct CITYFLOW_API FAStarNode
 {

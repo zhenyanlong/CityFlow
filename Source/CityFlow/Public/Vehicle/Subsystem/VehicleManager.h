@@ -55,11 +55,11 @@ public:
 		TArray<float>& OutArriveTangentLengths,
 		TArray<float>& OutLeaveTangentLengths) const;
 
-	UFUNCTION(BlueprintPure, Category = "Vehicle")
-	bool IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* AskingVehicle, EGridDirection EntryDir) const;
-
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
-	void AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir);
+	void AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir, EGridDirection ExitDir);
+
+	/** Returns true if the given intersection cell is locked by any vehicle other than Self. */
+	bool IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* Self) const;
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	const TArray<AVehicleActor*>& GetActiveVehicles() const { return ActiveVehicles; }
@@ -99,6 +99,7 @@ private:
 
 	bool IsIntersection(const FGridVector& Pos) const;
 	bool IsOccupiedByVehicle(const FGridVector& GridPos) const;
+	bool IsBuildingBlocked(class ABuilding* Building) const;
 	void UpdateVehicleGridOccupancy(AVehicleActor* Vehicle);
 
 	static int32 ManhattanDist(const FGridVector& A, const FGridVector& B);
@@ -112,7 +113,7 @@ private:
 	UPROPERTY()
 	TArray<AVehicleActor*> ArrivedVehicles;
 
-	TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, EGridDirection>> IntersectionLocks;
+	TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>> IntersectionLocks;
 
 	UPROPERTY()
 	TMap<FGridVector, AVehicleActor*> VehicleGridMap;
