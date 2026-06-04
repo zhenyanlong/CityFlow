@@ -575,6 +575,18 @@ struct FVehicleSpawnEntry
 | 删除 | `IA_RemoveItem`（鼠标右键）→ `Started`/`Triggered`/`Completed` 事件 → `TryRemoveAtCursor()` 辅助函数，通过 `LastRemovedGridPos` 去重实现拖拽连续删除。从网格 `Cell.RoadActor` 查找 Actor，不依赖碰撞命中。 |
 | 蓝图可配置 | `PlaceableActorClass`（任意 `AGridPlaceableActor` 子类）；`IA_PlaceItem`、`IA_RemoveItem` |
 
+#### 放置开关
+
+`ACityFlowPlayerController` 提供放置开关，用于与其他系统（L-system、模拟）协调：
+
+| API | 描述 |
+|---|---|
+| `EnablePlacement()` | 恢复光标采样、生成新预览 Actor、显示鼠标光标 |
+| `DisablePlacement()` | 停止光标采样、销毁预览 Actor |
+| `IsPlacementEnabled()` | 查询当前放置开关状态 |
+
+放置关闭时，`Tick()` 跳过 `UpdatePreviewPosition()`，`TryPlaceAtCursor()` / `TryRemoveAtCursor()` 均为空操作。进入模拟时自动关闭放置，重新规划时自动恢复。
+
 ---
 
 ### 2.9 网格可视化
@@ -665,11 +677,24 @@ struct FVehicleSpawnEntry
 - `ShowGameWidget()` / `ShowEvaluationWidget()` 切换可见 Widget。
 
 **CityFlowGameWidget**（`UUserWidget` C++ 基类）：
+- 使用 `BindWidget` 元标记自动绑定 UMG 控件——蓝图子类只需放置同名控件，无需手动绑定。
+- **绑定的控件：**
+  - `Btn_TriggerLSystem`（`UButton`）— 触发 L-system 毛细道路生成
+  - `Btn_StartSimulation`（`UButton`）— 启动模拟阶段
+  - `Btn_RestartPlanning`（`UButton`）— 返回规划阶段（仅在结算阶段可见）
+  - `Txt_Phase`（`UTextBlock`）— 显示当前游戏阶段
+  - `Txt_Budget`（`UTextBlock`）— 显示剩余道路预算
+  - `Txt_Score`（`UTextBlock`）— 显示当前分数
+- **按钮自动绑定：** `NativeConstruct()` 自动绑定所有按钮的 `OnClicked` 事件；`NativeDestruct()` 通过 `RemoveAll` 清理。
+- **按钮显隐状态：** `UpdateButtonStates(Phase)` 管理按钮可见性：
+  - 规划阶段：`Btn_TriggerLSystem` + `Btn_StartSimulation` 可见，`Btn_RestartPlanning` 隐藏
+  - 结算阶段：`Btn_RestartPlanning` 可见，操作按钮隐藏
+- **阶段感知的放置开关：** `StartSimulation()` 调用 `PC->DisablePlacement()` 停止放置预览；`RestartPlanning()` 调用 `PC->EnablePlacement()` 恢复。
+- **自动更新文本：** `HandleGamePhaseChanged()`、`HandleScoreChanged()`、`HandleLSystemStep()` 在 C++ 中直接更新 `Txt_Phase` / `Txt_Score` / `Txt_Budget`，无需蓝图参与。
 - 暴露 `BlueprintImplementableEvent` 回调：`OnPhaseChanged_BP`、`OnScoreChanged_BP`、`OnBudgetChanged_BP`、`OnLSystemStep_BP`、`OnLSystemFinished_BP`、`OnEvaluation_BP`。
-- 提供蓝图可调用操作：`StartSimulation()`、`EndSimulation()`、`RestartPlanning()`、`TriggerLSystem()`。
 - 在 `NativeConstruct()` 中绑定 GameMode/ScoringManager/LSystemManager 委托。
 
-蓝图子类使用 UMG 实现视觉布局（按钮、文本块、进度条）。
+蓝图子类只需放置指定名称的 UMG 控件——所有绑定和逻辑在 C++ 中处理。
 
 ---
 

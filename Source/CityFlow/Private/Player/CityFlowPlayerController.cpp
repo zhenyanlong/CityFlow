@@ -66,7 +66,10 @@ void ACityFlowPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	UpdatePreviewPosition();
+	if (bPlacementEnabled)
+	{
+		UpdatePreviewPosition();
+	}
 }
 
 void ACityFlowPlayerController::SpawnPreview()
@@ -131,9 +134,32 @@ void ACityFlowPlayerController::DestroyPreview()
 	}
 }
 
+void ACityFlowPlayerController::EnablePlacement()
+{
+	if (bPlacementEnabled)
+	{
+		return;
+	}
+
+	bPlacementEnabled = true;
+	bShowMouseCursor = true;
+	SpawnPreview();
+}
+
+void ACityFlowPlayerController::DisablePlacement()
+{
+	if (!bPlacementEnabled)
+	{
+		return;
+	}
+
+	bPlacementEnabled = false;
+	DestroyPreview();
+}
+
 void ACityFlowPlayerController::TryPlaceAtCursor()
 {
-	if (!PreviewActor || !PlaceableActorClass)
+	if (!bPlacementEnabled || !PreviewActor || !PlaceableActorClass)
 	{
 		return;
 	}
@@ -199,6 +225,11 @@ void ACityFlowPlayerController::OnPlaceItemCompleted_Implementation()
 
 void ACityFlowPlayerController::TryRemoveAtCursor()
 {
+	if (!bPlacementEnabled)
+	{
+		return;
+	}
+
 	UGridManager* GM = GetGridManager();
 	if (!GM || !GM->IsGridInitialized())
 	{

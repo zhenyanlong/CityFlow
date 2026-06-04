@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/Button.h"
+#include "Components/TextBlock.h"
 #include "GameMode/Types/CityFlowGameTypes.h"
 #include "CityFlowGameWidget.generated.h"
 
@@ -14,19 +16,29 @@ public:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	void StartSimulation();
-
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	void EndSimulation();
-
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	void RestartPlanning();
-
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	void TriggerLSystem();
-
 protected:
+	// ---- BindWidget 控件：蓝图放同名控件即自动绑定 ----
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_TriggerLSystem;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_StartSimulation;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_RestartPlanning;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_Phase;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_Budget;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_Score;
+
+	// ---- 蓝图事件回调 ----
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "CityFlow|UI")
 	void OnPhaseChanged_BP(ECityFlowGamePhase OldPhase, ECityFlowGamePhase NewPhase);
 
@@ -48,19 +60,16 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "CityFlow|UI")
 	void OnLSystemFinished_BP(bool bAllConnected);
 
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	ECityFlowGamePhase GetCurrentPhase() const;
-
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	int32 GetTotalScore() const;
-
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	int32 GetRemainingBudget() const;
-
-	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
-	float GetSimulationTimeRemaining() const;
-
 private:
+	void StartSimulation();
+	void EndSimulation();
+	void RestartPlanning();
+	void TriggerLSystem();
+
+	void UpdatePhaseText(ECityFlowGamePhase Phase);
+	void UpdateBudgetText();
+	void UpdateButtonStates(ECityFlowGamePhase Phase);
+
 	UFUNCTION()
 	void HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, ECityFlowGamePhase NewPhase);
 

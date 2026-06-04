@@ -13,6 +13,17 @@
 - 修复 pitch 抖动问题：将事后 `SetControlRotation` 钳位改为预钳位 delta 方案（后简化为蓝图全权处理 pitch）
 - 更新 TDD.md 和 TDD_Chinese.md 第 2.8 节，记录完整的摄像机/移动架构
 
+### 放置开关与 UI BindWidget
+
+- 在 `ACityFlowPlayerController` 中添加 `EnablePlacement()` / `DisablePlacement()` / `IsPlacementEnabled()`，守卫 `Tick()` 预览更新和 `TryPlaceAtCursor()` / `TryRemoveAtCursor()`
+- 禁用时停止光标采样并销毁预览 Actor；启用时生成新预览并恢复
+- `UCityFlowGameWidget::StartSimulation()` 自动禁用放置；`RestartPlanning()` 自动恢复
+- 在 `UCityFlowGameWidget` 中添加基于 `BindWidget` 的 UMG 控件：`Btn_TriggerLSystem`、`Btn_StartSimulation`、`Btn_RestartPlanning`、`Txt_Phase`、`Txt_Budget`、`Txt_Score`
+- 在 `NativeConstruct()` 中实现按钮 `OnClicked` 事件自动绑定，`NativeDestruct()` 中清理
+- 添加 `UpdateButtonStates()` 实现阶段感知的按钮显隐（操作按钮在规划阶段可见，重新规划按钮在结算阶段可见）
+- 添加 `UpdatePhaseText()` / `UpdateBudgetText()` 在 C++ 委托回调中自动更新 TextBlock 内容
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.8 节（放置开关）和第 2.12 节（UI 系统 BindWidget）
+
 ## 2026-06-02
 
 ### 双向车道与驾驶方向配置

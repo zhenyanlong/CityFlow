@@ -17,6 +17,15 @@ class CITYFLOW_API ACityFlowPlayerController : public APlayerController
 public:
 	ACityFlowPlayerController();
 
+	UFUNCTION(BlueprintCallable, Category = "Placement")
+	void EnablePlacement();
+
+	UFUNCTION(BlueprintCallable, Category = "Placement")
+	void DisablePlacement();
+
+	UFUNCTION(BlueprintPure, Category = "Placement")
+	bool IsPlacementEnabled() const { return bPlacementEnabled; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -62,6 +71,8 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<AGridPlaceableActor> PreviewActor;
+
+	bool bPlacementEnabled = true;
 
 private:
 	void TryPlaceAtCursor();

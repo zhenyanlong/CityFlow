@@ -13,6 +13,17 @@
 - Fixed pitch jitter by replacing post-clamp `SetControlRotation` with pre-clamp delta approach (later simplified to Blueprint-only pitch)
 - Updated TDD.md and TDD_Chinese.md section 2.8 with full camera/movement architecture
 
+### Placement Toggle & UI BindWidget
+
+- Added `EnablePlacement()` / `DisablePlacement()` / `IsPlacementEnabled()` to `ACityFlowPlayerController`, guarded `Tick()` preview update and `TryPlaceAtCursor()` / `TryRemoveAtCursor()`
+- Disable stops cursor sampling and destroys preview actor; Enable spawns new preview and resumes
+- `UCityFlowGameWidget::StartSimulation()` auto-disables placement; `RestartPlanning()` auto-re-enables
+- Added `BindWidget`-based UMG controls to `UCityFlowGameWidget`: `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`
+- Implemented auto-binding of button `OnClicked` events in `NativeConstruct()`, cleanup in `NativeDestruct()`
+- Added `UpdateButtonStates()` for phase-aware button visibility (action buttons visible in Planning, restart in Evaluation)
+- Added `UpdatePhaseText()` / `UpdateBudgetText()` to auto-update TextBlock content from C++ delegate callbacks
+- Updated TDD.md and TDD_Chinese.md sections 2.8 (Placement Toggle) and 2.12 (UI System BindWidget)
+
 ## 2026-06-02
 
 ### Bidirectional Lanes & Driving Side Configuration

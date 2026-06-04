@@ -578,6 +578,18 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Removal | `IA_RemoveItem` (right mouse button) → `Started`/`Triggered`/`Completed` events → `TryRemoveAtCursor()` helper with `LastRemovedGridPos` deduplication for drag-to-remove. Looks up the actor from `Cell.RoadActor` in the grid instead of relying on collision hit. |
 | Configurable (Blueprint) | `PlaceableActorClass` (any `AGridPlaceableActor` subclass); `IA_PlaceItem`, `IA_RemoveItem` |
 
+#### Placement Toggle
+
+`ACityFlowPlayerController` provides a placement on/off switch for coordinating with other systems (L-system, simulation):
+
+| API | Description |
+|---|---|
+| `EnablePlacement()` | Resumes cursor sampling, spawns a new preview actor, shows mouse cursor |
+| `DisablePlacement()` | Stops cursor sampling, destroys the preview actor |
+| `IsPlacementEnabled()` | Queries current placement toggle state |
+
+When placement is disabled, `Tick()` skips `UpdatePreviewPosition()` and both `TryPlaceAtCursor()` / `TryRemoveAtCursor()` are no-ops. Placement is automatically disabled when simulation starts and re-enabled on restart.
+
 ---
 
 ### 2.9 Grid Visualization
@@ -669,11 +681,24 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 - `ShowGameWidget()` / `ShowEvaluationWidget()` swap visible widgets.
 
 **CityFlowGameWidget** (`UUserWidget` C++ base):
+- Uses `BindWidget` meta specifiers to auto-bind UMG controls — Blueprint subclasses simply place controls with matching names, no manual binding required.
+- **Bound controls:**
+  - `Btn_TriggerLSystem` (`UButton`) — triggers L-system capillary road generation
+  - `Btn_StartSimulation` (`UButton`) — starts the simulation phase
+  - `Btn_RestartPlanning` (`UButton`) — returns to planning phase (visible only during Evaluation)
+  - `Txt_Phase` (`UTextBlock`) — displays current game phase
+  - `Txt_Budget` (`UTextBlock`) — displays remaining road budget
+  - `Txt_Score` (`UTextBlock`) — displays current score
+- **Button auto-binding:** `NativeConstruct()` binds all button `OnClicked` events automatically; `NativeDestruct()` cleans up with `RemoveAll`.
+- **Button visibility states:** `UpdateButtonStates(Phase)` manages button visibility:
+  - Planning phase: `Btn_TriggerLSystem` + `Btn_StartSimulation` visible, `Btn_RestartPlanning` hidden
+  - Evaluation phase: `Btn_RestartPlanning` visible, action buttons hidden
+- **Phase-aware placement toggle:** `StartSimulation()` calls `PC->DisablePlacement()` to stop placement preview; `RestartPlanning()` calls `PC->EnablePlacement()` to resume.
+- **Auto-updating text:** `HandleGamePhaseChanged()`, `HandleScoreChanged()`, `HandleLSystemStep()` update `Txt_Phase` / `Txt_Score` / `Txt_Budget` text in C++ without Blueprint involvement.
 - Exposes `BlueprintImplementableEvent` callbacks for phase changes (`OnPhaseChanged_BP`), score updates (`OnScoreChanged_BP`), budget changes (`OnBudgetChanged_BP`), L-system progress (`OnLSystemStep_BP`, `OnLSystemFinished_BP`), evaluation (`OnEvaluation_BP`).
-- Provides Blueprint-callable actions: `StartSimulation()`, `EndSimulation()`, `RestartPlanning()`, `TriggerLSystem()`.
 - Binds to GameMode/ScoringManager/LSystemManager delegates in `NativeConstruct()`.
 
-Blueprint subclasses implement the visual layout with UMG (buttons, text blocks, progress bars).
+Blueprint subclasses only need to place the named UMG controls — all binding and logic is handled in C++.
 
 ---
 
