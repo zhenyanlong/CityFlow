@@ -1,5 +1,6 @@
 #include "Grid/RoadTile.h"
 #include "Grid/GridManager.h"
+#include "Vehicle/Actor/VehicleActor.h"
 #include "Components/StaticMeshComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogRoadTile, Log, All);
@@ -16,18 +17,53 @@ static FVector GetDirectionLocalVector(EGridDirection Dir)
 	}
 }
 
+static FString DirToString(EGridDirection Dir)
+{
+	switch (Dir)
+	{
+	case EGridDirection::Up:    return TEXT("Up");
+	case EGridDirection::Down:  return TEXT("Down");
+	case EGridDirection::Left:  return TEXT("Left");
+	case EGridDirection::Right: return TEXT("Right");
+	default:                    return TEXT("None");
+	}
+}
+
 ARoadTile::ARoadTile()
 {
 	PlaceableType = EPlaceableType::Road;
+
+	IntersectionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("IntersectionBox"));
+	IntersectionBox->SetupAttachment(RootSceneComponent);
+	IntersectionBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// ObjectType = Vehicle so that VehicleMesh (QueryVehicle preset, which overlaps
+	// with Vehicle channel) generates BeginOverlap / EndOverlap events for the lock life-cycle.
+	IntersectionBox->SetCollisionObjectType(ECollisionChannel::ECC_Vehicle);
+	IntersectionBox->SetCollisionResponseToAllChannels(ECR_Ignore);
+	IntersectionBox->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Block);
+	IntersectionBox->SetCollisionResponseToChannel(ECollisionChannel::ECC_Vehicle, ECR_Overlap);
+	IntersectionBox->SetGenerateOverlapEvents(true);
 }
 
 void ARoadTile::BeginPlay()
 {
 	Super::BeginPlay();
+
+	IntersectionBox->OnComponentBeginOverlap.AddDynamic(this, &ARoadTile::OnIntersectionBoxBeginOverlap);
+	IntersectionBox->OnComponentEndOverlap.AddDynamic(this, &ARoadTile::OnIntersectionBoxEndOverlap);
 }
 
 void ARoadTile::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// Clear all tables so no dangling references remain
+	DirectionOccupants.Empty();
+	PendingReservations.Empty();
+	VehicleEntryDirs.Empty();
+	PendingReservationTimestamps.Empty();
+	ServingDirection = EGridDirection::None;
+	ServedCount = 0;
+	WaitingDirs.Empty();
+
 	UGridManager* GM = GetGridManager();
 	if (GM)
 	{
@@ -52,6 +88,17 @@ void ARoadTile::OnPlacedOnGrid_Implementation()
 
 void ARoadTile::OnRemovedFromGrid_Implementation()
 {
+	// Clear all intersection tables
+	DirectionOccupants.Empty();
+	PendingReservations.Empty();
+	VehicleEntryDirs.Empty();
+	PendingReservationTimestamps.Empty();
+	ServingDirection = EGridDirection::None;
+	ServedCount = 0;
+	WaitingDirs.Empty();
+
+	IntersectionBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 	UGridManager* GM = GetGridManager();
 	if (GM)
 	{
@@ -158,6 +205,8 @@ void ARoadTile::UpdateAppearance()
 		const float BaseScale = (ReferenceCellSize > 0.0f) ? (CellSize / ReferenceCellSize) : 1.0f;
 		SetActorScale3D(ScaleMult * BaseScale);
 	}
+
+	UpdateIntersectionBox();
 }
 
 bool ARoadTile::FindMeshConfig(uint8 Mask, UStaticMesh*& OutMesh, float& OutYaw, FVector& OutScaleMultiplier) const
@@ -266,4 +315,573 @@ bool ARoadTile::GetSplinePath(EGridDirection EntryDir, EGridDirection ExitDir, T
 	OutWorldPoints.Add(ActorXf.TransformPosition(GetDirectionLocalVector(EntryDir) * HalfCell));
 	OutWorldPoints.Add(ActorXf.TransformPosition(GetDirectionLocalVector(ExitDir) * HalfCell));
 	return true;
+}
+
+// ================================================================
+//  Intersection Box & Lock — Direction-Based Occupancy
+// ================================================================
+
+void ARoadTile::UpdateIntersectionBox()
+{
+	if (!IsPlacedOnGrid())
+	{
+		IntersectionBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		return;
+	}
+
+	const bool bIsIntersection = IsIntersection();
+
+	if (bIsIntersection)
+	{
+		UGridManager* GM = GetGridManager();
+		if (!GM) { return; }
+
+		const float CellSize = GM->GetCellSize();
+		const float HalfExtent = CellSize * 0.5f;
+
+		// Cancel inherited actor scale so the world-space box equals exactly one cell.
+		const FVector ActorScale = GetActorScale3D();
+		const float InvScaleXY = (FMath::Abs(ActorScale.X) > KINDA_SMALL_NUMBER) ? (1.0f / ActorScale.X) : 1.0f;
+		const float LocalHalfExtent = HalfExtent * InvScaleXY;
+		const float LocalZHalf = IntersectionBoxHalfHeight * InvScaleXY;
+
+		IntersectionBox->SetBoxExtent(FVector(LocalHalfExtent, LocalHalfExtent, LocalZHalf));
+		IntersectionBox->SetRelativeLocation(FVector(0.0f, 0.0f, IntersectionBoxHalfHeight * InvScaleXY));
+		IntersectionBox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
+		UE_LOG(LogRoadTile, Verbose, TEXT("[%s] IntersectionBox ENABLED at grid (%d,%d), cell=%.0f, worldHalf=%.0f, localHalf=%.0f, scale=%.2f"),
+			*GetName(), GridPosition.X, GridPosition.Y, CellSize, HalfExtent, LocalHalfExtent, ActorScale.X);
+	}
+	else
+	{
+		IntersectionBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+}
+
+bool ARoadTile::IsIntersection() const
+{
+	UGridManager* GM = GetGridManager();
+	if (!GM || !GM->IsGridInitialized())
+	{
+		return false;
+	}
+
+	const FGridCell& Cell = GM->GetCell(GridPosition);
+	if (Cell.Type != ECellType::Road)
+	{
+		return false;
+	}
+
+	int32 ConnCount = 0;
+	if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Up))    ++ConnCount;
+	if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Down))  ++ConnCount;
+	if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Left))  ++ConnCount;
+	if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
+
+	return ConnCount >= 3;
+}
+
+bool ARoadTile::IsAnyDirectionOccupied() const
+{
+	// A direction is "occupied" if there's at least one vehicle physically inside
+	// or at least one pending reservation for it.
+	for (const auto& Pair : DirectionOccupants)
+	{
+		if (Pair.Value.Num() > 0) return true;
+	}
+	for (const auto& Pair : PendingReservations)
+	{
+		if (Pair.Value.Num() > 0) return true;
+	}
+	return false;
+}
+
+// ---- Helper ----
+
+static TSet<EGridDirection> CollectOccupiedDirections(
+	const TMap<EGridDirection, TSet<TWeakObjectPtr<AVehicleActor>>>& DirOccupants,
+	const TMap<EGridDirection, TSet<TWeakObjectPtr<AVehicleActor>>>& PendingRes)
+{
+	TSet<EGridDirection> Result;
+	for (const auto& Pair : DirOccupants)
+	{
+		if (Pair.Value.Num() > 0) Result.Add(Pair.Key);
+	}
+	for (const auto& Pair : PendingRes)
+	{
+		if (Pair.Value.Num() > 0) Result.Add(Pair.Key);
+	}
+	return Result;
+}
+
+static void PurgeInvalidWeakRefs(TMap<EGridDirection, TSet<TWeakObjectPtr<AVehicleActor>>>& Map)
+{
+	for (auto& Pair : Map)
+	{
+		Pair.Value.Remove(TWeakObjectPtr<AVehicleActor>());
+	}
+	// Remove empty direction keys
+	for (auto It = Map.CreateIterator(); It; ++It)
+	{
+		if (It.Value().Num() == 0)
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
+void ARoadTile::ReleaseVehicleFromAllTables(AVehicleActor* Vehicle)
+{
+	if (!Vehicle) return;
+
+	// Remove from DirectionOccupants
+	for (auto& Pair : DirectionOccupants)
+	{
+		Pair.Value.Remove(Vehicle);
+	}
+	// Remove empty keys
+	for (auto It = DirectionOccupants.CreateIterator(); It; ++It)
+	{
+		if (It.Value().Num() == 0) It.RemoveCurrent();
+	}
+
+	// Remove from PendingReservations
+	for (auto& Pair : PendingReservations)
+	{
+		Pair.Value.Remove(Vehicle);
+	}
+	for (auto It = PendingReservations.CreateIterator(); It; ++It)
+	{
+		if (It.Value().Num() == 0) It.RemoveCurrent();
+	}
+
+	// Remove reverse map entry
+	VehicleEntryDirs.Remove(Vehicle);
+
+	// Remove timestamp
+	PendingReservationTimestamps.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+}
+
+EGridDirection ARoadTile::FindEntryDirForVehicle(AVehicleActor* Vehicle) const
+{
+	if (!Vehicle) return EGridDirection::None;
+	const EGridDirection* Found = VehicleEntryDirs.Find(TWeakObjectPtr<AVehicleActor>(Vehicle));
+	return Found ? *Found : EGridDirection::None;
+}
+
+// ---- Public API ----
+
+bool ARoadTile::TryAcquireIntersectionLock(AVehicleActor* Vehicle, EGridDirection EntryDir)
+{
+	if (!Vehicle || EntryDir == EGridDirection::None)
+	{
+		return false;
+	}
+
+	// 0. Refuse if vehicle has already passed through this intersection.
+	//    Prevents self-re-entry: a vehicle that just exited the box can still
+	//    sweep it via forward probe and would otherwise re-acquire the lock.
+	if (Vehicle->HasPassedIntersection(this))
+	{
+		return false;
+	}
+
+	// 1. Purge stale entries from all tables
+	PurgeInvalidWeakRefs(DirectionOccupants);
+	PurgeInvalidWeakRefs(PendingReservations);
+	// Purge invalid keys from VehicleEntryDirs
+	for (auto It = VehicleEntryDirs.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+	}
+
+	// 2. Re-entry: vehicle already has any recorded entry in this intersection → always pass.
+	//    This eliminates false rejections caused by direction-derivation drift on curved splines
+	//    where the probe direction (e.g. Right) diverges from the originally-granted direction (e.g. Down).
+	const EGridDirection* ExistingDir = VehicleEntryDirs.Find(TWeakObjectPtr<AVehicleActor>(Vehicle));
+	if (ExistingDir)
+	{
+		UE_LOG(LogRoadTile, Verbose, TEXT("[%s] Lock RE-ENTRY for %s (registered=%s, probing=%s)"),
+			*GetName(), *Vehicle->GetName(), *DirToString(*ExistingDir), *DirToString(EntryDir));
+		return true;
+	}
+	// 3. Conflict check with round-robin scheduling.
+	//    When multiple directions compete, each direction gets at most
+	//    MaxConsecutiveGrants vehicles before the lock switches to the next waiting direction.
+	const TSet<EGridDirection> OccupiedDirs = CollectOccupiedDirections(DirectionOccupants, PendingReservations);
+
+	// Helper: reject and enqueue
+	auto RejectAndEnqueue = [&](const FString& Reason)
+	{
+		WaitingDirs.Add(EntryDir);
+
+		FString OccupiedStr;
+		for (EGridDirection D : OccupiedDirs) { OccupiedStr += DirToString(D) + TEXT(" "); }
+
+		UE_LOG(LogRoadTile, Verbose, TEXT("[%s] REJECT %s dir=%s (reason=%s, occupied=%s, serving=%s, count=%d)"),
+			*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), *Reason, *OccupiedStr,
+			*DirToString(ServingDirection), ServedCount);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
+				FString::Printf(TEXT("[%s] REJECT %s dir=%s (%s)"),
+					*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), *Reason));
+		}
+	};
+
+	if (OccupiedDirs.Num() == 0)
+	{
+		// Intersection is physically empty.
+		if (WaitingDirs.Num() > 0)
+		{
+			// ServingDirection was already set by EndOverlap when the last vehicle left.
+			// Only grant if the probing direction matches.
+			if (EntryDir == ServingDirection)
+			{
+				ServedCount = 1;
+			}
+			else
+			{
+				RejectAndEnqueue(FString::Printf(TEXT("waiting for %s"), *DirToString(ServingDirection)));
+				return false;
+			}
+		}
+		else
+		{
+			// Only one direction (or first arrival): no competition.
+			ServingDirection = EntryDir;
+			ServedCount = 1;
+		}
+	}
+	else if (OccupiedDirs.Contains(EntryDir))
+	{
+		// Same direction as current occupants.
+		if (ServingDirection == EntryDir && ServedCount < MaxConsecutiveGrants)
+		{
+			ServedCount++;
+		}
+		else
+		{
+			// Turn limit reached. Don't enqueue — this direction already had its
+			// turn; enqueuing it would give it a 50% chance of re-winning the
+			// next round, starving other directions.
+			UE_LOG(LogRoadTile, Verbose, TEXT("[%s] REJECT %s dir=%s (turn limit reached, serving=%s)"),
+				*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), *DirToString(ServingDirection));
+			return false;
+		}
+	}
+	else
+	{
+		// Crossing direction — only grant if we're actively serving this direction
+		// and haven't exhausted its round yet.
+		if (ServingDirection == EntryDir && ServedCount < MaxConsecutiveGrants)
+		{
+			ServedCount++;
+		}
+		else
+		{
+			RejectAndEnqueue(TEXT("crossing"));
+			return false;
+		}
+	}
+
+	// 4. Grant: if this direction was waiting, it's now been served — remove from queue
+	WaitingDirs.Remove(EntryDir);
+
+	PendingReservations.FindOrAdd(EntryDir).Add(Vehicle);
+	VehicleEntryDirs.Add(TWeakObjectPtr<AVehicleActor>(Vehicle), EntryDir);
+
+	if (UWorld* World = GetWorld())
+	{
+		PendingReservationTimestamps.Add(TWeakObjectPtr<AVehicleActor>(Vehicle), World->GetTimeSeconds());
+	}
+
+	UE_LOG(LogRoadTile, Verbose, TEXT("[%s] Lock GRANTED for %s dir=%s (pending=%d, occupants=%d)"),
+		*GetName(), *Vehicle->GetName(), *DirToString(EntryDir),
+		PendingReservations.Contains(EntryDir) ? PendingReservations[EntryDir].Num() : 0,
+		DirectionOccupants.Contains(EntryDir) ? DirectionOccupants[EntryDir].Num() : 0);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
+			FString::Printf(TEXT("[%s] GRANT %s dir=%s (pending=%d)"),
+				*GetName(), *Vehicle->GetName(), *DirToString(EntryDir),
+				PendingReservations.Contains(EntryDir) ? PendingReservations[EntryDir].Num() : 0));
+	}
+
+	return true;
+}
+
+// ---- Overlap Events ----
+
+void ARoadTile::OnIntersectionBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	AVehicleActor* Vehicle = Cast<AVehicleActor>(OtherActor);
+	if (!Vehicle)
+	{
+		return;
+	}
+
+	// Find the vehicle's registered entry direction
+	EGridDirection EntryDir = FindEntryDirForVehicle(Vehicle);
+	if (EntryDir == EGridDirection::None)
+	{
+		// Vehicle entered the box without a prior reservation — infer direction from velocity
+		const FVector Vel = Vehicle->GetVelocityDirection();
+		EntryDir = GridDirectionUtils::DirectionFromWorldVector(Vel);
+		if (EntryDir == EGridDirection::None)
+		{
+			UE_LOG(LogRoadTile, Warning, TEXT("[%s] Vehicle %s entered box with unknown direction — skipped"),
+				*GetName(), *Vehicle->GetName());
+			return;
+		}
+		VehicleEntryDirs.Add(TWeakObjectPtr<AVehicleActor>(Vehicle), EntryDir);
+	}
+
+	// Move from pending → occupants
+	{
+		TSet<TWeakObjectPtr<AVehicleActor>>* PendingSet = PendingReservations.Find(EntryDir);
+		if (PendingSet)
+		{
+			PendingSet->Remove(Vehicle);
+			if (PendingSet->Num() == 0)
+			{
+				PendingReservations.Remove(EntryDir);
+			}
+		}
+	}
+
+	// Clear timestamp now that vehicle has entered the box
+	PendingReservationTimestamps.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+
+	DirectionOccupants.FindOrAdd(EntryDir).Add(Vehicle);
+
+	const int32 TotalInBox = DirectionOccupants.Contains(EntryDir) ? DirectionOccupants[EntryDir].Num() : 0;
+
+	UE_LOG(LogRoadTile, Verbose, TEXT("[%s] Vehicle %s ENTERED box dir=%s (occupants: %d)"),
+		*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), TotalInBox);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+			FString::Printf(TEXT("[%s] ENTER %s dir=%s (inside: %d, pending: %d)"),
+				*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), TotalInBox,
+				PendingReservations.Contains(EntryDir) ? PendingReservations[EntryDir].Num() : 0));
+	}
+}
+
+void ARoadTile::OnIntersectionBoxEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	AVehicleActor* Vehicle = Cast<AVehicleActor>(OtherActor);
+	if (!Vehicle)
+	{
+		return;
+	}
+
+	EGridDirection EntryDir = FindEntryDirForVehicle(Vehicle);
+	const bool bHadEntry = (EntryDir != EGridDirection::None);
+
+	// Remove from occupants
+	if (bHadEntry)
+	{
+		TSet<TWeakObjectPtr<AVehicleActor>>* OccSet = DirectionOccupants.Find(EntryDir);
+		if (OccSet)
+		{
+			OccSet->Remove(Vehicle);
+			if (OccSet->Num() == 0)
+			{
+				DirectionOccupants.Remove(EntryDir);
+			}
+		}
+	}
+
+	// Also clean up from pending (defensive, shouldn't normally be needed)
+	{
+		for (auto& Pair : PendingReservations)
+		{
+			Pair.Value.Remove(Vehicle);
+		}
+		for (auto It = PendingReservations.CreateIterator(); It; ++It)
+		{
+			if (It.Value().Num() == 0) It.RemoveCurrent();
+		}
+	}
+
+	// Remove from reverse-lookup
+	VehicleEntryDirs.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+
+	// Mark this intersection as passed so the vehicle can never re-acquire the lock
+	// (prevent self-re-entry: forward probe still sweeps the box just after exit)
+	Vehicle->MarkIntersectionPassed(this);
+
+	// Clear timestamp
+	PendingReservationTimestamps.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+
+	// Purge stale entries
+	PurgeInvalidWeakRefs(DirectionOccupants);
+	PurgeInvalidWeakRefs(PendingReservations);
+	for (auto It = VehicleEntryDirs.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+	}
+	for (auto It = PendingReservationTimestamps.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+	}
+
+	const bool bStillOccupied = IsAnyDirectionOccupied();
+
+	// If the intersection is now completely free, decide who goes next
+	if (!bStillOccupied)
+	{
+		if (WaitingDirs.Num() > 0)
+		{
+			// Peek the first waiting direction — don't remove yet.
+			// Removal happens in TryAcquire when a vehicle from this direction is actually granted.
+			EGridDirection NextDir = EGridDirection::None;
+			for (EGridDirection D : WaitingDirs)
+			{
+				NextDir = D;
+				break;
+			}
+			ServingDirection = NextDir;
+			ServedCount = 0;
+
+			UE_LOG(LogRoadTile, Verbose, TEXT("[%s] Round-robin: switching serving direction to %s (waiting: %d)"),
+				*GetName(), *DirToString(NextDir), WaitingDirs.Num());
+		}
+		else
+		{
+			ServingDirection = EGridDirection::None;
+			ServedCount = 0;
+		}
+	}
+
+	UE_LOG(LogRoadTile, Verbose, TEXT("[%s] Vehicle %s EXITED box dir=%s (anyOccluded=%s)"),
+		*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), bStillOccupied ? TEXT("YES") : TEXT("no"));
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange,
+			FString::Printf(TEXT("[%s] EXIT %s dir=%s (cleared=%s)"),
+				*GetName(), *Vehicle->GetName(), *DirToString(EntryDir),
+				bStillOccupied ? TEXT("no") : TEXT("YES")));
+	}
+}
+
+// ---- Safety nets ----
+
+void ARoadTile::SanitizeOccupants()
+{
+	PurgeInvalidWeakRefs(DirectionOccupants);
+	PurgeInvalidWeakRefs(PendingReservations);
+
+	// For each vehicle still in DirectionOccupants, verify it physically overlaps the box.
+	// If EndOverlap was lost (UE edge-case), this is the periodic rescue.
+	for (auto OccIt = DirectionOccupants.CreateIterator(); OccIt; ++OccIt)
+	{
+		TSet<TWeakObjectPtr<AVehicleActor>>& Vehicles = OccIt.Value();
+		for (auto VehIt = Vehicles.CreateIterator(); VehIt; ++VehIt)
+		{
+			AVehicleActor* Vehicle = VehIt->Get();
+			if (!Vehicle)
+			{
+				VehIt.RemoveCurrent();
+				continue;
+			}
+
+			if (!IntersectionBox->IsOverlappingActor(Vehicle))
+			{
+				UE_LOG(LogRoadTile, Warning, TEXT("[%s] SANITIZE: %s no longer overlaps box but was still registered as occupant dir=%s — removing"),
+					*GetName(), *Vehicle->GetName(), *DirToString(OccIt.Key()));
+
+				VehIt.RemoveCurrent();
+				VehicleEntryDirs.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+				PendingReservationTimestamps.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+			}
+		}
+		if (Vehicles.Num() == 0)
+		{
+			OccIt.RemoveCurrent();
+		}
+	}
+
+	// Purge stale keys from reverse maps
+	for (auto It = VehicleEntryDirs.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+	}
+	for (auto It = PendingReservationTimestamps.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid()) It.RemoveCurrent();
+	}
+
+	// If sanitize cleaned everything, decide the next serving direction
+	if (!IsAnyDirectionOccupied())
+	{
+		if (WaitingDirs.Num() > 0)
+		{
+			// Peek — don't remove. Removal happens in TryAcquire on actual grant.
+			EGridDirection NextDir = EGridDirection::None;
+			for (EGridDirection D : WaitingDirs)
+			{
+				NextDir = D;
+				break;
+			}
+			ServingDirection = NextDir;
+			ServedCount = 0;
+		}
+		else
+		{
+			ServingDirection = EGridDirection::None;
+			ServedCount = 0;
+		}
+	}
+}
+
+void ARoadTile::ExpirePendingReservations(float MaxAgeSeconds)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	const float Now = World->GetTimeSeconds();
+
+	for (auto& Pair : PendingReservations)
+	{
+		TSet<TWeakObjectPtr<AVehicleActor>>& Vehicles = Pair.Value;
+		for (auto VehIt = Vehicles.CreateIterator(); VehIt; ++VehIt)
+		{
+			AVehicleActor* Vehicle = VehIt->Get();
+			if (!Vehicle)
+			{
+				VehIt.RemoveCurrent();
+				PendingReservationTimestamps.Remove(*VehIt);
+				continue;
+			}
+
+			const float* Timestamp = PendingReservationTimestamps.Find(TWeakObjectPtr<AVehicleActor>(Vehicle));
+			if (Timestamp && (Now - *Timestamp) > MaxAgeSeconds)
+			{
+				UE_LOG(LogRoadTile, Warning, TEXT("[%s] EXPIRED pending reservation for %s dir=%s (age=%.1fs > max=%.1fs)"),
+					*GetName(), *Vehicle->GetName(), *DirToString(Pair.Key), Now - *Timestamp, MaxAgeSeconds);
+
+				VehIt.RemoveCurrent();
+				VehicleEntryDirs.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+				PendingReservationTimestamps.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
+			}
+		}
+		if (Vehicles.Num() == 0)
+		{
+			Pair.Value.Empty(); // mark for removal
+		}
+	}
+
+	// Remove empty direction keys
+	for (auto It = PendingReservations.CreateIterator(); It; ++It)
+	{
+		if (It.Value().Num() == 0) It.RemoveCurrent();
+	}
 }

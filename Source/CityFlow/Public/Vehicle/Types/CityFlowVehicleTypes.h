@@ -95,39 +95,6 @@ struct CITYFLOW_API FVehicleMovementPlan
 	}
 };
 
-USTRUCT(BlueprintType)
-struct CITYFLOW_API FIntersectionLock
-{
-	GENERATED_BODY()
-
-	FGridVector IntersectionPos;
-	class AVehicleActor* OccupyingVehicle = nullptr;
-	bool bOccupied = false;
-
-	void Acquire(class AVehicleActor* Vehicle)
-	{
-		bOccupied = true;
-		OccupyingVehicle = Vehicle;
-	}
-
-	void Release()
-	{
-		bOccupied = false;
-		OccupyingVehicle = nullptr;
-	}
-};
-
-/** Stores (EntryDir, ExitDir) for an occupant of an intersection cell. */
-struct FIntersectionOccupant
-{
-	EGridDirection EntryDir = EGridDirection::None;
-	EGridDirection ExitDir  = EGridDirection::None;
-
-	FIntersectionOccupant() = default;
-	FIntersectionOccupant(EGridDirection InEntry, EGridDirection InExit)
-		: EntryDir(InEntry), ExitDir(InExit) {}
-};
-
 USTRUCT()
 struct CITYFLOW_API FAStarNode
 {

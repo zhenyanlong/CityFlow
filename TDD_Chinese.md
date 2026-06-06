@@ -14,7 +14,7 @@ CityFlow 采用**阶段分离、组件化**的架构，将游戏流程拆分为*
 |---|---|---|
 | **GridManager** | `UWorldSubsystem` | 维护二维逻辑网格。提供网格吸附、放置验证、邻居查询、连接掩码计算和建筑接口注册。**管理共享道路预算** —— 玩家放置和 L-system 生成都从同一个 `RoadBudget` 池中消费。 |
 | **LSystemManager** | `UWorldSubsystem` | **可选的**辅助毛细道路生成器。从死胡同和直路段提取分支起点，执行广度优先、吸引偏向的生长算法。与玩家**共享道路预算**。由玩家手动触发（UI 按钮或控制台命令）。 |
-| **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | 生成并管理所有车辆 Actor。提供道路图上的 **A\* 寻路**，将网格路径转换为世界空间航点运动计划，处理**拥堵检测**（每格车辆数统计）和**交叉口占用**（≥3 向路口的互斥锁）。每帧 Tick。 |
+| **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | 生成并管理所有车辆 Actor。提供道路图上的 **A\* 寻路**，将网格路径转换为世界空间样条运动计划，处理**拥堵检测**（每格车辆数统计）。每帧 Tick，执行交叉口方向占用锁的定期清理。 |
 | **ScoringManager** | `UWorldSubsystem` | 在模拟阶段追踪到达数、到达分数和拥堵惩罚。使用定时器周期性扣除拥堵惩罚。结算时计算包含全连通奖励的最终分数。 |
 | **CityFlowGameMode** | `AGameModeBase` | 拥有**状态机**（`ECityFlowGamePhase`：Planning → Simulating → Evaluation）。初始化网格、生成默认建筑、管理共享预算分配、触发阶段切换。为 UI 控制提供蓝图可调用 API。 |
 
@@ -471,58 +471,79 @@ Score = Lerp(DistScore, AlignScore, AttractionStrength)
 - 节点 = 道路格（`ECellType::Road`）；边 = `ConnectedMask` 方向位。
 - 代价 = 每步 1（均匀）；启发式 = 曼哈顿距离。
 
-**交叉口占用（v0.5 — ⚠️ Bug：锁不生效）：**
-- 交叉口 = 任意 ≥ 3 个连接方向的道路格。
-- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>> IntersectionLocks`：每个交叉口格映射到一组 `(Vehicle, {EntryDir, ExitDir})` 对。
-- **入口方向推导：** 改用 `GridDirectionUtils::DirectionFromGridDelta(航点增量)` 替代世界速度向量，即使在样条弯道段也能保证轴对齐方向。
-- **占用者追踪：** `FIntersectionOccupant` 存储车辆的 `(EntryDir, ExitDir)` 对 —— 为未来的方向感知路径交叉逻辑做准备。
-- **锁获取：** 车辆在交叉口格上时每帧调用 `AcquireIntersectionLock(pos, this, EntryDir, ExitDir)`。
-- **锁释放：** `UpdateIntersectionLocks()` 移除 `WorldToGrid` 位置不再匹配锁格键的车辆。
-- **前向探测集成：** `PerformForwardProbe()` 遍历预存的 `PathIntersectionCells`（A\* 路径上的交叉口格，生成时通过 `SetPathIntersections()` 注入）。探测范围内的每个交叉口格通过 `IsIntersectionLockedByOther()` 检查 —— 若被其他车辆占用，则视为虚拟障碍，触发 `WaitingCongestion` 刹车。
-- **⚠️ 已知问题（2026-06-04）：** 交叉口锁机制无法可靠防止两车同时进入同一个交叉口。尽管采用了统一前向探测方案和预存交叉口格数据，车辆在特定条件下仍然无视锁。怀疑根因涉及 `UpdateIntersectionLocks` 释放时序以及探测使用的简化版 `IsIntersectionLockedByOther`（仅判断占用，缺少方向感知路径交叉逻辑）。方向感知双向冲突规则需要完全重新设计。
+**交叉口占用（v0.6 — ✅ 方向占用 + 轮转调度）：**
 
-**拥堵检测：**
-- 每帧 `UpdateCongestion()` 将世界位置映射到网格格。
-- 超过 `CongestionThreshold`（默认 3）辆车的格标记为拥堵。
-- 拥堵数据可通过 `GetCongestedCells()` 查询。
+**物理触发盒：**
+- 每个 `ConnectedMask` ≥ 3（十字 / T 型路口）的 `ARoadTile` 启用一个 `UBoxComponent`（`IntersectionBox`），尺寸恰好为一个网格单元（抵消 Actor 缩放后：`BoxExtent = CellSize / ActorScale / 2`）。
+- Box 使用 `ObjectType = ECC_Vehicle`，对 Vehicle 通道设为 `ECR_Overlap`，使 `VehicleMesh`（QueryVehicle 预设，Vehicle→Vehicle = Overlap）生成 `OnBeginOverlap` / `OnEndOverlap` 事件来驱动锁生命周期。
+- Box 同时 Block `ECC_GameTraceChannel2`（Intersection），用于前向探测扫描。
 
-#### 车辆生成表
-
-`UVehicleDataAsset`（`UPrimaryDataAsset`）作为**车辆类注册表**：
-
-```cpp
-USTRUCT()
-struct FVehicleSpawnEntry
-{
-    TSubclassOf<AVehicleActor> VehicleClass;   // AVehicleActor 的蓝图子类
-    float SpawnWeight = 1.0f;                  // 相对生成概率
-};
+**方向占用表（ARoadTile）：**
+```
+TMap<EGridDirection, TSet<TWeakObjectPtr<AVehicleActor>>> DirectionOccupants    // 物理在 Box 内的车辆
+TMap<EGridDirection, TSet<TWeakObjectPtr<AVehicleActor>>> PendingReservations   // 探测授予但尚未进入 Box
+TMap<TWeakObjectPtr<AVehicleActor>, EGridDirection>        VehicleEntryDirs      // 反向查找
+TMap<TWeakObjectPtr<AVehicleActor>, float>                 PendingReservationTimestamps  // 超时过期用
 ```
 
-`UVehicleDataAsset::VehicleEntries` 是一个 `FVehicleSpawnEntry` 数组。`UVehicleManager::CacheSpawnEntries()` 在模拟开始时加载 `DeveloperSettings::DefaultVehicleDataAsset` 引用的 DataAsset，然后每次生成时由 `PickRandomVehicleClass()` 执行加权随机选取。
+**核心锁协议：**
+1. **前向探测扫描（Channel2）：** `PerformForwardProbe()` 用 `ECC_GameTraceChannel2` 扫描，从 `GridDirectionUtils::DirectionFromWorldVector(Velocity)` 推导入口方向，调用 `RoadTile->TryAcquireIntersectionLock(this, EntryDir)`。
+2. **冲突检查：** 收集 `OccupiedDirs = DirectionOccupants.Keys ∪ PendingReservations.Keys`。
+   - 空 → 授予。
+   - 仅含 `EntryDir` → 同向车流，授予（如未超出 `MaxConsecutiveGrants`）。
+   - 含其他方向 → 交叉冲突。仅当 `ServingDirection == EntryDir && ServedCount < MaxConsecutiveGrants` 时授予。
+3. **Pending→Occupants 转移：** `OnBeginOverlap` 将车辆从 `PendingReservations[EntryDir]` 移至 `DirectionOccupants[EntryDir]`。
+4. **锁释放：** `OnEndOverlap` 从两个表中移除车辆。**无需显式释放 API**——Overlap 事件驱动整个生命周期。
 
-每个 `AVehicleActor` 子类（如 `BP_Car`、`BP_Truck`）在其蓝图默认值中直接配置自身的 `VehicleMesh`、`MoveSpeed`、`DebugColor` 等属性——无需 DataAsset 驱动属性覆盖。
+**方向轮转调度（v0.6）：**
+- `ServingDirection`：当前服务方向；`ServedCount`：本轮已放行车辆数；`WaitingDirs`：竞争方向集合；`MaxConsecutiveGrants = 1`：每方向每轮最多放行数。
+- `EndOverlap` 检测到 Box 变空时：peek（不 remove）`WaitingDirs` 中第一个方向作为新 `ServingDirection`。该方向仅在 `TryAcquireIntersectionLock` 实际放行一辆车后才从 `WaitingDirs` 中移除。
+- Box 被占用期间的交叉方向请求：仅当 `EntryDir == ServingDirection && ServedCount < MaxConsecutiveGrants` 时授予；否则拒绝。当 `ServedCount` 达上限时该方向**不重新入队**——本轮已让出。
+- 单方向车流：无轮转干预（行为与简单方向占用模型完全一致）。
 
+**保险机制：**
+| 机制 | 触发方式 | 目的 |
+|------|---------|------|
+| 已入驻全放行 | `TryAcquire` —— 车辆已在 `VehicleEntryDirs` 中 | 消除样条弯道上方向推导偏差导致的误拦 |
+| 物理重叠校验 | `VehicleManager::SanitizeAllIntersectionLocks()` 每 2 秒通过 `IsOverlappingActor` | 清理 `EndOverlap` 事件丢失导致的僵尸 `DirectionOccupants` 记录 |
+| 预占超时过期 | 同一 Timer，`ExpirePendingReservations(5.0f)` | 清除拥堵中车辆预占但永不进入 Box 的记录 |
+| 已过路口追踪 | `AVehicleActor::PassedIntersections` —— `EndOverlap` 时 `MarkIntersectionPassed()`；`TryAcquire` 中检查 | 防止自回绕：刚驶出的车辆前向探测仍能扫到 Box |
+
+**碰撞通道：**
+| 通道 | 用途 |
+|------|------|
+| `ECC_GameTraceChannel1`（Vehicle） | VehicleMesh 车身 → 前向探测物理车辆检测 |
+| `ECC_GameTraceChannel2`（Intersection） | IntersectionBox → 前向探测交叉口预留 |
+
+**已移除（v0.5 遗留）：**
+- `VehicleManager::IntersectionLocks` TMap、`AcquireIntersectionLock()`、`IsIntersectionLockedByOther()`、`UpdateIntersectionLocks()`
+- `VehicleManager::CachedIntersections`、`bIntersectionsDirty`
+- `VehicleActor::PathIntersectionCells`、`SetPathIntersections()`、`SetWaitingForIntersection()`
+- `CityFlowVehicleTypes.h`：`FIntersectionLock`、`FIntersectionOccupant` 结构体
+
+**运动状态机（v0.6）：**
 | 状态 | 描述 |
-|---|---|
+|------|------|
 | `Idle` | 初始或错误状态 |
-| `Moving` | 沿样条路径移动；每帧执行前向探测 |
-| `WaitingCongestion` | 前方车辆过近或前方交叉口被锁停；障碍清除后自动恢复 |
-| `WaitingIntersection` | **v0.5 已废弃** — 被统一拥堵模型替代；枚举值保留以兼容 |
-| `Arrived` | 到达终点 |
+| `Moving` | 沿样条路径移动；每帧执行前向探测（两次扫描：Ch1 车辆 + Ch2 交叉口） |
+| `WaitingCongestion` | 前车或锁定交叉口导致停车；障碍清除后自动恢复 |
+| `Arrived` | 到达终点；清除所有预留交叉口，广播事件 |
 
-**v0.5 运动流控：**
+**v0.6 运动流控：**
 ```
 TickMovementSpline:
-  1. PerformForwardProbe() — 统一物理扫描 + 交叉口锁检查（通过 PathIntersectionCells）
-  2. 若 bFrontVehicleTooClose → WaitingCongestion → 减速到 0（StartDeceleration=2500） → return（不推进）
-  3. 若 WaitingCongestion 且障碍清除 → Moving
-  4. 计算速度（终点减速 + 起步加速 via StartAcceleration=2000 / Acceleration=800）
-  5. 推进样条位置
-  6. 若在交叉口格上 → AcquireIntersectionLock()
+  1. PerformForwardProbe():
+     a. Sweep Ch1 → 找到最近物理车辆
+     b. Sweep Ch2 → 对每个命中的 IntersectionBox:
+        - TryAcquireIntersectionLock(this, EntryDir) → 授予: 记录到 ReservedIntersections
+        - 拒绝 → 视为虚拟障碍，取最小距离
+     c. ClosestDist = min(车辆距离, 交叉口距离)
+     d. bFrontVehicleTooClose = 最近距离 ≤ 安全距离（车辆）或任意虚拟障碍
+  2. 若 bFrontVehicleTooClose → WaitingCongestion → 减速 → return
+  3. 若已解除 → Moving → 加速 → 推进样条
 ```
 
----
+**拥堵检测：**
 
 ### 2.7 起点 / 目的地生成与计分
 

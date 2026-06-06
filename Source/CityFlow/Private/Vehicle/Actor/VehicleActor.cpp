@@ -1,6 +1,7 @@
 #include "Vehicle/Actor/VehicleActor.h"
 #include "Vehicle/Subsystem/VehicleManager.h"
 #include "Grid/GridManager.h"
+#include "Grid/RoadTile.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
@@ -40,6 +41,22 @@ void AVehicleActor::BeginPlay()
 	Super::BeginPlay();
 }
 
+void AVehicleActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Release all intersection reservations so stale entries don't block other vehicles
+	for (const TWeakObjectPtr<ARoadTile>& WeakTile : ReservedIntersections)
+	{
+		if (ARoadTile* Tile = WeakTile.Get())
+		{
+			Tile->ReleaseVehicleFromAllTables(this);
+		}
+	}
+	ReservedIntersections.Empty();
+	PassedIntersections.Empty();
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArray<FVector>& TangentDirs,
 	const TArray<float>& ArriveTangentLengths, const TArray<float>& LeaveTangentLengths,
 	float DefaultTangentLength)
@@ -71,7 +88,6 @@ void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArr
 		}
 	}
 
-	// Step 1: Old way — add points and set uniform tangents (both arrive & leave = same)
 	for (int32 i = 0; i < NumPts; ++i)
 	{
 		PathSpline->AddSplineWorldPoint(WorldPoints[i]);
@@ -82,18 +98,12 @@ void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArr
 		PathSpline->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local);
 	}
 
-	// Step 2: Break handle linkage — set all points to CurveCustomTangent
 	for (int32 i = 0; i < NumPts; ++i)
 	{
 		PathSpline->SetSplinePointType(i, ESplinePointType::CurveCustomTangent, false);
 	}
 	PathSpline->UpdateSpline();
 
-	// Step 3: Override per-segment tangents for turn curves
-	// For each pair (i, i+1), both the leave tangent of point i
-	// and the arrive tangent of point i+1 are scaled by the same multiplier,
-	// taken from point i's LeaveTangentLength (LMult).
-	// This ensures the curve segment between entry/exit offsets is symmetric.
 	FInterpCurveVector& PosCurve = PathSpline->SplineCurves.Position;
 	for (int32 i = 0; i < NumPts - 1; ++i)
 	{
@@ -106,12 +116,21 @@ void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArr
 		const FVector DirI   = TangentDirs[i].GetSafeNormal();
 		const FVector DirI1  = TangentDirs[i + 1].GetSafeNormal();
 
-		// Leave tangent of point i   — faces toward point i+1
 		PosCurve.Points[i].LeaveTangent = DirI * BaseTangentLen * LMult;
-		// Arrive tangent of point i+1 — faces toward point i
 		PosCurve.Points[i + 1].ArriveTangent = DirI1 * BaseTangentLen * LMult;
 	}
 	PathSpline->UpdateSpline();
+
+	// Clear any stale reservations from a previous path
+	for (const TWeakObjectPtr<ARoadTile>& WeakTile : ReservedIntersections)
+	{
+		if (ARoadTile* Tile = WeakTile.Get())
+		{
+			Tile->ReleaseVehicleFromAllTables(this);
+		}
+	}
+	ReservedIntersections.Empty();
+	PassedIntersections.Empty();
 
 	CurrentSplineDistance = 0.0f;
 	CurrentSpeed = 0.0f;
@@ -163,11 +182,6 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		return;
 	}
 
-	// =========================================================
-	//  Unified forward probe: physical sweep AND intersection-
-	//  lock check merged into one pass. Any obstacle ahead
-	//  triggers a smooth brake via WaitingCongestion.
-	// =========================================================
 	PerformForwardProbe();
 
 	if (bFrontVehicleTooClose)
@@ -182,15 +196,11 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		return;
 	}
 
-	// Obstacle cleared — resume
 	if (MovementState == EVehicleMovementState::WaitingCongestion)
 	{
 		MovementState = EVehicleMovementState::Moving;
 	}
 
-	// =========================================================
-	//  Speed computation: terminal deceleration + start boost
-	// =========================================================
 	{
 		const float RemainingDist = SplineLength - CurrentSplineDistance;
 		const float SpeedRatio = (DecelerationDistance > 0.0f)
@@ -200,9 +210,6 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, BaseTarget, DeltaTime, Accel);
 	}
 
-	// =========================================================
-	//  Advance spline position
-	// =========================================================
 	CurrentSplineDistance += FMath::Min(CurrentSpeed * DeltaTime, SplineLength - CurrentSplineDistance);
 
 	if (CurrentSplineDistance >= SplineLength)
@@ -224,64 +231,7 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 
 	UWorld* World = GetWorld();
 	UGridManager* GM = World ? World->GetSubsystem<UGridManager>() : nullptr;
-	UVehicleManager* VM = World ? World->GetSubsystem<UVehicleManager>() : nullptr;
-
 	PreviousGridPosition = GM ? GM->WorldToGrid(NewPos) : FGridVector();
-
-	// =========================================================
-	//  Acquire intersection lock (entered intersection cell)
-	// =========================================================
-	if (GM && VM)
-	{
-		const FGridVector NewGrid = GM->WorldToGrid(GetActorLocation());
-		const FGridCell& Cell = GM->GetCell(NewGrid);
-		if (Cell.Type == ECellType::Road)
-		{
-			int32 ConnCount = 0;
-			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Up)) ++ConnCount;
-			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Down)) ++ConnCount;
-			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Left)) ++ConnCount;
-			if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
-			if (ConnCount >= 3)
-			{
-				const float CellSize = GM->GetCellSize();
-				const float ExitLookDist = FMath::Min(CurrentSplineDistance + CellSize, SplineLength - 1.0f);
-				const FVector ExitPos = PathSpline->GetLocationAtDistanceAlongSpline(ExitLookDist, ESplineCoordinateSpace::World);
-				const FGridVector ExitGrid = GM->WorldToGrid(ExitPos);
-				const EGridDirection EntryDir = GridDirectionUtils::DirectionFromGridDelta(NewGrid - PreviousGridPosition);
-				const EGridDirection ExitDir = (ExitGrid != NewGrid)
-					? GridDirectionUtils::DirectionFromGridDelta(ExitGrid - NewGrid)
-					: EGridDirection::None;
-				VM->AcquireIntersectionLock(NewGrid, this, EntryDir, ExitDir);
-			}
-		}
-	}
-}
-
-void AVehicleActor::SetPathIntersections(const TArray<FGridVector>& GridPath)
-{
-	PathIntersectionCells.Reset();
-
-	UWorld* World = GetWorld();
-	UGridManager* GM = World ? World->GetSubsystem<UGridManager>() : nullptr;
-	if (!GM) { return; }
-
-	for (const FGridVector& Cell : GridPath)
-	{
-		if (GM->GetCellType(Cell) != ECellType::Road) { continue; }
-
-		int32 ConnCount = 0;
-		const FGridCell& C = GM->GetCell(Cell);
-		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Up))    ++ConnCount;
-		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Down))  ++ConnCount;
-		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Left))  ++ConnCount;
-		if (C.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
-
-		if (ConnCount >= 3)
-		{
-			PathIntersectionCells.Add(Cell);
-		}
-	}
 }
 
 void AVehicleActor::PerformForwardProbe()
@@ -296,9 +246,7 @@ void AVehicleActor::PerformForwardProbe()
 	}
 
 	UWorld* World = GetWorld();
-	UGridManager* GM = World ? World->GetSubsystem<UGridManager>() : nullptr;
-	UVehicleManager* VM = World ? World->GetSubsystem<UVehicleManager>() : nullptr;
-	if (!GM || !VM)
+	if (!World)
 	{
 		return;
 	}
@@ -309,19 +257,22 @@ void AVehicleActor::PerformForwardProbe()
 	const FVector ProbeEnd = ProbeStart + MyDir * ForwardProbeDistance;
 	const FCollisionShape ProbeShape = FCollisionShape::MakeSphere(ForwardProbeRadius);
 
-	// ---- Physical sphere sweep ----
-	FCollisionQueryParams QueryParams;
-	QueryParams.bTraceComplex = false;
-	QueryParams.AddIgnoredActor(this);
+	// Derive grid entry direction from our current velocity
+	const EGridDirection EntryDir = GridDirectionUtils::DirectionFromWorldVector(VelocityDirection);
 
-	TArray<FHitResult> Hits;
-	World->SweepMultiByChannel(Hits, ProbeStart, ProbeEnd, FQuat::Identity,
-		ECC_GameTraceChannel1, ProbeShape, QueryParams);
+	// ---- Pass 1: Physical vehicle sweep (Channel1 = Vehicle) ----
+	FCollisionQueryParams VehQueryParams;
+	VehQueryParams.bTraceComplex = false;
+	VehQueryParams.AddIgnoredActor(this);
+
+	TArray<FHitResult> VehHits;
+	World->SweepMultiByChannel(VehHits, ProbeStart, ProbeEnd, FQuat::Identity,
+		ECC_GameTraceChannel1, ProbeShape, VehQueryParams);
 
 	AVehicleActor* ClosestVehicle = nullptr;
 	float ClosestDist = ForwardProbeDistance;
 
-	for (const FHitResult& Hit : Hits)
+	for (const FHitResult& Hit : VehHits)
 	{
 		AVehicleActor* OtherVehicle = Cast<AVehicleActor>(Hit.GetActor());
 		if (!OtherVehicle || OtherVehicle == this) { continue; }
@@ -334,39 +285,56 @@ void AVehicleActor::PerformForwardProbe()
 		}
 	}
 
-	// ---- Path intersection lookup: pre-stored from A* grid data ----
-	for (const FGridVector& InterCell : PathIntersectionCells)
+	// ---- Pass 2: Intersection box sweep (Channel2 = Intersection) ----
+	FCollisionQueryParams InterQueryParams;
+	InterQueryParams.bTraceComplex = false;
+	InterQueryParams.AddIgnoredActor(this);
+
+	TArray<FHitResult> InterHits;
+	World->SweepMultiByChannel(InterHits, ProbeStart, ProbeEnd, FQuat::Identity,
+		ECC_GameTraceChannel2, ProbeShape, InterQueryParams);
+
+	for (const FHitResult& Hit : InterHits)
 	{
-		const FVector CellWorldPos = GM->GridToWorld(InterCell);
-		const FVector ToCell = CellWorldPos - ProbeStart;
-		const float CellDist = FVector::DotProduct(ToCell, MyDir);
-
-		if (CellDist <= 0.0f || CellDist > ForwardProbeDistance) { continue; }
-
-		if (!VM->IsIntersectionLockedByOther(InterCell, this)) { continue; }
-
-		if (CellDist < ClosestDist)
+		ARoadTile* RoadTile = Cast<ARoadTile>(Hit.GetActor());
+		if (!RoadTile || !RoadTile->IsIntersection())
 		{
-			ClosestDist = CellDist;
-			ClosestVehicle = nullptr; // Virtual obstacle, no physical vehicle
+			continue;
+		}
+
+		const float InterDist = FVector::DotProduct(Hit.ImpactPoint - ProbeStart, MyDir);
+		if (InterDist <= 0.0f || InterDist > ForwardProbeDistance)
+		{
+			continue;
+		}
+
+		if (RoadTile->TryAcquireIntersectionLock(this, EntryDir))
+		{
+			ReservedIntersections.AddUnique(RoadTile);
+			continue;
+		}
+
+		// Lock rejected → treat as virtual obstacle
+		if (InterDist < ClosestDist)
+		{
+			ClosestDist = InterDist;
+			ClosestVehicle = nullptr;
 		}
 	}
 
 	// ---- Combine results ----
 	if (ClosestDist < ForwardProbeDistance)
 	{
-		FrontVehicle        = ClosestVehicle;
+		FrontVehicle = ClosestVehicle;
 		FrontVehicleDistance = ClosestDist;
 
 		if (ClosestVehicle)
 		{
-			// Physical vehicle: maintain safe following distance
 			const float SafeDist = FMath::Max(SafeDistanceMin, CurrentSpeed * SafeDistanceSeconds);
 			bFrontVehicleTooClose = (FrontVehicleDistance <= SafeDist);
 		}
 		else
 		{
-			// Virtual obstacle (locked intersection): always stop
 			bFrontVehicleTooClose = true;
 		}
 	}
@@ -410,9 +378,34 @@ void AVehicleActor::PerformForwardProbe()
 
 void AVehicleActor::HandleArrival()
 {
+	// Release all intersection reservations
+	for (const TWeakObjectPtr<ARoadTile>& WeakTile : ReservedIntersections)
+	{
+		if (ARoadTile* Tile = WeakTile.Get())
+		{
+			Tile->ReleaseVehicleFromAllTables(this);
+		}
+	}
+	ReservedIntersections.Empty();
+	PassedIntersections.Empty();
+
 	MovementState = EVehicleMovementState::Arrived;
 	VelocityDirection = FVector::ZeroVector;
 	OnVehicleArrived.Broadcast(this);
+}
+
+void AVehicleActor::MarkIntersectionPassed(ARoadTile* Tile)
+{
+	if (Tile)
+	{
+		PassedIntersections.Add(Tile);
+	}
+}
+
+bool AVehicleActor::HasPassedIntersection(ARoadTile* Tile) const
+{
+	if (!Tile) return false;
+	return PassedIntersections.Contains(TWeakObjectPtr<ARoadTile>(Tile));
 }
 
 void AVehicleActor::SetDebugColor(FLinearColor Color)
@@ -427,10 +420,4 @@ void AVehicleActor::SetDebugColor(FLinearColor Color)
 			DynMat->SetVectorParameterValue(TEXT("BaseColor"), Color);
 		}
 	}
-}
-
-void AVehicleActor::SetWaitingForIntersection(bool bWaiting)
-{
-	// Deprecated: WaitingIntersection state is no longer used.
-	// All stopping is now handled by the unified forward probe.
 }

@@ -3,16 +3,18 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Tickable.h"
-#include "Grid/CityFlowGridTypes.h"
 #include "Vehicle/Types/CityFlowVehicleTypes.h"
-#include "Vehicle/Types/VehicleDataAsset.h"
 #include "GameMode/Types/CityFlowGameTypes.h"
-#include "VehicleManager.generated.h"
 
 class AVehicleActor;
+class ABuilding;
+class UGridManager;
+struct FVehicleSpawnEntry;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleSpawned, AVehicleActor*, Vehicle);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleArrivedAtDest, AVehicleActor*, Vehicle);
+#include "VehicleManager.generated.h"
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleSpawned, class AVehicleActor*, Vehicle);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleArrivedAtDest, class AVehicleActor*, Vehicle);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCongestionUpdated);
 
 UCLASS()
@@ -23,10 +25,7 @@ class CITYFLOW_API UVehicleManager : public UWorldSubsystem, public FTickableGam
 public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
-
 	virtual void Tick(float DeltaTime) override;
-	virtual bool IsTickable() const override { return bIsActive; }
-	virtual bool IsTickableInEditor() const override { return false; }
 	virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(UVehicleManager, STATGROUP_Tickables); }
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
@@ -37,6 +36,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void ClearAllVehicles();
+
+	UFUNCTION(BlueprintCallable, Category = "Vehicle")
+	bool IsSpawning() const { return bIsActive; }
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetDrivingSide(ECityFlowDrivingSide Side) { DrivingSide = Side; }
@@ -54,12 +56,6 @@ public:
 		TArray<FVector>& OutTangentDirs,
 		TArray<float>& OutArriveTangentLengths,
 		TArray<float>& OutLeaveTangentLengths) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Vehicle")
-	void AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir, EGridDirection ExitDir);
-
-	/** Returns true if the given intersection cell is locked by any vehicle other than Self. */
-	bool IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* Self) const;
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	const TArray<AVehicleActor*>& GetActiveVehicles() const { return ActiveVehicles; }
@@ -95,7 +91,7 @@ private:
 
 	TArray<FGridVector> FindRoadPath(const FGridVector& Start, const FGridVector& End) const;
 	void UpdateCongestion();
-	void UpdateIntersectionLocks();
+	void SanitizeAllIntersectionLocks();
 
 	bool IsIntersection(const FGridVector& Pos) const;
 	bool IsOccupiedByVehicle(const FGridVector& GridPos) const;
@@ -113,20 +109,17 @@ private:
 	UPROPERTY()
 	TArray<AVehicleActor*> ArrivedVehicles;
 
-	TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>> IntersectionLocks;
-
 	UPROPERTY()
 	TMap<FGridVector, AVehicleActor*> VehicleGridMap;
 
 	FTimerHandle SpawnTimerHandle;
 	FTimerHandle CongestionTimerHandle;
+	FTimerHandle SanitizeTimerHandle;
 	bool bIsActive = false;
 	float TimeSinceLastSpawn = 0.0f;
 	float SpawnInterval = 5.0f;
 
-	TSet<FGridVector> CachedIntersections;
 	TSet<FGridVector> CongestedCells;
-	bool bIntersectionsDirty = true;
 
 	TArray<FVehicleSpawnEntry> CachedSpawnEntries;
 	float TotalSpawnWeight = 0.0f;

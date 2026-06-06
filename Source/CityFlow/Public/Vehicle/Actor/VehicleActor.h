@@ -8,6 +8,7 @@
 #include "VehicleActor.generated.h"
 
 class UStaticMeshComponent;
+class ARoadTile;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleArrived, class AVehicleActor*, Vehicle);
 
@@ -28,9 +29,6 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetDestination(class ABuilding* InDestination);
-
-	/** Feed the A* grid path so the vehicle knows which intersection cells it will cross. */
-	void SetPathIntersections(const TArray<FGridVector>& GridPath);
 
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	class ABuilding* GetDestination() const { return Destination; }
@@ -55,6 +53,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle|Debug")
 	void SetDebugColor(FLinearColor Color);
+
+	/** Mark this intersection as passed — the vehicle can never re-acquire its lock. */
+	void MarkIntersectionPassed(class ARoadTile* Tile);
+
+	/** Returns true if this vehicle has already passed through (exited) the given intersection. */
+	bool HasPassedIntersection(class ARoadTile* Tile) const;
 
 	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
 	FOnVehicleArrived OnVehicleArrived;
@@ -116,12 +120,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Debug")
 	bool bDebugDrawProbe = false;
 
-	void SetWaitingForIntersection(bool bWaiting);
-
 	class ABuilding* Origin = nullptr;
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	void TickMovementSpline(float DeltaTime);
@@ -140,7 +143,13 @@ private:
 	float FrontVehicleDistance = 0.0f;
 	bool bFrontVehicleTooClose = false;
 
-	TArray<FGridVector> PathIntersectionCells;
+	/** Intersections this vehicle has reserved via forward-probe. Tracked for cleanup on destruction/arrival. */
+	TArray<TWeakObjectPtr<ARoadTile>> ReservedIntersections;
+
+	/** Intersections this vehicle has physically passed through. Once passed, the vehicle
+	 *  can never re-acquire the lock on the same intersection (prevents self-re-entry
+	 *  after exit when the forward probe still sweeps the box just behind). */
+	TSet<TWeakObjectPtr<ARoadTile>> PassedIntersections;
 
 	void PerformForwardProbe();
 };

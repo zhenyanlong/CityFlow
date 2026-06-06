@@ -14,7 +14,7 @@ Core management classes are gathered in the `GameMode` or delegated Manager comp
 |---|---|---|
 | **GridManager** | `UWorldSubsystem` | Maintains a 2D logical grid. Provides grid snapping, placement validation, neighbour queries, connected-mask calculation, and building interface registration. **Manages the shared road budget** — both player and L-system placement consume from a single pool tracked by `RoadBudget`. |
 | **LSystemManager** | `UWorldSubsystem` | **Optional** auxiliary capillary road generator. Extracts branch starting points from dead-ends and straight segments, then executes breadth-first, attraction-biased growth. Consumes from the **shared road budget** alongside the player. Triggered manually by player (UI button or console command). |
-| **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | Spawns and manages all vehicle Actors. Provides **A\* pathfinding** on the road graph, converts grid paths to world-space waypoint-based movement plans, handles **congestion detection** (per-cell vehicle count), and **intersection occupation** (simple mutex lock for ≥3-way junctions). Ticks every frame for vehicle state updates. |
+| **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | Spawns and manages all vehicle Actors. Provides **A\* pathfinding** on the road graph, converts grid paths to world-space spline-based movement plans, handles **congestion detection** (per-cell vehicle count). Ticks every frame for vehicle state updates and periodic intersection lock sanitization. |
 | **ScoringManager** | `UWorldSubsystem` | Tracks arrival count, arrival score, and congestion penalties during the Simulation Phase. Uses a periodic timer for congestion penalty deduction. Computes final score including full-connectivity bonus on evaluation. |
 | **CityFlowGameMode** | `AGameModeBase` | Owns the **state machine** (`ECityFlowGamePhase`: Planning → Simulating → Evaluation). Initializes the grid, spawns default buildings, manages the shared road budget split (Player vs L-System), and triggers phase transitions. Provides Blueprint-callable API for UI control. |
 
@@ -472,15 +472,77 @@ Processes the raw A\* path (all cells preserved) in a single pass, outputting sp
 - Cost = 1 per step (uniform); heuristic = Manhattan distance.
 - Algorithm: standard A\* with `TMap<FGridVector, FAStarNode>` for open/closed sets.
 
-**Intersection Occupation (v0.5 — ⚠️ BUG: not blocking):**
-- An intersection is any road cell with ≥ 3 connected directions.
-- `TMap<FGridVector, TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>> IntersectionLocks`: each intersection cell maps to a set of `(Vehicle, {EntryDir, ExitDir})` pairs.
-- **Entry direction derivation:** Uses `GridDirectionUtils::DirectionFromGridDelta(WaypointDelta)` instead of world velocity, ensuring axis-aligned direction even on curved spline segments.
-- **Occupant tracking:** `FIntersectionOccupant` stores the vehicle's `(EntryDir, ExitDir)` pair — intended for future direction-aware path-crossing logic.
-- **Lock acquisition:** Vehicle calls `AcquireIntersectionLock(pos, this, EntryDir, ExitDir)` each frame while on an intersection cell.
-- **Lock release:** `UpdateIntersectionLocks()` removes vehicles whose `WorldToGrid` position no longer matches the lock's cell key.
-- **Forward-probe integration:** `PerformForwardProbe()` in `AVehicleActor` walks the pre-stored `PathIntersectionCells` (intersection cells along the A\* path, injected at spawn via `SetPathIntersections()`). Each intersection cell within the probe range is checked via `IsIntersectionLockedByOther()` — if locked by another vehicle, it is treated as a virtual obstacle and triggers `WaitingCongestion` brake.
-- **⚠️ Known issue (2026-06-04):** The intersection lock mechanism does not reliably prevent two vehicles from entering the same intersection. Despite the unified forward-probe approach and pre-stored intersection cell data, vehicles still ignore locks under certain conditions — suspected root cause involves the `UpdateIntersectionLocks` release timing and the probe's simplified `IsIntersectionLockedByOther` (occupancy-only, lacks direction-aware path-crossing logic). Direction-aware bidirectional conflict rules need a complete redesign.
+**Intersection Occupation (v0.6 — ✅ Direction-based with round-robin scheduling):**
+
+**Physical trigger box:**
+- Each `ARoadTile` with `ConnectedMask` ≥ 3 (Cross / T-Junction) enables a `UBoxComponent` (`IntersectionBox`) sized to exactly one grid cell (actor-scale-neutralised: `BoxExtent = CellSize / ActorScale / 2`).
+- Box uses `ObjectType = ECC_Vehicle` with `ECR_Overlap` to the Vehicle channel so that `VehicleMesh` (QueryVehicle preset, Vehicle→Vehicle = Overlap) generates `OnBeginOverlap` / `OnEndOverlap` events for the lock life-cycle.
+- The box also blocks `ECC_GameTraceChannel2` (Intersection) for the forward-probe sweep.
+
+**Direction-occupancy tables (ARoadTile):**
+```
+TMap<EGridDirection, TSet<TWeakObjectPtr<AVehicleActor>>> DirectionOccupants    // vehicles physically inside the box
+TMap<EGridDirection, TSet<TWeakObjectPtr<AVehicleActor>>> PendingReservations   // probed & granted but not yet inside
+TMap<TWeakObjectPtr<AVehicleActor>, EGridDirection>        VehicleEntryDirs      // reverse-lookup
+TMap<TWeakObjectPtr<AVehicleActor>, float>                 PendingReservationTimestamps  // for expiry
+```
+
+**Core lock protocol:**
+1. **Forward-probe sweep (Channel2):** `PerformForwardProbe()` sweeps with `ECC_GameTraceChannel2`, derives entry direction from `GridDirectionUtils::DirectionFromWorldVector(Velocity)`, and calls `RoadTile->TryAcquireIntersectionLock(this, EntryDir)`.
+2. **Conflict check:** Collect `OccupiedDirs = DirectionOccupants.Keys ∪ PendingReservations.Keys`.
+   - Empty → grant.
+   - Only contains `EntryDir` → same-direction flow, grant (if under `MaxConsecutiveGrants`).
+   - Contains other directions → crossing conflict. Grant only if `ServingDirection == EntryDir && ServedCount < MaxConsecutiveGrants`.
+3. **Pending→Occupants transition:** `OnBeginOverlap` moves the vehicle from `PendingReservations[EntryDir]` to `DirectionOccupants[EntryDir]`.
+4. **Lock release:** `OnEndOverlap` removes the vehicle from both tables. **No explicit release API needed** — the overlap events drive the entire life-cycle.
+
+**Round-robin direction scheduling (v0.6):**
+- `ServingDirection`: currently served direction; `ServedCount`: vehicles granted this round; `WaitingDirs`: set of competing directions; `MaxConsecutiveGrants = 1`: vehicles per direction per round.
+- On `EndOverlap` when the box becomes empty: peek (not remove) the first `WaitingDir` as the new `ServingDirection`. The direction is removed from `WaitingDirs` only when a vehicle from it is actually granted in `TryAcquireIntersectionLock`.
+- Cross-direction requests while the box is occupied: grant only if `EntryDir == ServingDirection && ServedCount < MaxConsecutiveGrants`; otherwise reject. When `ServedCount` hits the limit that direction is **not re-enqueued** — it yielded its turn.
+- Single-direction traffic: no round-robin intervention (behaves identically to the simple direction-occupancy model).
+
+**Safety nets:**
+| Mechanism | Trigger | Purpose |
+|---|---|---|
+| Re-entry all-pass | `TryAcquire` — vehicle already in `VehicleEntryDirs` | Eliminates false rejections from direction-derivation drift on curved splines |
+| Physical overlap sanctise | `VehicleManager::SanitizeAllIntersectionLocks()` every 2 s via `IsOverlappingActor` | Removes zombie `DirectionOccupants` entries from lost `EndOverlap` events |
+| Pending reservation expiry | Same timer, `ExpirePendingReservations(5.0f)` | Clears pre-reservations from vehicles stuck in traffic that never enter the box |
+| Passed-intersection tracking | `AVehicleActor::PassedIntersections` — `MarkIntersectionPassed()` on `EndOverlap`; checked in `TryAcquire` | Prevents self-re-entry: vehicle that just exited can still sweep the box via forward probe |
+
+**Collision channels:**
+| Channel | Use |
+|---|---|
+| `ECC_GameTraceChannel1` (Vehicle) | VehicleMesh body → forward-probe physical vehicle detection |
+| `ECC_GameTraceChannel2` (Intersection) | IntersectionBox → forward-probe intersection reservation |
+
+**Removed (v0.5 legacy):**
+- `VehicleManager::IntersectionLocks` TMap, `AcquireIntersectionLock()`, `IsIntersectionLockedByOther()`, `UpdateIntersectionLocks()`
+- `VehicleManager::CachedIntersections`, `bIntersectionsDirty`
+- `VehicleActor::PathIntersectionCells`, `SetPathIntersections()`, `SetWaitingForIntersection()`
+- `CityFlowVehicleTypes.h`: `FIntersectionLock`, `FIntersectionOccupant` structs
+
+**Movement State Machine (v0.6):**
+| State | Description |
+|---|---|
+| `Idle` | Initial or error state |
+| `Moving` | Following spline path; forward probe runs each frame (two sweeps: Ch1 vehicles + Ch2 intersections) |
+| `WaitingCongestion` | Stopped due to front vehicle or locked intersection ahead; resumes automatically when obstacle clears |
+| `Arrived` | Reached destination; clears all reserved intersections, broadcasts event |
+
+**v0.6 movement flow:**
+```
+TickMovementSpline:
+  1. PerformForwardProbe():
+     a. Sweep Ch1 → find closest physical vehicle
+     b. Sweep Ch2 → for each hit IntersectionBox:
+        - TryAcquireIntersectionLock(this, EntryDir) → granted: track in ReservedIntersections
+        - Rejected → treat as virtual obstacle, take min distance
+     c. ClosestDist = min(vehicleDist, intersectionDist)
+     d. bFrontVehicleTooClose = closest ≤ safeDist (vehicle) or any virtual obstacle
+  2. if bFrontVehicleTooClose → WaitingCongestion → decelerate → return
+  3. if cleared → Moving → accelerate → advance spline
+```
 
 **Congestion Detection:**
 - Each tick, `UpdateCongestion()` maps world positions to grid cells.
@@ -503,27 +565,6 @@ struct FVehicleSpawnEntry
 `UVehicleDataAsset::VehicleEntries` is an array of `FVehicleSpawnEntry`. `UVehicleManager::CacheSpawnEntries()` loads the DataAsset referenced by `DeveloperSettings::DefaultVehicleDataAsset` on simulation start, then `PickRandomVehicleClass()` performs weighted random selection per spawn.
 
 Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `VehicleMesh`, `MoveSpeed`, `DebugColor`, etc. directly in its Blueprint defaults — no DataAsset-driven property override is needed.
-
-#### Vehicle Movement State Machine (v0.5)
-
-| State | Description |
-|---|---|
-| `Idle` | Initial or error state |
-| `Moving` | Following spline path; forward probe runs each frame |
-| `WaitingCongestion` | Stopped due to front vehicle or locked intersection ahead; resumes automatically when obstacle clears |
-| `WaitingIntersection` | **Deprecated in v0.5** — replaced by unified congestion model; enum value retained for compatibility |
-| `Arrived` | Reached destination; broadcasts event |
-
-**v0.5 movement flow:**
-```
-TickMovementSpline:
-  1. PerformForwardProbe() — unified physical sweep + intersection-lock check via PathIntersectionCells
-  2. if bFrontVehicleTooClose → WaitingCongestion → decelerate to 0 (StartDeceleration=2500) → return (don't advance)
-  3. if WaitingCongestion and obstacle cleared → Moving
-  4. Compute speed (terminal deceleration + start boost via StartAcceleration=2000 / Acceleration=800)
-  5. Advance spline position
-  6. if on intersection cell → AcquireIntersectionLock()
-```
 
 ---
 

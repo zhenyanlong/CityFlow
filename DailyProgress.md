@@ -1,3 +1,21 @@
+## 2026-06-06
+
+### Intersection Lock Redesign: Direction-Based Occupancy with Round-Robin Scheduling (v0.6)
+
+- Replaced per-vehicle `LockHolder` model with direction-occupancy tables (`DirectionOccupants`, `PendingReservations`, `VehicleEntryDirs`) on `ARoadTile`
+- Added `UBoxComponent IntersectionBox` to `ARoadTile` for physical overlap-driven lock life-cycle (enable only for Cross/T-Junction tiles, size neutralised against actor scale)
+- Fixed IntersectionBox collision: ObjectType=ECC_Vehicle with ECR_Overlap to Vehicle channel so VehicleMesh (QueryVehicle preset) generates BeginOverlap/EndOverlap events
+- Added `ECC_GameTraceChannel2` (Intersection) for forward-probe box sweep
+- Implemented `TryAcquireIntersectionLock(Vehicle, EntryDir)` with same-direction follow-through and cross-direction rejection
+- Implemented round-robin direction scheduling (`ServingDirection`, `ServedCount`, `WaitingDirs`, `MaxConsecutiveGrants=1`) to prevent single-direction starvation
+- Added four safety nets: re-entry all-pass, periodic physical overlap sanitisation (2s), pending reservation expiry (5s), passed-intersection tracking
+- Removed all v0.5 legacy: `VehicleManager::IntersectionLocks`, `AcquireIntersectionLock()`, `UpdateIntersectionLocks()`, `IsIntersectionLockedByOther()`, `CachedIntersections`, `VehicleActor::PathIntersectionCells`, `SetPathIntersections()`, `FIntersectionLock`, `FIntersectionOccupant`
+- Added screen debug messages for vehicle enter/exit overlap and lock grant/reject events
+- Updated `DebugDrawIntersections()` to query `ARoadTile::IsAnyDirectionOccupied()` via `TActorIterator`
+- Added periodic `SanitizeAllIntersectionLocks()` timer in VehicleManager (every 2s)
+- Fixed include order in VehicleManager.h (ECityFlowDrivingSide forward declaration replaced with include)
+- Updated TDD.md and TDD_Chinese.md section 2.6 with v0.6 intersection occupation and movement state machine documentation
+
 ## 2026-06-04
 
 ### Vehicle Congestion & Forward Probe Refactor

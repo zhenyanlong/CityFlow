@@ -4,6 +4,7 @@
 #include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "Grid/GridManager.h"
 #include "Grid/Building.h"
+#include "Grid/RoadTile.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
@@ -110,8 +111,6 @@ void UVehicleManager::Tick(float DeltaTime)
 		}
 	}
 
-	UpdateIntersectionLocks();
-
 	for (int32 i = ActiveVehicles.Num() - 1; i >= 0; --i)
 	{
 		AVehicleActor* Vehicle = ActiveVehicles[i];
@@ -140,23 +139,6 @@ void UVehicleManager::Tick(float DeltaTime)
 		UpdateVehicleGridOccupancy(Vehicle);
 	}
 
-	if (bIntersectionsDirty)
-	{
-		CachedIntersections.Reset();
-		UGridManager* GM = GetGridManager();
-		if (GM)
-		{
-			for (const FGridVector& RoadCell : GM->GetCellsOfType(ECellType::Road))
-			{
-				if (IsIntersection(RoadCell))
-				{
-					CachedIntersections.Add(RoadCell);
-				}
-			}
-		}
-		bIntersectionsDirty = false;
-	}
-
 	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
 	if (Settings && Settings->bDebugDrawPaths)
 	{
@@ -173,7 +155,6 @@ void UVehicleManager::StartSpawning()
 	StopSpawning();
 
 	bIsActive = true;
-	bIntersectionsDirty = true;
 
 	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
 	if (Settings)
@@ -192,6 +173,15 @@ void UVehicleManager::StartSpawning()
 		this,
 		&UVehicleManager::UpdateCongestion,
 		CONGESTION_CHECK_INTERVAL,
+		true
+	);
+
+	// Periodic intersection lock sanitization — cleans up lost EndOverlap events and expired pending reservations
+	World->GetTimerManager().SetTimer(
+		SanitizeTimerHandle,
+		this,
+		&UVehicleManager::SanitizeAllIntersectionLocks,
+		2.0f,
 		true
 	);
 
@@ -215,6 +205,7 @@ void UVehicleManager::StopSpawning()
 	{
 		World->GetTimerManager().ClearTimer(SpawnTimerHandle);
 		World->GetTimerManager().ClearTimer(CongestionTimerHandle);
+		World->GetTimerManager().ClearTimer(SanitizeTimerHandle);
 	}
 	bIsActive = false;
 }
@@ -232,9 +223,7 @@ void UVehicleManager::ClearAllVehicles()
 	}
 	ActiveVehicles.Empty();
 	ArrivedVehicles.Empty();
-	IntersectionLocks.Empty();
 	VehicleGridMap.Empty();
-	CachedIntersections.Empty();
 	CachedSpawnEntries.Empty();
 	TotalSpawnWeight = 0.0f;
 }
@@ -355,9 +344,6 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 	const float TangentLen = GM->GetCellSize();
 	Vehicle->SetSplinePath(SplinePoints, SplineTangentDirs, SplineArriveLengths, SplineLeaveLengths, TangentLen);
 
-	// Store intersections along the path for forward-probe lookup
-	Vehicle->SetPathIntersections(Path);
-
 	ActiveVehicles.Add(Vehicle);
 	OnVehicleSpawned.Broadcast(Vehicle);
 
@@ -447,27 +433,18 @@ TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path
 
 			if (bPreviousWasTurn)
 			{
-				// Consecutive turn: previous turn's exit point is treated as
-				// this turn's entry — update that point's leave tangent to this TurnMult
 				const int32 LastIdx = OutLeaveTangentLengths.Num() - 1;
 				OutLeaveTangentLengths[LastIdx] = TurnMult;
 			}
 			else
 			{
-				// First turn in sequence: add entry offset
-				//       arrive = 1.0  (from previous straight)
-				//       leave  = TurnMult  (face turn curve)
 				AddPoint(Center - EntryDir * HalfCell, EntryDir, 1.0f, TurnMult);
 			}
 
-			// Add exit offset
-			//       arrive = TurnMult  (face turn curve)
-			//       leave  = 1.0  (default — may be overridden if next is consecutive)
 			AddPoint(Center + ExitDir * HalfCell, ExitDir, TurnMult, 1.0f);
 		}
 		else
 		{
-			// Straight cell: both arrive and leave = 1.0 (resets turn sequence)
 			AddPoint(GM->GridToWorld(Curr), GridDeltaToWorldDir(ExitDelta), 1.0f, 1.0f);
 		}
 
@@ -664,73 +641,6 @@ void UVehicleManager::UpdateCongestion()
 
 	CongestedCells = CongestedSet;
 	OnCongestionUpdated.Broadcast();
-}
-
-void UVehicleManager::UpdateIntersectionLocks()
-{
-	UGridManager* GM = GetGridManager();
-	if (!GM)
-	{
-		return;
-	}
-
-	for (auto It = IntersectionLocks.CreateIterator(); It; ++It)
-	{
-		TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>& VehiclesAtIntersection = It.Value();
-
-		for (auto VehIt = VehiclesAtIntersection.CreateIterator(); VehIt; ++VehIt)
-		{
-			AVehicleActor* Vehicle = VehIt.Key();
-			if (!Vehicle || !ActiveVehicles.Contains(Vehicle) ||
-				Vehicle->GetMovementState() == EVehicleMovementState::Arrived)
-			{
-				VehIt.RemoveCurrent();
-				continue;
-			}
-
-			const FGridVector VehicleGrid = GM->WorldToGrid(Vehicle->GetActorLocation());
-			if (VehicleGrid != It.Key())
-			{
-				VehIt.RemoveCurrent();
-			}
-		}
-
-		if (VehiclesAtIntersection.Num() == 0)
-		{
-			It.RemoveCurrent();
-		}
-	}
-}
-
-bool UVehicleManager::IsIntersectionLockedByOther(const FGridVector& Pos, const AVehicleActor* Self) const
-{
-	const TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>* Occupants = IntersectionLocks.Find(Pos);
-	if (!Occupants || Occupants->Num() == 0)
-	{
-		return false;
-	}
-
-	for (const auto& Pair : *Occupants)
-	{
-		if (Pair.Key && Pair.Key != Self)
-		{
-			return true;
-		}
-	}
-
-	return false;
-}
-
-void UVehicleManager::AcquireIntersectionLock(const FGridVector& Pos, AVehicleActor* Vehicle, EGridDirection EntryDir, EGridDirection ExitDir)
-{
-	if (!Vehicle || EntryDir == EGridDirection::None)
-	{
-		return;
-	}
-
-	const FIntersectionOccupant NewOcc(EntryDir, ExitDir);
-	TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>& VehiclesAtPos = IntersectionLocks.FindOrAdd(Pos);
-	VehiclesAtPos.FindOrAdd(Vehicle) = NewOcc;
 }
 
 bool UVehicleManager::IsIntersection(const FGridVector& Pos) const
@@ -1009,25 +919,41 @@ void UVehicleManager::DebugDrawPaths() const
 void UVehicleManager::DebugDrawIntersections() const
 {
 	UWorld* World = GetWorld();
-	if (!World)
+	UGridManager* GM = GetGridManager();
+	if (!World || !GM)
 	{
 		return;
 	}
 
-	for (const FGridVector& IntersectionPos : CachedIntersections)
+	// Iterate all ARoadTile actors in the world and query their lock state
+	for (TActorIterator<ARoadTile> It(World); It; ++It)
 	{
-		UGridManager* GM = GetGridManager();
-		if (!GM)
+		ARoadTile* Tile = *It;
+		if (!Tile || !Tile->IsIntersection())
 		{
 			continue;
 		}
 
-		const FVector WorldPos = GM->GridToWorld(IntersectionPos);
-		const TMap<TObjectPtr<AVehicleActor>, FIntersectionOccupant>* VehiclesAtPos = IntersectionLocks.Find(IntersectionPos);
-		const bool bLocked = VehiclesAtPos && VehiclesAtPos->Num() > 0;
+		const bool bLocked = Tile->IsAnyDirectionOccupied();
 		const FColor DrawColor = bLocked ? FColor::Red : FColor::Orange;
+		const FVector WorldPos = Tile->GetActorLocation();
 
 		DrawDebugBox(World, WorldPos + FVector(0, 0, 150), FVector(40, 40, 20),
 			DrawColor, false, 0.1f, 0, 2.0f);
+	}
+}
+
+void UVehicleManager::SanitizeAllIntersectionLocks()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	for (TActorIterator<ARoadTile> It(World); It; ++It)
+	{
+		ARoadTile* Tile = *It;
+		if (!Tile || !Tile->IsIntersection()) continue;
+
+		Tile->SanitizeOccupants();
+		Tile->ExpirePendingReservations(5.0f);
 	}
 }

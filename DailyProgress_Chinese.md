@@ -1,3 +1,21 @@
+## 2026-06-06
+
+### 交叉口锁重新设计：方向占用 + 轮转调度（v0.6）
+
+- 将单车 `LockHolder` 模型替换为 `ARoadTile` 上的方向占用表（`DirectionOccupants`、`PendingReservations`、`VehicleEntryDirs`）
+- 为 `ARoadTile` 添加 `UBoxComponent IntersectionBox`，通过物理 Overlap 事件驱动锁生命周期（仅十字/T型路口启用，尺寸抵消 Actor 缩放）
+- 修复 IntersectionBox 碰撞：ObjectType=ECC_Vehicle，对 Vehicle 通道设 ECR_Overlap，使 VehicleMesh（QueryVehicle 预设）生成 BeginOverlap/EndOverlap 事件
+- 新增 `ECC_GameTraceChannel2`（Intersection）碰撞通道用于前向探测 Box 扫描
+- 实现 `TryAcquireIntersectionLock(Vehicle, EntryDir)`，支持同方向跟车放行、交叉方向拒绝
+- 实现方向轮转调度（`ServingDirection`、`ServedCount`、`WaitingDirs`、`MaxConsecutiveGrants=1`），防止单一方向饿死
+- 添加四层保险：已入驻全放行、定期物理重叠校验（每 2 秒）、预占超时过期（5 秒）、已过路口追踪
+- 移除所有 v0.5 遗留：`VehicleManager::IntersectionLocks`、`AcquireIntersectionLock()`、`UpdateIntersectionLocks()`、`IsIntersectionLockedByOther()`、`CachedIntersections`、`VehicleActor::PathIntersectionCells`、`SetPathIntersections()`、`FIntersectionLock`、`FIntersectionOccupant`
+- 添加车辆进出 Overlap 及锁授予/拒绝的屏幕调试消息
+- 更新 `DebugDrawIntersections()` 改为通过 `TActorIterator` 查询 `ARoadTile::IsAnyDirectionOccupied()`
+- 在 VehicleManager 中添加定期 `SanitizeAllIntersectionLocks()` 定时器（每 2 秒）
+- 修复 VehicleManager.h 的 include 顺序（ECityFlowDrivingSide 前置声明改为 include）
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节，记录 v0.6 交叉口占用和运动状态机文档
+
 ## 2026-06-04
 
 ### 车辆拥堵与前向探测重构
