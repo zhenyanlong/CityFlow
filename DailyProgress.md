@@ -1,5 +1,24 @@
 ## 2026-06-06
 
+### Full Game Loop Widget System (v0.7)
+
+- Fixed StartSimulation button not responding: button callbacks in UCityFlowGameWidget were missing `UFUNCTION()` macro, causing `AddDynamic`/`BindUFunction` to silently fail
+- Renamed button callbacks to `OnStartSimulationClicked`/`OnRestartPlanningClicked`/`OnTriggerLSystemClicked` with UFUNCTION macro
+- Removed dead code: `EndSimulation()`, `HandleSimulationEnd()`, `HideGameWidget()`
+- Created `UCityFlowStartWidget` C++ base: main menu widget with `Btn_StartGame`/`Btn_QuitGame` BindWidget controls, delegates `OnStartGameClicked`/`OnQuitGameClicked`
+- Created `UCityFlowPauseWidget` C++ base: pause overlay widget with `Btn_Resume`/`Btn_ReturnToMain` BindWidget controls, delegates `OnResumeClicked`/`OnReturnToMainClicked`
+- Complete rewrite of `ACityFlowHUD`: now manages full widget lifecycle (StartWidget → GameWidget ↔ PauseWidget → EvaluationWidget → loop)
+- Added `TogglePause()`/`ShowPauseOverlay()`/`HidePauseOverlay()` with `SetGamePaused` and `FInputModeUIOnly`/`FInputModeGameAndUI` switching
+- Added `ReturnToMainMenu()` Blueprint-callable for evaluation screen
+- HUD auto-listens to `GameMode::OnSimulationPhaseEnd` to show evaluation widget
+- Eliminated dual widget creation: removed `GameWidgetClass` and `GameWidgetInstance` from `ACityFlowGameMode`; HUD is sole widget lifecycle owner
+- GameMode deferred initialization: `BeginPlay()` only sets budget; new `StartNewGame()` called by HUD on "Start Game" click
+- Added `ReturnToMainMenu()` to GameMode: stops all timers/vehicles, destroys all `AGridPlaceableActor` via `TActorIterator`, re-initialises grid, aborts L-system
+- Added `IA_Pause` Enhanced Input action to `ACityFlowPlayerController` for Esc-key pause/resume
+- Fixed `Btn_RestartPlanning` visibility: now shows during Simulating phase (mid-game return to Planning), not Evaluation
+- Fixed compilation error: `FInputMode_UIOnly` → `FInputModeUIOnly` (UE class names have no underscores)
+- Updated TDD.md and TDD_Chinese.md sections 2.8 (pause input), 2.11 (deferred init + new APIs), 2.12 (full rewrite with widget lifecycle)
+
 ### Intersection Lock Redesign: Direction-Based Occupancy with Round-Robin Scheduling (v0.6)
 
 - Replaced per-vehicle `LockHolder` model with direction-occupancy tables (`DirectionOccupants`, `PendingReservations`, `VehicleEntryDirs`) on `ARoadTile`

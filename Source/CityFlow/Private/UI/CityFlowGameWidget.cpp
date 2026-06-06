@@ -4,78 +4,55 @@
 #include "LSystem/Subsystem/LSystemManager.h"
 #include "Player/CityFlowPlayerController.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+
+// ============================================================================
+//  生命周期
+// ============================================================================
 
 void UCityFlowGameWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	// 绑定按钮点击事件
+	// 绑定按钮（回调必须是 UFUNCTION，否则 AddDynamic 静默失败）
 	if (Btn_TriggerLSystem)
-	{
-		Btn_TriggerLSystem->OnClicked.AddDynamic(this, &UCityFlowGameWidget::TriggerLSystem);
-	}
+		Btn_TriggerLSystem->OnClicked.AddDynamic(this, &UCityFlowGameWidget::OnTriggerLSystemClicked);
 	if (Btn_StartSimulation)
-	{
-		Btn_StartSimulation->OnClicked.AddDynamic(this, &UCityFlowGameWidget::StartSimulation);
-	}
+		Btn_StartSimulation->OnClicked.AddDynamic(this, &UCityFlowGameWidget::OnStartSimulationClicked);
 	if (Btn_RestartPlanning)
-	{
-		Btn_RestartPlanning->OnClicked.AddDynamic(this, &UCityFlowGameWidget::RestartPlanning);
-	}
+		Btn_RestartPlanning->OnClicked.AddDynamic(this, &UCityFlowGameWidget::OnRestartPlanningClicked);
 
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	if (GM)
-	{
+	// 绑定 GameMode / Scoring / LSystem 委托
+	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		GM->OnGamePhaseChanged.AddDynamic(this, &UCityFlowGameWidget::HandleGamePhaseChanged);
-	}
 
-	UScoringManager* SM = GetScoringManager();
-	if (SM)
-	{
+	if (UScoringManager* SM = GetScoringManager())
 		SM->OnScoreChanged.AddDynamic(this, &UCityFlowGameWidget::HandleScoreChanged);
-	}
 
-	ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>();
-	if (LSM)
+	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
 	{
 		LSM->OnGenerationStep.AddDynamic(this, &UCityFlowGameWidget::HandleLSystemStep);
 		LSM->OnGenerationFinished.AddDynamic(this, &UCityFlowGameWidget::HandleLSystemFinished);
 	}
 
-	// 初始状态刷新
-	UpdateButtonStates(GM ? GM->GetCurrentPhase() : ECityFlowGamePhase::None);
+	// 初始 UI 状态
+	UpdateButtonStates(GetCityFlowGameMode() ? GetCityFlowGameMode()->GetCurrentPhase() : ECityFlowGamePhase::None);
 }
 
 void UCityFlowGameWidget::NativeDestruct()
 {
-	if (Btn_TriggerLSystem)
-	{
-		Btn_TriggerLSystem->OnClicked.RemoveAll(this);
-	}
-	if (Btn_StartSimulation)
-	{
-		Btn_StartSimulation->OnClicked.RemoveAll(this);
-	}
-	if (Btn_RestartPlanning)
-	{
-		Btn_RestartPlanning->OnClicked.RemoveAll(this);
-	}
+	// 解绑按钮
+	if (Btn_TriggerLSystem)     Btn_TriggerLSystem->OnClicked.RemoveAll(this);
+	if (Btn_StartSimulation)    Btn_StartSimulation->OnClicked.RemoveAll(this);
+	if (Btn_RestartPlanning)    Btn_RestartPlanning->OnClicked.RemoveAll(this);
 
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	if (GM)
-	{
+	// 解绑委托
+	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		GM->OnGamePhaseChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleGamePhaseChanged);
-	}
 
-	UScoringManager* SM = GetScoringManager();
-	if (SM)
-	{
+	if (UScoringManager* SM = GetScoringManager())
 		SM->OnScoreChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleScoreChanged);
-	}
 
-	ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>();
-	if (LSM)
+	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
 	{
 		LSM->OnGenerationStep.RemoveDynamic(this, &UCityFlowGameWidget::HandleLSystemStep);
 		LSM->OnGenerationFinished.RemoveDynamic(this, &UCityFlowGameWidget::HandleLSystemFinished);
@@ -84,55 +61,37 @@ void UCityFlowGameWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
-// ---- 按钮逻辑 ----
+// ============================================================================
+//  按钮回调
+// ============================================================================
 
-void UCityFlowGameWidget::StartSimulation()
+void UCityFlowGameWidget::OnStartSimulationClicked()
 {
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	if (GM)
-	{
+	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		GM->StartSimulationPhase();
-	}
 
 	if (ACityFlowPlayerController* PC = GetOwningPlayer<ACityFlowPlayerController>())
-	{
 		PC->DisablePlacement();
-	}
 }
 
-void UCityFlowGameWidget::EndSimulation()
+void UCityFlowGameWidget::OnRestartPlanningClicked()
 {
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	if (GM)
-	{
-		GM->EndSimulationPhase();
-	}
-}
-
-void UCityFlowGameWidget::RestartPlanning()
-{
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	if (GM)
-	{
+	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		GM->RestartPlanningPhase();
-	}
 
 	if (ACityFlowPlayerController* PC = GetOwningPlayer<ACityFlowPlayerController>())
-	{
 		PC->EnablePlacement();
-	}
 }
 
-void UCityFlowGameWidget::TriggerLSystem()
+void UCityFlowGameWidget::OnTriggerLSystemClicked()
 {
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	if (GM)
-	{
+	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		GM->TriggerLSystemGrowth();
-	}
 }
 
-// ---- 委托回调 ----
+// ============================================================================
+//  委托回调
+// ============================================================================
 
 void UCityFlowGameWidget::HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, ECityFlowGamePhase NewPhase)
 {
@@ -142,19 +101,14 @@ void UCityFlowGameWidget::HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, EC
 
 	OnPhaseChanged_BP(OldPhase, NewPhase);
 
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	if (GM)
-	{
+	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		OnBudgetChanged_BP(GM->GetPlayerBudget(), GM->GetLSystemBudget(), GM->GetRemainingBudget());
-	}
 }
 
 void UCityFlowGameWidget::HandleScoreChanged(int32 NewScore)
 {
 	if (Txt_Score)
-	{
 		Txt_Score->SetText(FText::FromString(FString::Printf(TEXT("Score: %d"), NewScore)));
-	}
 
 	OnScoreChanged_BP(NewScore);
 }
@@ -162,9 +116,7 @@ void UCityFlowGameWidget::HandleScoreChanged(int32 NewScore)
 void UCityFlowGameWidget::HandleLSystemStep(int32 RemainingBudget)
 {
 	if (Txt_Budget)
-	{
 		Txt_Budget->SetText(FText::FromString(FString::Printf(TEXT("Budget: %d"), RemainingBudget)));
-	}
 
 	OnLSystemStep_BP(RemainingBudget);
 }
@@ -175,25 +127,13 @@ void UCityFlowGameWidget::HandleLSystemFinished(bool bAllConnected)
 	OnLSystemFinished_BP(bAllConnected);
 }
 
-void UCityFlowGameWidget::HandleSimulationEnd()
-{
-	UScoringManager* SM = GetScoringManager();
-	if (!SM)
-	{
-		return;
-	}
-
-	OnEvaluation_BP(SM->GetTotalScore(), SM->GetArrivalCount(), SM->GetCongestionPenalty(), false);
-}
-
-// ---- UI 更新辅助 ----
+// ============================================================================
+//  UI 更新辅助
+// ============================================================================
 
 void UCityFlowGameWidget::UpdatePhaseText(ECityFlowGamePhase Phase)
 {
-	if (!Txt_Phase)
-	{
-		return;
-	}
+	if (!Txt_Phase) return;
 
 	const TCHAR* PhaseStr = TEXT("Unknown");
 	switch (Phase)
@@ -207,35 +147,26 @@ void UCityFlowGameWidget::UpdatePhaseText(ECityFlowGamePhase Phase)
 
 void UCityFlowGameWidget::UpdateBudgetText()
 {
-	if (!Txt_Budget)
-	{
-		return;
-	}
+	if (!Txt_Budget) return;
 
-	ACityFlowGameMode* GM = GetCityFlowGameMode();
-	const int32 Remaining = GM ? GM->GetRemainingBudget() : 0;
+	const int32 Remaining = GetCityFlowGameMode() ? GetCityFlowGameMode()->GetRemainingBudget() : 0;
 	Txt_Budget->SetText(FText::FromString(FString::Printf(TEXT("Budget: %d"), Remaining)));
 }
 
 void UCityFlowGameWidget::UpdateButtonStates(ECityFlowGamePhase Phase)
 {
 	using EVis = ESlateVisibility;
+	const bool bPlanning = (Phase == ECityFlowGamePhase::Planning);
+	const bool bSimulating = (Phase == ECityFlowGamePhase::Simulating);
 
-	if (Btn_TriggerLSystem)
-	{
-		Btn_TriggerLSystem->SetVisibility(Phase == ECityFlowGamePhase::Planning ? EVis::Visible : EVis::Collapsed);
-	}
-	if (Btn_StartSimulation)
-	{
-		Btn_StartSimulation->SetVisibility(Phase == ECityFlowGamePhase::Planning ? EVis::Visible : EVis::Collapsed);
-	}
-	if (Btn_RestartPlanning)
-	{
-		Btn_RestartPlanning->SetVisibility(Phase == ECityFlowGamePhase::Evaluation ? EVis::Visible : EVis::Collapsed);
-	}
+	if (Btn_TriggerLSystem)   Btn_TriggerLSystem->SetVisibility(bPlanning ? EVis::Visible : EVis::Collapsed);
+	if (Btn_StartSimulation)  Btn_StartSimulation->SetVisibility(bPlanning ? EVis::Visible : EVis::Collapsed);
+	if (Btn_RestartPlanning)  Btn_RestartPlanning->SetVisibility(bSimulating ? EVis::Visible : EVis::Collapsed);
 }
 
-// ---- 辅助 ----
+// ============================================================================
+//  辅助
+// ============================================================================
 
 ACityFlowGameMode* UCityFlowGameWidget::GetCityFlowGameMode() const
 {
@@ -244,10 +175,5 @@ ACityFlowGameMode* UCityFlowGameWidget::GetCityFlowGameMode() const
 
 UScoringManager* UCityFlowGameWidget::GetScoringManager() const
 {
-	const UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-	return World->GetSubsystem<UScoringManager>();
+	return GetWorld() ? GetWorld()->GetSubsystem<UScoringManager>() : nullptr;
 }

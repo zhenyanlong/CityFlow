@@ -15,6 +15,14 @@ public:
 
 	virtual void BeginPlay() override;
 
+	/** 玩家点击 "开始游戏" 后调用，创建场景并进入 Planning */
+	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
+	void StartNewGame();
+
+	/** 回到主菜单 —— 清理所有 Actor 和状态 */
+	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
+	void ReturnToMainMenu();
+
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void StartSimulationPhase();
 
@@ -63,9 +71,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TSubclassOf<class AVehicleActor> VehicleClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
-	TSubclassOf<class UUserWidget> GameWidgetClass;
-
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Budget")
 	int32 TotalRoadBudget = 200;
 
@@ -106,9 +111,6 @@ protected:
 	void TransitionToPhase(ECityFlowGamePhase NewPhase);
 
 	virtual void Tick(float DeltaSeconds) override;
-
-	UPROPERTY()
-	TObjectPtr<class UUserWidget> GameWidgetInstance;
 
 private:
 	void OnSimulationTimerExpired();

@@ -61,15 +61,17 @@ protected:
 	void OnLSystemFinished_BP(bool bAllConnected);
 
 private:
-	void StartSimulation();
-	void EndSimulation();
-	void RestartPlanning();
-	void TriggerLSystem();
+	// ---- 按钮回调（必须是 UFUNCTION，否则 AddDynamic 绑定静默失败）----
+	UFUNCTION()
+	void OnStartSimulationClicked();
 
-	void UpdatePhaseText(ECityFlowGamePhase Phase);
-	void UpdateBudgetText();
-	void UpdateButtonStates(ECityFlowGamePhase Phase);
+	UFUNCTION()
+	void OnRestartPlanningClicked();
 
+	UFUNCTION()
+	void OnTriggerLSystemClicked();
+
+	// ---- 委托回调 ----
 	UFUNCTION()
 	void HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, ECityFlowGamePhase NewPhase);
 
@@ -82,8 +84,10 @@ private:
 	UFUNCTION()
 	void HandleLSystemFinished(bool bAllConnected);
 
-	UFUNCTION()
-	void HandleSimulationEnd();
+	// ---- 内部辅助 ----
+	void UpdatePhaseText(ECityFlowGamePhase Phase);
+	void UpdateBudgetText();
+	void UpdateButtonStates(ECityFlowGamePhase Phase);
 
 	class ACityFlowGameMode* GetCityFlowGameMode() const;
 	class UScoringManager* GetScoringManager() const;

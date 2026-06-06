@@ -628,7 +628,8 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Preview system | Spawns a preview actor on `BeginPlay`; follows cursor via `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()`; each tick calls `SetPreviewPlacementValid()` for validity, then `UpdatePreviewAppearance()` to let `ARoadTile` show the predicted mesh in preview |
 | Placement | `IA_PlaceItem` (left mouse button) → `Started`/`Triggered`/`Completed` events → `TryPlaceAtCursor()` helper with `LastPlacedGridPos` deduplication for drag-to-place |
 | Removal | `IA_RemoveItem` (right mouse button) → `Started`/`Triggered`/`Completed` events → `TryRemoveAtCursor()` helper with `LastRemovedGridPos` deduplication for drag-to-remove. Looks up the actor from `Cell.RoadActor` in the grid instead of relying on collision hit. |
-| Configurable (Blueprint) | `PlaceableActorClass` (any `AGridPlaceableActor` subclass); `IA_PlaceItem`, `IA_RemoveItem` |
+| Configurable (Blueprint) | `PlaceableActorClass` (any `AGridPlaceableActor` subclass); `IA_PlaceItem`, `IA_RemoveItem`, `IA_Pause` |
+| Pause | `IA_Pause` → `OnPausePressed` → `HUD::TogglePause()` — toggles pause overlay and `SetGamePaused` |
 
 #### Placement Toggle
 
@@ -699,26 +700,37 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 ### 2.11 GameMode State Machine
 
-#### Implementation Status: ✅ Implemented
+#### Implementation Status: ✅ Implemented — v0.7 deferred init
 
 `ACityFlowGameMode` owns the game lifecycle via `ECityFlowGamePhase`:
 
 | Phase | Transition | Actions |
 |---|---|---|
-| **None** → **Planning** | `BeginPlay()` | Init grid, spawn default buildings, create GameWidget, set budget |
+| **None** → **Planning** | `StartNewGame()` (called by HUD on "Start Game") | Init grid, spawn default buildings, set budget |
 | **Planning** → **Simulating** | `StartSimulationPhase()` (UI/Cheat) | Lock road placement, start VehicleManager spawning + ScoringManager, start simulation timer |
 | **Simulating** → **Evaluation** | Timer expiry or `EndSimulationPhase()` (UI/Cheat) | Stop spawning, finalize scoring, broadcast events |
 | **Evaluation** → **Planning** | `RestartPlanningPhase()` (UI/Cheat) | Clear vehicles, reset budget, re-enable placement |
+| **Any** → **None** | `ReturnToMainMenu()` (HUD) | Stop timers, destroy all placed actors, reset grid, abort L-system, clear phase |
+
+`BeginPlay()` now only sets budget — scene creation is **deferred** to `StartNewGame()`, triggered by HUD when the player clicks "Start Game" on the main menu.
+
+**New APIs:**
+
+| Method | Description |
+|---|---|
+| `StartNewGame()` | Initialises default scene and transitions to Planning. Guards: only from `None` phase. |
+| `ReturnToMainMenu()` | Full cleanup: stops spawning/vehicles/scoring/timer, destroys all `AGridPlaceableActor` via `TActorIterator`, re-initialises grid, calls `LSystemManager::AbortGeneration()`, returns phase to `None`. |
+
+**Removed from GameMode:** `GameWidgetClass` and `GameWidgetInstance` — HUD is now the sole widget lifecycle owner.
 
 **Blueprint-Configurable Properties:**
 - `OriginBuildingClass` / `DestinationBuildingClass` — building BP classes
 - `RoadTileClass` — road tile BP class
 - `VehicleClass` — vehicle BP class (future override)
-- `GameWidgetClass` / `EvaluationWidgetClass` — UMG widget classes
 - `TotalRoadBudget`, `LSystemBudgetShare` — budget split
 - `SimulationDuration`, `DefaultBuildingCount`, `DefaultGridWidth/Height/CellSize`
-- `DrivingSide` — `ECityFlowDrivingSide` (RightHand / LeftHand), controls lane side for bidirectional traffic
-- `LaneOffsetFactor` — float (0.0~0.45, default 0.2), fraction of CellSize to offset spline path from road center
+- `DrivingSide` — `ECityFlowDrivingSide` (RightHand / LeftHand)
+- `LaneOffsetFactor` — float (0.0~0.45, default 0.2)
 
 **Events:** `OnGamePhaseChanged`, `OnPlanningPhaseEnd`, `OnSimulationPhaseEnd`
 
@@ -726,31 +738,76 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 ### 2.12 UI System
 
-#### Implementation Status: ✅ Implemented
+#### Implementation Status: ✅ Implemented — v0.7 full game-loop widgets
 
-**CityFlowHUD** (`ACityFlowHUD`):
-- Manages `GameWidget` (Planning/Simulation overlay) and `EvaluationWidget` (results screen).
-- `ShowGameWidget()` / `ShowEvaluationWidget()` swap visible widgets.
+CityFlow's UI is managed by **ACityFlowHUD** as the sole widget lifecycle owner. Widgets follow a main-menu-first flow with four states.
 
-**CityFlowGameWidget** (`UUserWidget` C++ base):
-- Uses `BindWidget` meta specifiers to auto-bind UMG controls — Blueprint subclasses simply place controls with matching names, no manual binding required.
-- **Bound controls:**
-  - `Btn_TriggerLSystem` (`UButton`) — triggers L-system capillary road generation
-  - `Btn_StartSimulation` (`UButton`) — starts the simulation phase
-  - `Btn_RestartPlanning` (`UButton`) — returns to planning phase (visible only during Evaluation)
-  - `Txt_Phase` (`UTextBlock`) — displays current game phase
-  - `Txt_Budget` (`UTextBlock`) — displays remaining road budget
-  - `Txt_Score` (`UTextBlock`) — displays current score
-- **Button auto-binding:** `NativeConstruct()` binds all button `OnClicked` events automatically; `NativeDestruct()` cleans up with `RemoveAll`.
-- **Button visibility states:** `UpdateButtonStates(Phase)` manages button visibility:
-  - Planning phase: `Btn_TriggerLSystem` + `Btn_StartSimulation` visible, `Btn_RestartPlanning` hidden
-  - Evaluation phase: `Btn_RestartPlanning` visible, action buttons hidden
-- **Phase-aware placement toggle:** `StartSimulation()` calls `PC->DisablePlacement()` to stop placement preview; `RestartPlanning()` calls `PC->EnablePlacement()` to resume.
-- **Auto-updating text:** `HandleGamePhaseChanged()`, `HandleScoreChanged()`, `HandleLSystemStep()` update `Txt_Phase` / `Txt_Score` / `Txt_Budget` text in C++ without Blueprint involvement.
-- Exposes `BlueprintImplementableEvent` callbacks for phase changes (`OnPhaseChanged_BP`), score updates (`OnScoreChanged_BP`), budget changes (`OnBudgetChanged_BP`), L-system progress (`OnLSystemStep_BP`, `OnLSystemFinished_BP`), evaluation (`OnEvaluation_BP`).
-- Binds to GameMode/ScoringManager/LSystemManager delegates in `NativeConstruct()`.
+#### Widget Lifecycle
 
-Blueprint subclasses only need to place the named UMG controls — all binding and logic is handled in C++.
+```
+StartWidget (主菜单)
+  ├─ Btn_StartGame → HUD::ShowGameWidget() → GameMode::StartNewGame()
+  ├─ Btn_QuitGame → Quit
+  ↓
+GameWidget (规划/模拟 HUD 覆盖层)
+  ├─ [Planning] Btn_TriggerLSystem / Btn_StartSimulation
+  ├─ [Simulating] Btn_RestartPlanning (return to Planning)
+  ├─ Esc → HUD::TogglePause()
+  ↓
+PauseWidget (Overlay, ZOrder=100)
+  ├─ Btn_Resume → HUD::HidePauseOverlay()
+  └─ Btn_ReturnToMain → HUD::ReturnToMainMenu() → StartWidget
+  ↓
+EvaluationWidget (结算)
+  └─ BP button calls HUD::ReturnToMainMenu() → StartWidget
+```
+
+**ACityFlowHUD** — central widget manager:
+- `BeginPlay()` shows `StartWidget` (main menu); listens to `GameMode::OnSimulationPhaseEnd` to auto-show `EvaluationWidget`.
+- `TogglePause()` / `ShowPauseOverlay()` / `HidePauseOverlay()` — pause with `FInputModeUIOnly`, resume with `FInputModeGameAndUI`.
+- `ReturnToMainMenu()` — Blueprint-callable; cleans up and returns to `StartWidget`.
+- `HandleReturnToMainClicked()` — pause → `GameMode::ReturnToMainMenu()` → `ShowStartWidget()`.
+- `HandleEvaluationReturn()` — evaluation → `GameMode::ReturnToMainMenu()` → `ShowStartWidget()`.
+
+**Blueprint-configurable Widget classes (on HUD):**
+
+| Property | Type | Purpose |
+|---|---|---|
+| `StartWidgetClass` | `TSubclassOf<UCityFlowStartWidget>` | Main menu widget |
+| `GameWidgetClass` | `TSubclassOf<UCityFlowGameWidget>` | Planning/Simulation HUD overlay |
+| `PauseWidgetClass` | `TSubclassOf<UCityFlowPauseWidget>` | Pause menu overlay |
+| `EvaluationWidgetClass` | `TSubclassOf<UUserWidget>` | Results screen |
+
+#### CityFlowStartWidget
+
+Main menu widget with `BindWidget` controls:
+- `Btn_StartGame` → broadcasts `OnStartGameClicked` (HUD listens → `ShowGameWidget()`)
+- `Btn_QuitGame` → broadcasts `OnQuitGameClicked`
+- `Txt_Title`, `Txt_Version` (BindWidgetOptional) — display text
+
+#### CityFlowPauseWidget
+
+Pause overlay widget with `BindWidget` controls:
+- `Btn_Resume` → broadcasts `OnResumeClicked` (HUD listens → `HidePauseOverlay()`)
+- `Btn_ReturnToMain` → broadcasts `OnReturnToMainClicked` (HUD listens → `ReturnToMainMenu()`)
+
+#### CityFlowGameWidget (Planning / Simulation overlay)
+
+`UUserWidget` C++ base using `BindWidget` for UMG controls:
+- **Bound controls:** `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`
+- **Button auto-binding:** `NativeConstruct()` binds `OnClicked` via `AddDynamic` (callbacks are `UFUNCTION()` — required by `BindUFunction`); `NativeDestruct()` cleans up.
+- **Button visibility:** `UpdateButtonStates(Phase)`:
+  - Planning: `Btn_TriggerLSystem` + `Btn_StartSimulation` visible
+  - Simulating: `Btn_RestartPlanning` visible
+  - Otherwise: all hidden
+- **Placement toggle:** `OnStartSimulationClicked` calls `PC->DisablePlacement()`; `OnRestartPlanningClicked` calls `PC->EnablePlacement()`.
+- **Auto-updating text:** `HandleGamePhaseChanged`, `HandleScoreChanged`, `HandleLSystemStep` update `Txt_*` in C++.
+- **BlueprintImplementableEvents:** `OnPhaseChanged_BP`, `OnScoreChanged_BP`, `OnBudgetChanged_BP`, `OnSimulationTick_BP`, `OnEvaluation_BP`, `OnLSystemStep_BP`, `OnLSystemFinished_BP`.
+- **Delegates bound in `NativeConstruct()`:** `GameMode::OnGamePhaseChanged`, `ScoringManager::OnScoreChanged`, `LSystemManager::OnGenerationStep`, `LSystemManager::OnGenerationFinished`.
+
+#### Ownership
+
+HUD is the **sole widget lifecycle owner** — GameMode no longer creates widgets. GameMode's `GameWidgetClass` and `GameWidgetInstance` have been removed. The BP GameMode's old "Game Widget Class" value should be moved to the BP HUD's `GameWidgetClass`.
 
 ---
 

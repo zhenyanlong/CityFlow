@@ -1,6 +1,7 @@
 #include "Player/CityFlowPlayerController.h"
 #include "Grid/GridManager.h"
 #include "Grid/GridPlaceableActor.h"
+#include "UI/CityFlowHUD.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
@@ -53,11 +54,11 @@ void ACityFlowPlayerController::SetupInputComponent()
 			EnhancedInput->BindAction(IA_RemoveItem, ETriggerEvent::Started, this, &ACityFlowPlayerController::OnRemoveItemStarted);
 			EnhancedInput->BindAction(IA_RemoveItem, ETriggerEvent::Triggered, this, &ACityFlowPlayerController::OnRemoveItemTriggered);
 			EnhancedInput->BindAction(IA_RemoveItem, ETriggerEvent::Completed, this, &ACityFlowPlayerController::OnRemoveItemCompleted);
-			CF_DEBUG("[Remove] IA_RemoveItem bound to OnRemoveItemStarted");
 		}
-		else
+
+		if (IA_Pause)
 		{
-			CF_DEBUG("[Remove] IA_RemoveItem is NULL - not configured in Blueprint!");
+			EnhancedInput->BindAction(IA_Pause, ETriggerEvent::Started, this, &ACityFlowPlayerController::OnPausePressed);
 		}
 	}
 }
@@ -290,6 +291,12 @@ void ACityFlowPlayerController::OnRemoveItemTriggered_Implementation()
 void ACityFlowPlayerController::OnRemoveItemCompleted_Implementation()
 {
 	LastRemovedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
+}
+
+void ACityFlowPlayerController::OnPausePressed_Implementation()
+{
+	if (ACityFlowHUD* HUD = GetHUD<ACityFlowHUD>())
+		HUD->TogglePause();
 }
 
 UGridManager* ACityFlowPlayerController::GetGridManager() const

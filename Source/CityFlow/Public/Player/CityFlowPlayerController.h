@@ -55,6 +55,9 @@ protected:
 	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
 	void OnRemoveItemCompleted();
 
+	UFUNCTION(BlueprintNativeEvent, Category = "Placement")
+	void OnPausePressed();
+
 	class UGridManager* GetGridManager() const;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
@@ -65,6 +68,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_RemoveItem;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Pause;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
 	TSubclassOf<AGridPlaceableActor> PlaceableActorClass;

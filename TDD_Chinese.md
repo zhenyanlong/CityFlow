@@ -605,7 +605,8 @@ TickMovementSpline:
 | 预览系统 | `BeginPlay` 时生成预览 Actor；通过 `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()` 跟随光标；每帧通过 `SetPreviewPlacementValid()` 更新有效性，然后调用 `UpdatePreviewAppearance()` 让 `ARoadTile` 在预览中显示预测的 mesh |
 | 放置 | `IA_PlaceItem`（鼠标左键）→ `Started`/`Triggered`/`Completed` 事件 → `TryPlaceAtCursor()` 辅助函数，通过 `LastPlacedGridPos` 去重实现拖拽连续放置 |
 | 删除 | `IA_RemoveItem`（鼠标右键）→ `Started`/`Triggered`/`Completed` 事件 → `TryRemoveAtCursor()` 辅助函数，通过 `LastRemovedGridPos` 去重实现拖拽连续删除。从网格 `Cell.RoadActor` 查找 Actor，不依赖碰撞命中。 |
-| 蓝图可配置 | `PlaceableActorClass`（任意 `AGridPlaceableActor` 子类）；`IA_PlaceItem`、`IA_RemoveItem` |
+| 蓝图可配置 | `PlaceableActorClass`（任意 `AGridPlaceableActor` 子类）；`IA_PlaceItem`、`IA_RemoveItem`、`IA_Pause` |
+| 暂停 | `IA_Pause` → `OnPausePressed` → `HUD::TogglePause()` — 切换暂停覆盖层和 `SetGamePaused` |
 
 #### 放置开关
 
@@ -675,26 +676,37 @@ TickMovementSpline:
 
 ### 2.11 GameMode 状态机
 
-#### 实现状态：✅ 已实现
+#### 实现状态：✅ 已实现 — v0.7 推迟初始化
 
 `ACityFlowGameMode` 通过 `ECityFlowGamePhase` 管理游戏生命周期：
 
 | 阶段 | 转换 | 动作 |
 |---|---|---|
-| **None** → **Planning** | `BeginPlay()` | 初始化网格、生成默认建筑、创建 GameWidget、设置预算 |
-| **Planning** → **Simulating** | `StartSimulationPhase()` | 锁定道路放置、启动 VehicleManager 生成 + ScoringManager、启动模拟计时器 |
+| **None** → **Planning** | `StartNewGame()`（由 HUD 在 "开始游戏" 时调用） | 初始化网格、生成默认建筑、设置预算 |
+| **Planning** → **Simulating** | `StartSimulationPhase()`（UI/Cheat） | 锁定道路放置、启动 VehicleManager 生成 + ScoringManager、启动模拟计时器 |
 | **Simulating** → **Evaluation** | 计时器到期或 `EndSimulationPhase()` | 停止生成、结算分数、广播事件 |
 | **Evaluation** → **Planning** | `RestartPlanningPhase()` | 清除车辆、重置预算、重新开放放置 |
+| **任意** → **None** | `ReturnToMainMenu()`（HUD） | 停止计时器、销毁所有已放置 Actor、重置网格、中止 L-system、清空阶段 |
+
+`BeginPlay()` 现在仅设置预算——场景创建**推迟**到 `StartNewGame()`，由 HUD 在玩家点击主菜单 "开始游戏" 时触发。
+
+**新增 API：**
+
+| 方法 | 描述 |
+|---|---|
+| `StartNewGame()` | 初始化默认场景并切换到 Planning。守卫：仅允许从 `None` 阶段调用。 |
+| `ReturnToMainMenu()` | 完全清理：停止生成/车辆/计分/计时器，通过 `TActorIterator` 销毁所有 `AGridPlaceableActor`，重新初始化网格，调用 `LSystemManager::AbortGeneration()`，回到 `None` 阶段。 |
+
+**已从 GameMode 移除：** `GameWidgetClass` 和 `GameWidgetInstance` — HUD 是唯一 Widget 生命周期所有者。
 
 **蓝图可配置属性：**
 - `OriginBuildingClass` / `DestinationBuildingClass` — 建筑蓝图类
 - `RoadTileClass` — 道路地块蓝图类
 - `VehicleClass` — 车辆蓝图类（未来覆写）
-- `GameWidgetClass` / `EvaluationWidgetClass` — UMG Widget 类
 - `TotalRoadBudget`、`LSystemBudgetShare` — 预算分配
 - `SimulationDuration`、`DefaultBuildingCount`、`DefaultGridWidth/Height/CellSize`
-- `DrivingSide` — `ECityFlowDrivingSide`（右舵/左舵），控制双向车道行驶侧
-- `LaneOffsetFactor` — float（0.0~0.45，默认 0.2），样条路径距道路中心的偏移比例
+- `DrivingSide` — `ECityFlowDrivingSide`（右舵/左舵）
+- `LaneOffsetFactor` — float（0.0~0.45，默认 0.2）
 
 **事件：** `OnGamePhaseChanged`、`OnPlanningPhaseEnd`、`OnSimulationPhaseEnd`
 
@@ -702,31 +714,76 @@ TickMovementSpline:
 
 ### 2.12 UI 系统
 
-#### 实现状态：✅ 已实现
+#### 实现状态：✅ 已实现 — v0.7 完整游戏循环 Widget
 
-**CityFlowHUD**（`ACityFlowHUD`）：
-- 管理 `GameWidget`（规划/模拟覆盖层）和 `EvaluationWidget`（结算界面）。
-- `ShowGameWidget()` / `ShowEvaluationWidget()` 切换可见 Widget。
+CityFlow 的 UI 由 **ACityFlowHUD** 作为唯一 Widget 生命周期所有者集中管理。Widget 遵循主菜单优先的四状态流程。
 
-**CityFlowGameWidget**（`UUserWidget` C++ 基类）：
-- 使用 `BindWidget` 元标记自动绑定 UMG 控件——蓝图子类只需放置同名控件，无需手动绑定。
-- **绑定的控件：**
-  - `Btn_TriggerLSystem`（`UButton`）— 触发 L-system 毛细道路生成
-  - `Btn_StartSimulation`（`UButton`）— 启动模拟阶段
-  - `Btn_RestartPlanning`（`UButton`）— 返回规划阶段（仅在结算阶段可见）
-  - `Txt_Phase`（`UTextBlock`）— 显示当前游戏阶段
-  - `Txt_Budget`（`UTextBlock`）— 显示剩余道路预算
-  - `Txt_Score`（`UTextBlock`）— 显示当前分数
-- **按钮自动绑定：** `NativeConstruct()` 自动绑定所有按钮的 `OnClicked` 事件；`NativeDestruct()` 通过 `RemoveAll` 清理。
-- **按钮显隐状态：** `UpdateButtonStates(Phase)` 管理按钮可见性：
-  - 规划阶段：`Btn_TriggerLSystem` + `Btn_StartSimulation` 可见，`Btn_RestartPlanning` 隐藏
-  - 结算阶段：`Btn_RestartPlanning` 可见，操作按钮隐藏
-- **阶段感知的放置开关：** `StartSimulation()` 调用 `PC->DisablePlacement()` 停止放置预览；`RestartPlanning()` 调用 `PC->EnablePlacement()` 恢复。
-- **自动更新文本：** `HandleGamePhaseChanged()`、`HandleScoreChanged()`、`HandleLSystemStep()` 在 C++ 中直接更新 `Txt_Phase` / `Txt_Score` / `Txt_Budget`，无需蓝图参与。
-- 暴露 `BlueprintImplementableEvent` 回调：`OnPhaseChanged_BP`、`OnScoreChanged_BP`、`OnBudgetChanged_BP`、`OnLSystemStep_BP`、`OnLSystemFinished_BP`、`OnEvaluation_BP`。
-- 在 `NativeConstruct()` 中绑定 GameMode/ScoringManager/LSystemManager 委托。
+#### Widget 生命周期
 
-蓝图子类只需放置指定名称的 UMG 控件——所有绑定和逻辑在 C++ 中处理。
+```
+StartWidget (主菜单)
+  ├─ Btn_StartGame → HUD::ShowGameWidget() → GameMode::StartNewGame()
+  ├─ Btn_QuitGame → 退出
+  ↓
+GameWidget (规划/模拟 HUD 覆盖层)
+  ├─ [Planning] Btn_TriggerLSystem / Btn_StartSimulation
+  ├─ [Simulating] Btn_RestartPlanning (回到 Planning)
+  ├─ Esc → HUD::TogglePause()
+  ↓
+PauseWidget (Overlay, ZOrder=100)
+  ├─ Btn_Resume → HUD::HidePauseOverlay()
+  └─ Btn_ReturnToMain → HUD::ReturnToMainMenu() → StartWidget
+  ↓
+EvaluationWidget (结算)
+  └─ BP 按钮调用 HUD::ReturnToMainMenu() → StartWidget
+```
+
+**ACityFlowHUD** — 中央 Widget 管理器：
+- `BeginPlay()` 显示 `StartWidget`（主菜单）；监听 `GameMode::OnSimulationPhaseEnd` 自动显示 `EvaluationWidget`。
+- `TogglePause()` / `ShowPauseOverlay()` / `HidePauseOverlay()` — 暂停用 `FInputModeUIOnly`，恢复用 `FInputModeGameAndUI`。
+- `ReturnToMainMenu()` — 蓝图可调用；清理后回到 `StartWidget`。
+- `HandleReturnToMainClicked()` — 暂停 → `GameMode::ReturnToMainMenu()` → `ShowStartWidget()`。
+- `HandleEvaluationReturn()` — 结算 → `GameMode::ReturnToMainMenu()` → `ShowStartWidget()`。
+
+**蓝图可配置 Widget 类（在 HUD 上）：**
+
+| 属性 | 类型 | 用途 |
+|---|---|---|
+| `StartWidgetClass` | `TSubclassOf<UCityFlowStartWidget>` | 主菜单 Widget |
+| `GameWidgetClass` | `TSubclassOf<UCityFlowGameWidget>` | 规划/模拟 HUD 覆盖层 |
+| `PauseWidgetClass` | `TSubclassOf<UCityFlowPauseWidget>` | 暂停菜单覆盖层 |
+| `EvaluationWidgetClass` | `TSubclassOf<UUserWidget>` | 结算界面 |
+
+#### CityFlowStartWidget
+
+主菜单 Widget，使用 `BindWidget` 控件：
+- `Btn_StartGame` → 广播 `OnStartGameClicked`（HUD 监听 → `ShowGameWidget()`）
+- `Btn_QuitGame` → 广播 `OnQuitGameClicked`
+- `Txt_Title`、`Txt_Version`（BindWidgetOptional）— 展示文本
+
+#### CityFlowPauseWidget
+
+暂停覆盖 Widget，使用 `BindWidget` 控件：
+- `Btn_Resume` → 广播 `OnResumeClicked`（HUD 监听 → `HidePauseOverlay()`）
+- `Btn_ReturnToMain` → 广播 `OnReturnToMainClicked`（HUD 监听 → `ReturnToMainMenu()`）
+
+#### CityFlowGameWidget（规划 / 模拟覆盖层）
+
+`UUserWidget` C++ 基类，使用 `BindWidget` 绑定 UMG 控件：
+- **绑定控件：** `Btn_TriggerLSystem`、`Btn_StartSimulation`、`Btn_RestartPlanning`、`Txt_Phase`、`Txt_Budget`、`Txt_Score`
+- **按钮自动绑定：** `NativeConstruct()` 通过 `AddDynamic` 绑定 `OnClicked`（回调必须有 `UFUNCTION()` 宏，`BindUFunction` 需要）；`NativeDestruct()` 清理。
+- **按钮显隐：** `UpdateButtonStates(Phase)`：
+  - Planning：`Btn_TriggerLSystem` + `Btn_StartSimulation` 可见
+  - Simulating：`Btn_RestartPlanning` 可见
+  - 其他：全部隐藏
+- **放置开关：** `OnStartSimulationClicked` 调用 `PC->DisablePlacement()`；`OnRestartPlanningClicked` 调用 `PC->EnablePlacement()`。
+- **自动更新文本：** `HandleGamePhaseChanged`、`HandleScoreChanged`、`HandleLSystemStep` 在 C++ 中直接更新 `Txt_*`。
+- **BlueprintImplementableEvents：** `OnPhaseChanged_BP`、`OnScoreChanged_BP`、`OnBudgetChanged_BP`、`OnSimulationTick_BP`、`OnEvaluation_BP`、`OnLSystemStep_BP`、`OnLSystemFinished_BP`。
+- **委托绑定（`NativeConstruct()` 中）：** `GameMode::OnGamePhaseChanged`、`ScoringManager::OnScoreChanged`、`LSystemManager::OnGenerationStep`、`LSystemManager::OnGenerationFinished`。
+
+#### 所有权
+
+HUD 是**唯一的 Widget 生命周期所有者** — GameMode 不再创建 Widget。GameMode 的 `GameWidgetClass` 和 `GameWidgetInstance` 已被移除。BP GameMode 原来的 "Game Widget Class" 值应迁移到 BP HUD 的 `GameWidgetClass`。
 
 ---
 

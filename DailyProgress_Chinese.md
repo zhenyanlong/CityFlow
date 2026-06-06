@@ -1,5 +1,24 @@
 ## 2026-06-06
 
+### 完整游戏循环 Widget 系统（v0.7）
+
+- 修复 StartSimulation 按钮无反应：UCityFlowGameWidget 的按钮回调缺少 `UFUNCTION()` 宏，导致 `AddDynamic`/`BindUFunction` 静默失败
+- 重命名按钮回调为 `OnStartSimulationClicked`/`OnRestartPlanningClicked`/`OnTriggerLSystemClicked` 并添加 UFUNCTION 宏
+- 移除死代码：`EndSimulation()`、`HandleSimulationEnd()`、`HideGameWidget()`
+- 创建 `UCityFlowStartWidget` C++ 基类：主菜单 Widget，含 `Btn_StartGame`/`Btn_QuitGame` BindWidget 控件和委托 `OnStartGameClicked`/`OnQuitGameClicked`
+- 创建 `UCityFlowPauseWidget` C++ 基类：暂停菜单 Widget，含 `Btn_Resume`/`Btn_ReturnToMain` BindWidget 控件和委托 `OnResumeClicked`/`OnReturnToMainClicked`
+- 完整重写 `ACityFlowHUD`：管理完整 Widget 生命周期（StartWidget → GameWidget ↔ PauseWidget → EvaluationWidget → 循环）
+- 添加 `TogglePause()`/`ShowPauseOverlay()`/`HidePauseOverlay()`，带 `SetGamePaused` 和 `FInputModeUIOnly`/`FInputModeGameAndUI` 切换
+- 添加 `ReturnToMainMenu()` 蓝图可调用接口供结算界面使用
+- HUD 自动监听 `GameMode::OnSimulationPhaseEnd` 以显示结算界面
+- 消除双重 Widget 创建：从 `ACityFlowGameMode` 移除 `GameWidgetClass` 和 `GameWidgetInstance`；HUD 是唯一 Widget 生命周期所有者
+- GameMode 推迟初始化：`BeginPlay()` 仅设置预算；新增 `StartNewGame()` 由 HUD 在 "开始游戏" 点击时调用
+- 为 GameMode 添加 `ReturnToMainMenu()`：停止所有计时器/车辆，通过 `TActorIterator` 销毁所有 `AGridPlaceableActor`，重新初始化网格，中止 L-system
+- 为 `ACityFlowPlayerController` 添加 `IA_Pause` Enhanced Input 动作实现 Esc 键暂停/恢复
+- 修复 `Btn_RestartPlanning` 可见性：现在在 Simulating 阶段显示（中途返回 Planning），而非 Evaluation 阶段
+- 修复编译错误：`FInputMode_UIOnly` → `FInputModeUIOnly`（UE 类名无下划线）
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.8 节（暂停输入）、2.11 节（推迟初始化 + 新 API）、2.12 节（完整重写 Widget 生命周期）
+
 ### 交叉口锁重新设计：方向占用 + 轮转调度（v0.6）
 
 - 将单车 `LockHolder` 模型替换为 `ARoadTile` 上的方向占用表（`DirectionOccupants`、`PendingReservations`、`VehicleEntryDirs`）

@@ -9,9 +9,9 @@
 #include "Scoring/Subsystem/ScoringManager.h"
 #include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "LSystem/Subsystem/LSystemManager.h"
-#include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCityFlowGM, Log, All);
@@ -28,28 +28,47 @@ void ACityFlowGameMode::BeginPlay()
 	RemainingBudget = TotalRoadBudget;
 	PlayerBudget = FMath::RoundToInt(TotalRoadBudget * (1.0f - LSystemBudgetShare));
 	LSystemBudget = TotalRoadBudget - PlayerBudget;
-	RemainingBudget = TotalRoadBudget;
 
-	{
-		UGridManager* GM = GetGridManager();
-		if (GM)
-		{
-			GM->SetRoadBudget(TotalRoadBudget);
-		}
-	}
+	if (UGridManager* GM = GetGridManager())
+		GM->SetRoadBudget(TotalRoadBudget);
+}
+
+void ACityFlowGameMode::StartNewGame()
+{
+	if (CurrentPhase != ECityFlowGamePhase::None)
+		return;
 
 	InitializeDefaultScene();
+	TransitionToPhase(ECityFlowGamePhase::Planning);
+}
 
-	if (GameWidgetClass)
+void ACityFlowGameMode::ReturnToMainMenu()
+{
+	// 停止一切
+	GetWorldTimerManager().ClearTimer(SimulationTimerHandle);
+
+	if (UVehicleManager* VM = GetVehicleManager())
 	{
-		GameWidgetInstance = CreateWidget<UUserWidget>(GetWorld(), GameWidgetClass);
-		if (GameWidgetInstance)
-		{
-			GameWidgetInstance->AddToViewport();
-		}
+		VM->StopSpawning();
+		VM->ClearAllVehicles();
 	}
 
-	TransitionToPhase(ECityFlowGamePhase::Planning);
+	if (UScoringManager* SM = GetScoringManager())
+		SM->StopScoring();
+
+	// 销毁所有已放置的 Actor
+	for (TActorIterator<AGridPlaceableActor> It(GetWorld()); It; ++It)
+		It->Destroy();
+
+	// 重置网格
+	if (UGridManager* GM = GetGridManager())
+		GM->InitGrid(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, FVector::ZeroVector);
+
+	// 重置 L-system
+	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
+		LSM->AbortGeneration();
+
+	CurrentPhase = ECityFlowGamePhase::None;
 }
 
 void ACityFlowGameMode::Tick(float DeltaSeconds)
