@@ -1,4 +1,6 @@
 #include "Player/CityFlowPawn.h"
+#include "Player/CityFlowPlayerController.h"
+#include "GameMode/CityFlowGameMode.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "EnhancedInputComponent.h"
@@ -123,6 +125,9 @@ void ACityFlowPawn::OnAltPressed()
 	{
 		PC->bShowMouseCursor = false;
 		PC->SetInputMode(FInputModeGameOnly());
+
+		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
+			CFPC->DisablePlacement();
 	}
 }
 
@@ -136,5 +141,15 @@ void ACityFlowPawn::OnAltReleased()
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(InputMode);
+
+		// 仅在 Planning 阶段恢复放置，避免在 Simulating 等阶段误开启
+		if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
+		{
+			if (GM->GetCurrentPhase() == ECityFlowGamePhase::Planning)
+			{
+				if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
+					CFPC->EnablePlacement();
+			}
+		}
 	}
 }

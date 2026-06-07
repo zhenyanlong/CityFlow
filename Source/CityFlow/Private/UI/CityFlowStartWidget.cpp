@@ -8,6 +8,8 @@ void UCityFlowStartWidget::NativeConstruct()
 
 	if (Btn_StartGame)
 		Btn_StartGame->OnClicked.AddDynamic(this, &UCityFlowStartWidget::HandleStartGameClicked);
+	if (Btn_RandomMode)
+		Btn_RandomMode->OnClicked.AddDynamic(this, &UCityFlowStartWidget::HandleRandomModeClicked);
 	if (Btn_QuitGame)
 		Btn_QuitGame->OnClicked.AddDynamic(this, &UCityFlowStartWidget::HandleQuitGameClicked);
 }
@@ -16,6 +18,8 @@ void UCityFlowStartWidget::NativeDestruct()
 {
 	if (Btn_StartGame)
 		Btn_StartGame->OnClicked.RemoveAll(this);
+	if (Btn_RandomMode)
+		Btn_RandomMode->OnClicked.RemoveAll(this);
 	if (Btn_QuitGame)
 		Btn_QuitGame->OnClicked.RemoveAll(this);
 
@@ -25,6 +29,11 @@ void UCityFlowStartWidget::NativeDestruct()
 void UCityFlowStartWidget::HandleStartGameClicked()
 {
 	OnStartGameClicked.Broadcast();
+}
+
+void UCityFlowStartWidget::HandleRandomModeClicked()
+{
+	OnRandomModeClicked.Broadcast();
 }
 
 void UCityFlowStartWidget::HandleQuitGameClicked()

@@ -7,6 +7,7 @@
 class UCityFlowStartWidget;
 class UCityFlowGameWidget;
 class UCityFlowPauseWidget;
+class UCityFlowEvaluationWidget;
 
 /**
  * HUD —— 管理完整 Widget 生命周期：
@@ -39,7 +40,7 @@ public:
 	UCityFlowGameWidget* GetGameWidget() const { return GameWidget; }
 
 	UFUNCTION(BlueprintPure, Category = "CityFlow|UI")
-	class UUserWidget* GetEvaluationWidget() const { return EvaluationWidget; }
+	UCityFlowEvaluationWidget* GetEvaluationWidget() const { return EvaluationWidget; }
 
 	/** 从结算界面返回主菜单 */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
@@ -56,7 +57,7 @@ public:
 	TSubclassOf<UCityFlowPauseWidget> PauseWidgetClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
-	TSubclassOf<class UUserWidget> EvaluationWidgetClass;
+	TSubclassOf<UCityFlowEvaluationWidget> EvaluationWidgetClass;
 
 protected:
 	UFUNCTION()
@@ -72,10 +73,23 @@ protected:
 	UFUNCTION()
 	void HandleReturnToMainClicked();
 
+	UFUNCTION()
+	void HandleStartGameClicked();
+
+	UFUNCTION()
+	void HandleRandomModeClicked();
+
+	UFUNCTION()
+	void HandleRestartClicked();
+
 private:
 	// ---- Widget 创建 / 切换 ----
 	void ShowStartWidget();
+
+	UFUNCTION()
 	void ShowGameWidget();
+
+	void ShowGameWidgetRandom();
 	void ShowPauseOverlay();
 	void HidePauseOverlay();
 	void ShowEvaluationWidget();
@@ -91,7 +105,7 @@ private:
 	TObjectPtr<UCityFlowPauseWidget> PauseWidget;
 
 	UPROPERTY()
-	TObjectPtr<class UUserWidget> EvaluationWidget;
+	TObjectPtr<UCityFlowEvaluationWidget> EvaluationWidget;
 
 	bool bPaused = false;
 };

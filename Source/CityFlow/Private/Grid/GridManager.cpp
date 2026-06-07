@@ -117,10 +117,17 @@ bool UGridManager::ClearCell(const FGridVector& GridPos)
 	}
 
 	FGridCell& Cell = Grid[GridPos.Y][GridPos.X];
+	const ECellType OldType = Cell.Type;
+
 	Cell.Type = ECellType::Empty;
 	Cell.ConnectedMask = 0;
 	Cell.BuildingID = INDEX_NONE;
 	Cell.RoadActor = nullptr;
+
+	if (OldType == ECellType::Road)
+	{
+		++RoadBudget;
+	}
 
 	UpdateNeighborMasks(GridPos);
 

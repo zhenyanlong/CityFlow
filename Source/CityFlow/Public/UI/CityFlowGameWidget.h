@@ -5,6 +5,7 @@
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "GameMode/Types/CityFlowGameTypes.h"
+#include "Grid/CityFlowGridTypes.h"
 #include "CityFlowGameWidget.generated.h"
 
 UCLASS()
@@ -36,6 +37,9 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> Txt_Score;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Countdown;
 
 	// ---- 蓝图事件回调 ----
 
@@ -84,11 +88,23 @@ private:
 	UFUNCTION()
 	void HandleLSystemFinished(bool bAllConnected);
 
+	UFUNCTION()
+	void HandleCellChanged(FGridVector CellPos, const FGridCell& NewCell);
+
 	// ---- 内部辅助 ----
 	void UpdatePhaseText(ECityFlowGamePhase Phase);
 	void UpdateBudgetText();
 	void UpdateButtonStates(ECityFlowGamePhase Phase);
+	void StartCountdown();
+	UFUNCTION()
+	void TickCountdown();
+	void StopCountdown();
+	void UpdateCountdownText();
 
 	class ACityFlowGameMode* GetCityFlowGameMode() const;
 	class UScoringManager* GetScoringManager() const;
+	int32 GetRemainingBudget() const;
+
+	FTimerHandle CountdownTimerHandle;
+	int32 CountdownSeconds = 0;
 };

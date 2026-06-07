@@ -1,9 +1,11 @@
 #include "UI/CityFlowGameWidget.h"
 #include "GameMode/CityFlowGameMode.h"
+#include "Grid/GridManager.h"
 #include "Scoring/Subsystem/ScoringManager.h"
 #include "LSystem/Subsystem/LSystemManager.h"
 #include "Player/CityFlowPlayerController.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 // ============================================================================
 //  生命周期
@@ -34,6 +36,10 @@ void UCityFlowGameWidget::NativeConstruct()
 		LSM->OnGenerationFinished.AddDynamic(this, &UCityFlowGameWidget::HandleLSystemFinished);
 	}
 
+	// 监听网格变化，随时刷新预算显示
+	if (UGridManager* GridMgr = GetWorld()->GetSubsystem<UGridManager>())
+		GridMgr->OnCellChanged.AddDynamic(this, &UCityFlowGameWidget::HandleCellChanged);
+
 	// 初始 UI 状态
 	UpdateButtonStates(GetCityFlowGameMode() ? GetCityFlowGameMode()->GetCurrentPhase() : ECityFlowGamePhase::None);
 }
@@ -57,6 +63,9 @@ void UCityFlowGameWidget::NativeDestruct()
 		LSM->OnGenerationStep.RemoveDynamic(this, &UCityFlowGameWidget::HandleLSystemStep);
 		LSM->OnGenerationFinished.RemoveDynamic(this, &UCityFlowGameWidget::HandleLSystemFinished);
 	}
+
+	if (UGridManager* GridMgr = GetWorld()->GetSubsystem<UGridManager>())
+		GridMgr->OnCellChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleCellChanged);
 
 	Super::NativeDestruct();
 }
@@ -98,6 +107,11 @@ void UCityFlowGameWidget::HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, EC
 	UpdatePhaseText(NewPhase);
 	UpdateBudgetText();
 	UpdateButtonStates(NewPhase);
+
+	if (NewPhase == ECityFlowGamePhase::Simulating)
+		StartCountdown();
+	else
+		StopCountdown();
 
 	OnPhaseChanged_BP(OldPhase, NewPhase);
 
@@ -149,7 +163,7 @@ void UCityFlowGameWidget::UpdateBudgetText()
 {
 	if (!Txt_Budget) return;
 
-	const int32 Remaining = GetCityFlowGameMode() ? GetCityFlowGameMode()->GetRemainingBudget() : 0;
+	const int32 Remaining = GetRemainingBudget();
 	Txt_Budget->SetText(FText::FromString(FString::Printf(TEXT("Budget: %d"), Remaining)));
 }
 
@@ -165,6 +179,15 @@ void UCityFlowGameWidget::UpdateButtonStates(ECityFlowGamePhase Phase)
 }
 
 // ============================================================================
+//  网格变更 → 刷新预算
+// ============================================================================
+
+void UCityFlowGameWidget::HandleCellChanged(FGridVector CellPos, const FGridCell& NewCell)
+{
+	UpdateBudgetText();
+}
+
+// ============================================================================
 //  辅助
 // ============================================================================
 
@@ -176,4 +199,58 @@ ACityFlowGameMode* UCityFlowGameWidget::GetCityFlowGameMode() const
 UScoringManager* UCityFlowGameWidget::GetScoringManager() const
 {
 	return GetWorld() ? GetWorld()->GetSubsystem<UScoringManager>() : nullptr;
+}
+
+int32 UCityFlowGameWidget::GetRemainingBudget() const
+{
+	if (UGridManager* GM = GetWorld()->GetSubsystem<UGridManager>())
+		return GM->GetRemainingBudget();
+	return 0;
+}
+
+// ============================================================================
+//  倒计时
+// ============================================================================
+
+void UCityFlowGameWidget::StartCountdown()
+{
+	ACityFlowGameMode* GM = GetCityFlowGameMode();
+	if (!GM) return;
+
+	CountdownSeconds = FMath::CeilToInt(GM->SimulationDuration);
+	UpdateCountdownText();
+
+	GetWorld()->GetTimerManager().SetTimer(
+		CountdownTimerHandle,
+		this,
+		&UCityFlowGameWidget::TickCountdown,
+		1.0f,
+		true
+	);
+}
+
+void UCityFlowGameWidget::TickCountdown()
+{
+	--CountdownSeconds;
+	UpdateCountdownText();
+
+	if (CountdownSeconds <= 0)
+	{
+		StopCountdown();
+	}
+}
+
+void UCityFlowGameWidget::StopCountdown()
+{
+	GetWorld()->GetTimerManager().ClearTimer(CountdownTimerHandle);
+}
+
+void UCityFlowGameWidget::UpdateCountdownText()
+{
+	if (!Txt_Countdown) return;
+
+	const int32 Mins = CountdownSeconds / 60;
+	const int32 Secs = CountdownSeconds % 60;
+	Txt_Countdown->SetText(FText::FromString(
+		FString::Printf(TEXT("%02d:%02d"), Mins, Secs)));
 }

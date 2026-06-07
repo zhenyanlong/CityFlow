@@ -1,3 +1,19 @@
+## 2026-06-07
+
+### UI System Refinement (v0.8)
+
+- Refactored CityFlowStartWidget: added Btn_RandomMode with OnRandomModeClicked delegate, fixed Btn_StartGame not responding (ShowGameWidget missing UFUNCTION)
+- Added HandleRandomModeClicked/HandleStartGameClicked to HUD, with ShowGameWidgetRandom that calls StartNewGame + EnablePlacement
+- Fixed mouse cursor hiding during click-and-drag in Random Mode: added SetHideCursorDuringCapture(false) to FInputModeGameAndUI in ShowGameWidget and ShowGameWidgetRandom
+- Alt key now disables placement on press (DisablePlacement), re-enables on release only if in Planning phase (avoids accidental placement in Simulation)
+- Fixed road budget: ClearCell now refunds +1 RoadBudget when clearing a Road cell, fixing two bugs — deleting roads not restoring budget, and L-system-depleted budget blocking further placement after removal
+- GameWidget budget display now reads from GridManager directly and updates via OnCellChanged binding, ensuring real-time budget display on every placement/removal
+- Added countdown timer (Txt_Countdown) to GameWidget: starts on Simulating phase entry, ticks every 1s in MM:SS format, stops on phase change
+- Created UCityFlowEvaluationWidget C++ base: displays total score, arrival count, congestion penalty, high score (static), simulation time (MM:SS), with Btn_BackToMain and Btn_Restart
+- HUD ShowEvaluationWidget now populates data from ScoringManager/GameMode, binds OnBackToMainClicked/OnRestartClicked
+- Added HandleRestartClicked to HUD: removes EvaluationWidget, calls GameMode::RestartPlanningPhase, shows GameWidget
+- Updated TDD.md and TDD_Chinese.md sections 2.8 (Alt placement disable), 2.10 (ClearCell refund), 2.12 (v0.8 full rewrite with StartWidget/GameWidget/EvaluationWidget changes)
+
 ## 2026-06-06
 
 ### Full Game Loop Widget System (v0.7)

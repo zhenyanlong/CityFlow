@@ -17,11 +17,16 @@ public:
 	virtual void NativeDestruct() override;
 
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnStartGameClicked);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRandomModeClicked);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnQuitGameClicked);
 
 	/** 点击 "开始游戏" 时广播 */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnStartGameClicked OnStartGameClicked;
+
+	/** 点击 "随机模式" 时广播 */
+	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
+	FOnRandomModeClicked OnRandomModeClicked;
 
 	/** 点击 "退出游戏" 时广播 */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
@@ -30,6 +35,9 @@ public:
 protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Btn_StartGame;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_RandomMode;
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Btn_QuitGame;
@@ -43,6 +51,9 @@ protected:
 private:
 	UFUNCTION()
 	void HandleStartGameClicked();
+
+	UFUNCTION()
+	void HandleRandomModeClicked();
 
 	UFUNCTION()
 	void HandleQuitGameClicked();

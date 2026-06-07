@@ -1,3 +1,19 @@
+## 2026-06-07
+
+### UI 系统精细化（v0.8）
+
+- 重构 CityFlowStartWidget：新增 Btn_RandomMode 及 OnRandomModeClicked 委托，修复 Btn_StartGame 无响应（ShowGameWidget 缺少 UFUNCTION）
+- 在 HUD 中添加 HandleRandomModeClicked/HandleStartGameClicked，ShowGameWidgetRandom 调用 StartNewGame + EnablePlacement
+- 修复随机模式拖拽放置时光标消失：ShowGameWidget 和 ShowGameWidgetRandom 中 FInputModeGameAndUI 添加 SetHideCursorDuringCapture(false)
+- Alt 键按下时关闭放置功能（DisablePlacement），松开后仅在 Planning 阶段恢复，避免 Simulation 阶段误开启
+- 修复道路预算：ClearCell 清理 Road 格时返还 +1 RoadBudget，解决了删除路块不恢复预算、L-system 耗尽预算后无法继续放置两个 Bug
+- GameWidget 预算显示改为直接从 GridManager 读取，通过 OnCellChanged 绑定实时刷新
+- 为 GameWidget 添加倒计时（Txt_Countdown）：进入 Simulating 阶段启动，每秒以 MM:SS 格式刷新，离开阶段时停止
+- 创建 UCityFlowEvaluationWidget C++ 基类：展示总分、到达数、拥堵罚分、最高分（静态）、模拟时间（MM:SS），含 Btn_BackToMain 和 Btn_Restart
+- HUD ShowEvaluationWidget 从 ScoringManager/GameMode 读取数据并调用 Populate，绑定 OnBackToMainClicked/OnRestartClicked
+- 为 HUD 添加 HandleRestartClicked：移除 EvaluationWidget → GameMode::RestartPlanningPhase → 显示 GameWidget
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.8 节（Alt 放置开关）、2.10 节（ClearCell 返还）、2.12 节（v0.8 完整重写）
+
 ## 2026-06-06
 
 ### 完整游戏循环 Widget 系统（v0.7）

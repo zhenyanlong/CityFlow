@@ -2,7 +2,12 @@
 #include "UI/CityFlowStartWidget.h"
 #include "UI/CityFlowGameWidget.h"
 #include "UI/CityFlowPauseWidget.h"
+#include "UI/CityFlowEvaluationWidget.h"
 #include "GameMode/CityFlowGameMode.h"
+#include "Scoring/Subsystem/ScoringManager.h"
+#include "Grid/GridManager.h"
+#include "LSystem/Subsystem/LSystemManager.h"
+#include "Player/CityFlowPlayerController.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -49,7 +54,10 @@ void ACityFlowHUD::ShowStartWidget()
 		StartWidget->AddToViewport();
 
 		StartWidget->OnStartGameClicked.RemoveAll(this);
-		StartWidget->OnStartGameClicked.AddDynamic(this, &ACityFlowHUD::ShowGameWidget);
+		StartWidget->OnStartGameClicked.AddDynamic(this, &ACityFlowHUD::HandleStartGameClicked);
+
+		StartWidget->OnRandomModeClicked.RemoveAll(this);
+		StartWidget->OnRandomModeClicked.AddDynamic(this, &ACityFlowHUD::HandleRandomModeClicked);
 	}
 
 	// 确保鼠标可见
@@ -81,7 +89,11 @@ void ACityFlowHUD::ShowGameWidget()
 
 	// 恢复 Game + UI 输入模式（从 StartWidget 的 UIOnly 切换回来）
 	if (APlayerController* PC = GetOwningPlayerController())
-		PC->SetInputMode(FInputModeGameAndUI());
+	{
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(InputMode);
+	}
 }
 
 void ACityFlowHUD::ShowPauseOverlay()
@@ -131,10 +143,33 @@ void ACityFlowHUD::HidePauseOverlay()
 void ACityFlowHUD::ShowEvaluationWidget()
 {
 	if (!EvaluationWidget && EvaluationWidgetClass)
-		EvaluationWidget = CreateWidget<UUserWidget>(GetWorld(), EvaluationWidgetClass);
+		EvaluationWidget = CreateWidget<UCityFlowEvaluationWidget>(GetWorld(), EvaluationWidgetClass);
 
 	if (EvaluationWidget && !EvaluationWidget->IsInViewport())
+	{
 		EvaluationWidget->AddToViewport();
+
+		// 委托已绑定过就不重复绑
+		EvaluationWidget->OnBackToMainClicked.RemoveAll(this);
+		EvaluationWidget->OnBackToMainClicked.AddDynamic(this, &ACityFlowHUD::HandleEvaluationReturn);
+
+		EvaluationWidget->OnRestartClicked.RemoveAll(this);
+		EvaluationWidget->OnRestartClicked.AddDynamic(this, &ACityFlowHUD::HandleRestartClicked);
+	}
+
+	// 从 ScoringManager 读取结算数据并填入 Widget
+	UScoringManager* SM = GetWorld()->GetSubsystem<UScoringManager>();
+	ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode());
+
+	if (SM && GM && EvaluationWidget)
+	{
+		const float Elapsed = GM->SimulationDuration - GM->GetSimulationTimeRemaining();
+		EvaluationWidget->Populate(
+			SM->GetTotalScore(),
+			SM->GetArrivalCount(),
+			SM->GetCongestionPenalty(),
+			Elapsed);
+	}
 
 	if (GameWidget && GameWidget->IsInViewport())
 		GameWidget->RemoveFromParent();
@@ -192,4 +227,61 @@ void ACityFlowHUD::HandleEvaluationReturn()
 		GM->ReturnToMainMenu();
 
 	ShowStartWidget();
+}
+
+// ============================================================================
+//  StartWidget 按钮处理
+// ============================================================================
+
+void ACityFlowHUD::HandleStartGameClicked()
+{
+	ShowGameWidget();
+}
+
+void ACityFlowHUD::HandleRandomModeClicked()
+{
+	ShowGameWidgetRandom();
+}
+
+void ACityFlowHUD::HandleRestartClicked()
+{
+	if (EvaluationWidget && EvaluationWidget->IsInViewport())
+		EvaluationWidget->RemoveFromParent();
+
+	if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
+		GM->RestartPlanningPhase();
+
+	ShowGameWidget();
+}
+
+void ACityFlowHUD::ShowGameWidgetRandom()
+{
+	// 隐藏 StartWidget
+	if (StartWidget && StartWidget->IsInViewport())
+		StartWidget->RemoveFromParent();
+
+	if (!GameWidget && GameWidgetClass)
+		GameWidget = CreateWidget<UCityFlowGameWidget>(GetWorld(), GameWidgetClass);
+
+	if (GameWidget && !GameWidget->IsInViewport())
+		GameWidget->AddToViewport();
+
+	ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode());
+	if (!GM) return;
+
+	// 随机模式：初始化场景并进入 Planning
+	if (GM->GetCurrentPhase() == ECityFlowGamePhase::None)
+	{
+		GM->StartNewGame();
+	}
+
+	// 开启 Actor 放置功能
+	if (APlayerController* PC = GetOwningPlayerController())
+	{
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(InputMode);
+		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
+			CFPC->EnablePlacement();
+	}
 }

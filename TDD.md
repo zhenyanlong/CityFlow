@@ -605,7 +605,7 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Input | `Enhanced Input` → `IA_Move` (Axis2D), `IA_Look` (Axis2D), `IA_Zoom` (Axis1D), `IA_Alt` (Digital) |
 | Movement direction | Derived from `CameraYaw` (set by Blueprint from camera orientation) — WASD moves relative to the player's facing direction, not the live camera rotation |
 | Camera orientation | `CameraYaw` (BlueprintReadWrite, float) — Blueprint updates this each tick from the live camera yaw; `Move()` builds `FRotator(0, CameraYaw, 0)` for forward/right vectors |
-| Alt + Mouse look | `IA_Alt` + `IA_Look` — holding Alt sets `bAltHeld = true`, switches to `FInputModeGameOnly()` (captures mouse), and drives `AddControllerYawInput()` from mouse delta (yaw only in C++; pitch handled in Blueprint). Releasing Alt restores `FInputModeGameAndUI` + mouse cursor |
+| Alt + Mouse look | `IA_Alt` + `IA_Look` — holding Alt sets `bAltHeld = true`, switches to `FInputModeGameOnly()` (captures mouse), drives `AddControllerYawInput()` from mouse delta (yaw only in C++; pitch handled in Blueprint), and **disables placement** (`DisablePlacement()`) so the cursor and preview actor do not interfere with camera rotation. Releasing Alt restores `FInputModeGameAndUI` + mouse cursor, and **re-enables placement only if the current phase is `Planning`** (avoids accidentally enabling placement during Simulation). |
 | Scroll wheel zoom | `IA_Zoom` adjusts `TargetSpringArmLength` (clamped [Min, Max]). Blueprint reads this variable each tick to drive spring arm length interpolation |
 | Configurable (Blueprint) | `MoveSpeed`, `LookSensitivity`, `ZoomSpeed`, `MinSpringArmLength`, `MaxSpringArmLength`, `DefaultCameraPitch`, `MinCameraPitch`, `MaxCameraPitch` |
 | Camera setup | Handled in Blueprint: `USpringArmComponent` + `UCameraComponent` as child components; spring arm uses `bUsePawnControlRotation = true`; character auto-possesses |
@@ -696,6 +696,8 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 | `ConsumeRoadBudget(int32)` | Attempts to deduct |
 | `AddRoadBudget(int32)` | Adds to budget (debug/cheat) |
 
+**ClearCell Refund:** `ClearCell()` restores +1 to `RoadBudget` when the cleared cell was `ECellType::Road`, maintaining budget symmetry with `OccupyCell`. This means deleting road tiles refunds budget, and L-system-depleted budgets can be replenished by removing roads.
+
 ---
 
 ### 2.11 GameMode State Machine
@@ -738,7 +740,7 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 ### 2.12 UI System
 
-#### Implementation Status: ✅ Implemented — v0.7 full game-loop widgets
+#### Implementation Status: ✅ Implemented — v0.8 full widget lifecycle with evaluation & countdown
 
 CityFlow's UI is managed by **ACityFlowHUD** as the sole widget lifecycle owner. Widgets follow a main-menu-first flow with four states.
 
@@ -747,19 +749,22 @@ CityFlow's UI is managed by **ACityFlowHUD** as the sole widget lifecycle owner.
 ```
 StartWidget (主菜单)
   ├─ Btn_StartGame → HUD::ShowGameWidget() → GameMode::StartNewGame()
+  ├─ Btn_RandomMode → HUD::ShowGameWidgetRandom() → StartNewGame + EnablePlacement
   ├─ Btn_QuitGame → Quit
   ↓
 GameWidget (规划/模拟 HUD 覆盖层)
   ├─ [Planning] Btn_TriggerLSystem / Btn_StartSimulation
-  ├─ [Simulating] Btn_RestartPlanning (return to Planning)
+  ├─ [Simulating] Btn_RestartPlanning (回到 Planning)
   ├─ Esc → HUD::TogglePause()
+  ├─ Txt_Countdown: MM:SS countdown during Simulation
   ↓
 PauseWidget (Overlay, ZOrder=100)
   ├─ Btn_Resume → HUD::HidePauseOverlay()
   └─ Btn_ReturnToMain → HUD::ReturnToMainMenu() → StartWidget
   ↓
 EvaluationWidget (结算)
-  └─ BP button calls HUD::ReturnToMainMenu() → StartWidget
+  ├─ Btn_BackToMain → HUD::HandleEvaluationReturn() → StartWidget
+  └─ Btn_Restart → HUD::HandleRestartClicked() → RestartPlanning → GameWidget
 ```
 
 **ACityFlowHUD** — central widget manager:
@@ -776,14 +781,44 @@ EvaluationWidget (结算)
 | `StartWidgetClass` | `TSubclassOf<UCityFlowStartWidget>` | Main menu widget |
 | `GameWidgetClass` | `TSubclassOf<UCityFlowGameWidget>` | Planning/Simulation HUD overlay |
 | `PauseWidgetClass` | `TSubclassOf<UCityFlowPauseWidget>` | Pause menu overlay |
-| `EvaluationWidgetClass` | `TSubclassOf<UUserWidget>` | Results screen |
+| `EvaluationWidgetClass` | `TSubclassOf<UCityFlowEvaluationWidget>` | Results screen |
+
+#### CityFlowEvaluationWidget
+
+`UCityFlowEvaluationWidget` is the results screen shown after simulation ends. It displays all relevant statistics and offers two actions.
+
+**Displayed data (Populated from `ScoringManager` + `GameMode`):**
+
+| Field | Source | Description |
+|---|---|---|
+| Total Score | `ScoringManager::GetTotalScore()` | `ArrivalScore - CongestionPenalty + FullConnectivityBonus` |
+| Arrival Count | `ScoringManager::GetArrivalCount()` | Number of vehicles that reached destinations |
+| Congestion Penalty | `ScoringManager::GetCongestionPenalty()` | Total penalty deducted |
+| High Score | Static `GlobalHighScore` | Best score across all games this process lifetime |
+| Simulation Time | `SimulationDuration - GameMode::GetSimulationTimeRemaining()` | Elapsed time in `MM:SS` |
+
+**BindWidget controls:**
+- `Txt_TotalScore` — total score display
+- `Txt_Arrivals`, `Txt_Penalty`, `Txt_HighScore`, `Txt_SimulationTime` — BindWidgetOptional detail rows
+- `Btn_BackToMain` → broadcasts `OnBackToMainClicked` (HUD → `HandleEvaluationReturn` → main menu)
+- `Btn_Restart` → broadcasts `OnRestartClicked` (HUD → `HandleRestartClicked` → `GameMode::RestartPlanningPhase()` → GameWidget)
+
+**Public API:**
+| Method | Description |
+|---|---|
+| `Populate(TotalScore, Arrivals, Penalty, ElapsedTime)` | Sets all data and refreshes UI; auto-updates `GlobalHighScore` |
+
+`ShowEvaluationWidget()` in HUD reads from `ScoringManager` and `GameMode`, then calls `Populate()`.
 
 #### CityFlowStartWidget
 
 Main menu widget with `BindWidget` controls:
-- `Btn_StartGame` → broadcasts `OnStartGameClicked` (HUD listens → `ShowGameWidget()`)
+- `Btn_StartGame` → broadcasts `OnStartGameClicked` (HUD listens → `HandleStartGameClicked` → `ShowGameWidget()`)
+- `Btn_RandomMode` → broadcasts `OnRandomModeClicked` (HUD listens → `HandleRandomModeClicked` → `ShowGameWidgetRandom()` — starts game with placement enabled)
 - `Btn_QuitGame` → broadcasts `OnQuitGameClicked`
 - `Txt_Title`, `Txt_Version` (BindWidgetOptional) — display text
+
+`ShowGameWidget()` and `ShowGameWidgetRandom()` both use `FInputModeGameAndUI` with `SetHideCursorDuringCapture(false)` to prevent the cursor from vanishing during click-and-drag.
 
 #### CityFlowPauseWidget
 
@@ -794,16 +829,17 @@ Pause overlay widget with `BindWidget` controls:
 #### CityFlowGameWidget (Planning / Simulation overlay)
 
 `UUserWidget` C++ base using `BindWidget` for UMG controls:
-- **Bound controls:** `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`
+- **Bound controls:** `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`, `Txt_Countdown` (BindWidgetOptional)
 - **Button auto-binding:** `NativeConstruct()` binds `OnClicked` via `AddDynamic` (callbacks are `UFUNCTION()` — required by `BindUFunction`); `NativeDestruct()` cleans up.
 - **Button visibility:** `UpdateButtonStates(Phase)`:
   - Planning: `Btn_TriggerLSystem` + `Btn_StartSimulation` visible
   - Simulating: `Btn_RestartPlanning` visible
   - Otherwise: all hidden
 - **Placement toggle:** `OnStartSimulationClicked` calls `PC->DisablePlacement()`; `OnRestartPlanningClicked` calls `PC->EnablePlacement()`.
-- **Auto-updating text:** `HandleGamePhaseChanged`, `HandleScoreChanged`, `HandleLSystemStep` update `Txt_*` in C++.
+- **Auto-updating text:** `HandleGamePhaseChanged`, `HandleScoreChanged`, `HandleLSystemStep` update `Txt_*` in C++. Budget reads from `GridManager::GetRemainingBudget()` via `HandleCellChanged` bound to `OnCellChanged`, ensuring real-time updates on every placement/removal.
+- **Countdown timer:** When phase transitions to `Simulating`, `StartCountdown()` reads `SimulationDuration` and starts a 1-second recurring `TickCountdown()` (marked `UFUNCTION()`). Each tick decrements `CountdownSeconds` and updates `Txt_Countdown` to `MM:SS` format. The timer stops when seconds reach zero or the phase changes away from Simulating.
 - **BlueprintImplementableEvents:** `OnPhaseChanged_BP`, `OnScoreChanged_BP`, `OnBudgetChanged_BP`, `OnSimulationTick_BP`, `OnEvaluation_BP`, `OnLSystemStep_BP`, `OnLSystemFinished_BP`.
-- **Delegates bound in `NativeConstruct()`:** `GameMode::OnGamePhaseChanged`, `ScoringManager::OnScoreChanged`, `LSystemManager::OnGenerationStep`, `LSystemManager::OnGenerationFinished`.
+- **Delegates bound in `NativeConstruct()`:** `GameMode::OnGamePhaseChanged`, `ScoringManager::OnScoreChanged`, `LSystemManager::OnGenerationStep`, `LSystemManager::OnGenerationFinished`, `GridManager::OnCellChanged`.
 
 #### Ownership
 
