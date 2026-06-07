@@ -64,7 +64,7 @@ All world coordinates are mapped to grid indices through `WorldToGrid(Location)`
    - Placement logic:
      - Convert the hit world position to grid coordinate `(x, y)`.
      - **Validation:** target cell must be `Empty`.
-     - On success: the preview Actor transitions to `EnterPlacedState()`, restoring original materials and enabling collision. The cell is set to the appropriate type and `ConnectedMask` is computed. A new preview Actor spawns immediately.
+     - On success: the preview Actor transitions to `EnterPlacedState()`, restoring original materials and enabling collision. The cell is set to the appropriate type and `ConnectedMask` is computed. A new preview Actor spawns immediately. After `OnPlacedOnGrid()`, the actor plays a **spawn scale animation** — scaling up from a configurable initial size to full scale with an ease-out curve.
 4. **Removal** — bound to `IA_RemoveItem` (right mouse button):
    - **Started:** reset `LastRemovedGridPos`, execute first removal.
    - **Triggered:** enables **drag-to-remove** with the same deduplication via `LastRemovedGridPos`.
@@ -123,6 +123,29 @@ Adds a `UStaticMeshComponent` and automatic material switching. The `MeshCompone
 #### Preview Appearance Extension (AGridPlaceableActor)
 
 A `virtual void UpdatePreviewAppearance(const FGridVector& GridPos)` method is defined on `AGridPlaceableActor` (default empty). The Controller calls this every tick after `SetPreviewPlacementValid()`, allowing subclasses to update their visual appearance during preview based on the predicted grid position.
+
+#### Spawn Scale Animation (v0.9)
+
+When a `GridPlaceableActor` is placed on the grid via `PlaceOnGrid()`, it plays a **scale-up animation** for visual feedback. The animation runs on a `FTimerHandle` (no per-frame Tick overhead) and follows an ease-out cubic curve.
+
+**Insertion point:** At the end of `PlaceOnGrid()`, after `OnPlacedOnGrid()` and `OnGridPlaced` broadcast — this ensures subclasses (e.g., `ARoadTile::UpdateAppearance()`) have already applied their final `SetActorScale3D()` before the animation captures the target scale.
+
+**Flow:**
+1. `PlaySpawnAnimation()` captures current `GetActorScale3D()` as `TargetScale`.
+2. Sets initial scale to `TargetScale × SpawnAnimationInitialScale`.
+3. Starts `FTimerHandle` at ~60 Hz (0.016 s interval).
+4. `TickSpawnAnimation()` increments elapsed time, computes `T = elapsed / Duration`, applies `Alpha = 1 - (1-T)^3` (ease-out cubic), sets `ActorScale = TargetScale × Alpha`.
+5. On `T ≥ 1.0`, snaps to exact `TargetScale` and clears the timer.
+
+**Blueprint-configurable properties (all on `AGridPlaceableActor`):**
+
+| Property | Default | Description |
+|---|---|---|
+| `bPlaySpawnAnimation` | `true` | Master toggle; set to `false` to disable (e.g., L-system batch placement) |
+| `SpawnAnimationDuration` | `0.2` | Animation duration in seconds |
+| `SpawnAnimationInitialScale` | `0.05` | Initial scale fraction (0.0–1.0, clamped to ≥ 0.01 to avoid zero-scale issues) |
+
+**Safety:** `EndPlay()` clears `SpawnAnimTimer` to prevent dangling callbacks after actor destruction.
 
 ---
 

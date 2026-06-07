@@ -17,6 +17,11 @@ void AGridPlaceableActor::BeginPlay()
 
 void AGridPlaceableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(SpawnAnimTimer);
+	}
+
 	if (bIsPlaced)
 	{
 		UnregisterCells();
@@ -80,6 +85,8 @@ bool AGridPlaceableActor::PlaceOnGrid(const FGridVector& InGridPos)
 	EnterPlacedState();
 	OnPlacedOnGrid();
 	GM->OnGridPlaced.Broadcast(this);
+
+	PlaySpawnAnimation();
 
 	return true;
 }
@@ -227,6 +234,54 @@ void AGridPlaceableActor::UnregisterCells()
 	for (const FGridVector& Cell : OccupiedCells)
 	{
 		GM->ClearCell(Cell);
+	}
+}
+
+void AGridPlaceableActor::PlaySpawnAnimation()
+{
+	if (!bPlaySpawnAnimation || !GetWorld())
+	{
+		return;
+	}
+
+	const FVector CurrentScale = GetActorScale3D();
+	if (CurrentScale.IsNearlyZero())
+	{
+		return;
+	}
+
+	const float Init = FMath::Clamp(SpawnAnimationInitialScale, 0.01f, 1.0f);
+	SetActorScale3D(CurrentScale * Init);
+
+	SpawnAnimTargetScale = CurrentScale;
+	SpawnAnimElapsed = 0.0f;
+
+	const float TickRate = 0.016f;
+	GetWorld()->GetTimerManager().SetTimer(SpawnAnimTimer, this,
+		&AGridPlaceableActor::TickSpawnAnimation, TickRate, true);
+}
+
+void AGridPlaceableActor::TickSpawnAnimation()
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	SpawnAnimElapsed += 0.016f;
+
+	const float Duration = FMath::Max(SpawnAnimationDuration, 0.05f);
+	const float T = FMath::Clamp(SpawnAnimElapsed / Duration, 0.0f, 1.0f);
+
+	// Ease-out cubic
+	const float Alpha = 1.0f - FMath::Pow(1.0f - T, 3.0f);
+
+	SetActorScale3D(SpawnAnimTargetScale * Alpha);
+
+	if (T >= 1.0f)
+	{
+		SetActorScale3D(SpawnAnimTargetScale);
+		GetWorld()->GetTimerManager().ClearTimer(SpawnAnimTimer);
 	}
 }
 

@@ -14,6 +14,16 @@
 - 为 HUD 添加 HandleRestartClicked：移除 EvaluationWidget → GameMode::RestartPlanningPhase → 显示 GameWidget
 - 更新 TDD.md 和 TDD_Chinese.md 第 2.8 节（Alt 放置开关）、2.10 节（ClearCell 返还）、2.12 节（v0.8 完整重写）
 
+### GridPlaceableActor 放置生长动画（v0.9）
+
+- 实现 GridPlaceableActor 放置时的缩放入场动画：从初始缩放平滑过渡到目标大小
+- 使用 FTimerHandle 驱动（~60Hz），ease-out 三次方缓动曲线 `Alpha = 1 - (1-t)^3`，无每帧 Tick 开销
+- 在 AGridPlaceableActor 基类上新增 3 个 UPROPERTY：bPlaySpawnAnimation（开关）、SpawnAnimationDuration（0.2s）、SpawnAnimationInitialScale（0.05）
+- 动画插入点在 PlaceOnGrid() 末尾、OnPlacedOnGrid() 之后 — 确保 RoadTile::UpdateAppearance() 已确定最终 ActorScale3D
+- EndPlay() 清除 SpawnAnimTimer 防止 Actor 销毁后回调悬空
+- 编译验证通过
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.1 节（放置流程增加动画描述）、2.2 节（新增放置生长动画 v0.9 子节）
+
 ## 2026-06-06
 
 ### 完整游戏循环 Widget 系统（v0.7）

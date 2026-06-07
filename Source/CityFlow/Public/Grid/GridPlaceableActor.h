@@ -62,6 +62,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Grid|Preview")
 	virtual void UpdatePreviewAppearance(const FGridVector& GridPos);
 
+	// ---- Spawn animation ----
+
+	/** Whether to play a scale-up animation when this actor is placed on the grid. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid|Animation")
+	bool bPlaySpawnAnimation = true;
+
+	/** Duration of the scale-up animation in seconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid|Animation")
+	float SpawnAnimationDuration = 0.2f;
+
+	/** Initial scale at animation start (0.0-1.0, must be > 0 to avoid zero-scale issues). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid|Animation")
+	float SpawnAnimationInitialScale = 0.05f;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -113,9 +127,17 @@ protected:
 
 	class UGridManager* GetGridManager() const;
 
+	UFUNCTION()
+	void TickSpawnAnimation();
+
 private:
 	void EnterPlacedState();
+	void PlaySpawnAnimation();
 
 	bool RegisterCells();
 	void UnregisterCells();
+
+	FTimerHandle SpawnAnimTimer;
+	FVector SpawnAnimTargetScale = FVector::OneVector;
+	float SpawnAnimElapsed = 0.0f;
 };

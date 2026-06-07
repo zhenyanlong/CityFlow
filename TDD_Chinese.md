@@ -64,7 +64,7 @@ struct FGridCell
    - 放置逻辑：
      - 将命中点转换为网格坐标 `(x, y)`。
      - **验证：** 目标单元格必须为 `Empty`。
-     - 成功后：预览 Actor 转为 `EnterPlacedState()`，恢复原始材质并启用碰撞。单元格设为对应类型并计算 `ConnectedMask`。立即生成新的预览 Actor。
+     - 成功后：预览 Actor 转为 `EnterPlacedState()`，恢复原始材质并启用碰撞。单元格设为对应类型并计算 `ConnectedMask`。立即生成新的预览 Actor。在 `OnPlacedOnGrid()` 之后，Actor 播放**放置生长动画** — 从可配置的初始大小缩放到完整尺寸，使用 ease-out 缓动曲线。
 4. **删除** — 绑定到 `IA_RemoveItem`（鼠标右键）：
    - **Started：** 重置 `LastRemovedGridPos`，执行首次删除。
    - **Triggered：** 启用**拖拽连续删除**，同样通过 `LastRemovedGridPos` 去重。
@@ -123,6 +123,29 @@ AGridPlaceableActor  (Abstract)          ← 状态管理 + 统一 API
 #### 预览外观扩展 (AGridPlaceableActor)
 
 在 `AGridPlaceableActor` 基类上定义了 `virtual void UpdatePreviewAppearance(const FGridVector& GridPos)` 方法（默认空实现）。Controller 每帧在 `SetPreviewPlacementValid()` 之后调用此方法，允许子类根据预测的网格位置更新预览视觉。
+
+#### 放置生长动画（v0.9）
+
+当 `GridPlaceableActor` 通过 `PlaceOnGrid()` 放置到网格上时，会播放**缩放入场动画**作为视觉反馈。动画通过 `FTimerHandle` 驱动（无每帧 Tick 开销），使用 ease-out 三次方缓动曲线。
+
+**插入点：** 在 `PlaceOnGrid()` 末尾、`OnPlacedOnGrid()` 和 `OnGridPlaced` 广播之后 — 这确保子类（如 `ARoadTile::UpdateAppearance()`）已在动画捕获目标缩放之前应用了最终 `SetActorScale3D()`。
+
+**流程：**
+1. `PlaySpawnAnimation()` 捕获当前 `GetActorScale3D()` 作为 `TargetScale`。
+2. 设置初始缩放为 `TargetScale × SpawnAnimationInitialScale`。
+3. 启动 `FTimerHandle`，频率 ~60 Hz（0.016 秒间隔）。
+4. `TickSpawnAnimation()` 递增已用时间，计算 `T = elapsed / Duration`，应用 `Alpha = 1 - (1-T)^3`（ease-out 三次方），设置 `ActorScale = TargetScale × Alpha`。
+5. 当 `T ≥ 1.0` 时，精确设置到 `TargetScale` 并清除 Timer。
+
+**蓝图可配置属性（均在 `AGridPlaceableActor` 上）：**
+
+| 属性 | 默认值 | 描述 |
+|---|---|---|
+| `bPlaySpawnAnimation` | `true` | 总开关；设为 `false` 可禁用（如 L-system 批量放置） |
+| `SpawnAnimationDuration` | `0.2` | 动画时长（秒） |
+| `SpawnAnimationInitialScale` | `0.05` | 初始缩放比例（0.0–1.0，被钳位到 ≥ 0.01 以避免零缩放问题） |
+
+**安全性：** `EndPlay()` 清除 `SpawnAnimTimer`，防止 Actor 销毁后回调悬空。
 
 ---
 

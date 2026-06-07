@@ -14,6 +14,16 @@
 - Added HandleRestartClicked to HUD: removes EvaluationWidget, calls GameMode::RestartPlanningPhase, shows GameWidget
 - Updated TDD.md and TDD_Chinese.md sections 2.8 (Alt placement disable), 2.10 (ClearCell refund), 2.12 (v0.8 full rewrite with StartWidget/GameWidget/EvaluationWidget changes)
 
+### GridPlaceableActor Spawn Scale Animation (v0.9)
+
+- Implemented spawn scale-up animation for GridPlaceableActor on placement: smooth transition from initial scale to full size
+- Driven by FTimerHandle (~60 Hz) with ease-out cubic curve `Alpha = 1 - (1-t)^3`, zero per-frame Tick overhead
+- Added 3 UPROPERTYs on AGridPlaceableActor base class: bPlaySpawnAnimation (toggle), SpawnAnimationDuration (0.2s), SpawnAnimationInitialScale (0.05)
+- Insertion point at end of PlaceOnGrid(), after OnPlacedOnGrid() — ensures RoadTile::UpdateAppearance() has already set final ActorScale3D
+- EndPlay() clears SpawnAnimTimer to prevent dangling callback after actor destruction
+- Build verified with zero errors
+- Updated TDD.md and TDD_Chinese.md section 2.1 (placement flow now mentions animation) and 2.2 (new Spawn Scale Animation v0.9 subsection)
+
 ## 2026-06-06
 
 ### Full Game Loop Widget System (v0.7)
