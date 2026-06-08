@@ -1,11 +1,13 @@
 #include "GameMode/CityFlowGameMode.h"
 #include "GameMode/Types/CityFlowGameTypes.h"
+#include "GameMode/Types/BuildingDataAsset.h"
 #include "Grid/GridManager.h"
 #include "Grid/GridPlaceableActor.h"
 #include "Grid/Building.h"
 #include "Grid/RoadTile.h"
 #include "Vehicle/Subsystem/VehicleManager.h"
 #include "Vehicle/Actor/VehicleActor.h"
+#include "Vehicle/Types/VehicleDataAsset.h"
 #include "Scoring/Subsystem/ScoringManager.h"
 #include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "LSystem/Subsystem/LSystemManager.h"
@@ -90,28 +92,103 @@ void ACityFlowGameMode::InitializeDefaultScene()
 		GM->InitGrid(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, Origin);
 	}
 
-	if (OriginBuildingClass || DestinationBuildingClass)
+	TArray<FBuildingSpawnRequest> Requests;
+
+	if (BuildingDataAsset)
 	{
-		TArray<FBuildingSpawnRequest> Requests;
-
-		const int32 HalfCount = DefaultBuildingCount / 2;
-
-		if (OriginBuildingClass)
+		// 使用 BuildingDataAsset 按权重占比确定各建筑生成数量
+		const TArray<FBuildingDataEntry>& Entries = BuildingDataAsset->BuildingEntries;
+		if (Entries.Num() > 0)
 		{
-			FBuildingSpawnRequest OriginReq;
-			OriginReq.BuildingClass = OriginBuildingClass;
-			OriginReq.Count = HalfCount;
-			Requests.Add(OriginReq);
-		}
+			float TotalWeight = 0.0f;
+			for (const FBuildingDataEntry& Entry : Entries)
+			{
+				TotalWeight += FMath::Max(0.0f, Entry.SpawnWeight);
+			}
 
-		if (DestinationBuildingClass)
+			if (TotalWeight > 0.0f)
+			{
+				// 按 weight / TotalWeight * DefaultBuildingCount 分配，取整后用最大余数法补足
+				int32 AssignedTotal = 0;
+				TArray<TPair<int32, float>> Fractionals; // (entry_index, fractional_part)
+
+				for (int32 i = 0; i < Entries.Num(); ++i)
+				{
+					if (!Entries[i].BuildingClass) continue;
+
+					const float Fraction = (Entries[i].SpawnWeight / TotalWeight) * DefaultBuildingCount;
+					const int32 Count = FMath::FloorToInt(Fraction);
+					AssignedTotal += Count;
+
+					Fractionals.Add(TPair<int32, float>(i, Fraction - Count));
+
+					if (Count > 0)
+					{
+						FBuildingSpawnRequest Req;
+						Req.BuildingClass = Entries[i].BuildingClass;
+						Req.Count = Count;
+						Requests.Add(Req);
+					}
+				}
+
+				// 余量按小数部分从大到小分配
+				const int32 Remainder = DefaultBuildingCount - AssignedTotal;
+				Fractionals.Sort([](const TPair<int32, float>& A, const TPair<int32, float>& B)
+				{
+					return A.Value > B.Value;
+				});
+
+				for (int32 i = 0; i < Remainder; ++i)
+				{
+					const int32 EntryIdx = Fractionals[i].Key;
+					bool bFound = false;
+					for (FBuildingSpawnRequest& Req : Requests)
+					{
+						if (Req.BuildingClass == Entries[EntryIdx].BuildingClass)
+						{
+							Req.Count++;
+							bFound = true;
+							break;
+						}
+					}
+					if (!bFound)
+					{
+						FBuildingSpawnRequest Req;
+						Req.BuildingClass = Entries[EntryIdx].BuildingClass;
+						Req.Count = 1;
+						Requests.Add(Req);
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		// 回退：使用旧的单类配置
+		if (OriginBuildingClass || DestinationBuildingClass)
 		{
-			FBuildingSpawnRequest DestReq;
-			DestReq.BuildingClass = DestinationBuildingClass;
-			DestReq.Count = DefaultBuildingCount - HalfCount;
-			Requests.Add(DestReq);
-		}
+			const int32 HalfCount = DefaultBuildingCount / 2;
 
+			if (OriginBuildingClass)
+			{
+				FBuildingSpawnRequest OriginReq;
+				OriginReq.BuildingClass = OriginBuildingClass;
+				OriginReq.Count = HalfCount;
+				Requests.Add(OriginReq);
+			}
+
+			if (DestinationBuildingClass)
+			{
+				FBuildingSpawnRequest DestReq;
+				DestReq.BuildingClass = DestinationBuildingClass;
+				DestReq.Count = DefaultBuildingCount - HalfCount;
+				Requests.Add(DestReq);
+			}
+		}
+	}
+
+	if (Requests.Num() > 0)
+	{
 		GM->TryPlaceBuildingsRandom(Requests);
 	}
 
@@ -155,6 +232,13 @@ void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
 		{
 			VM->SetDrivingSide(DrivingSide);
 			VM->SetLaneOffsetFactor(LaneOffsetFactor);
+
+			// 优先使用 GameMode 上的 VehicleDataAsset，否则 VehicleManager 回退到 DeveloperSettings
+			if (VehicleDataAsset)
+			{
+				VM->SetVehicleDataAsset(VehicleDataAsset);
+			}
+
 			VM->StartSpawning();
 		}
 

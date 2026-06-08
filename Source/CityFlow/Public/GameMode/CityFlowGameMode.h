@@ -5,6 +5,9 @@
 #include "GameMode/Types/CityFlowGameTypes.h"
 #include "CityFlowGameMode.generated.h"
 
+class UBuildingDataAsset;
+class UVehicleDataAsset;
+
 UCLASS()
 class CITYFLOW_API ACityFlowGameMode : public AGameModeBase
 {
@@ -59,17 +62,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void InitializeDefaultScene();
 
+	/** 建筑生成数据资产 —— 配置可生成的建筑类型及权重。设置后优先使用，否则回退到 OriginBuildingClass/DestinationBuildingClass */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
+	TObjectPtr<UBuildingDataAsset> BuildingDataAsset;
+
+	/** 车辆生成数据资产 —— 配置可生成的车辆类型及权重。设置后优先使用，否则回退到 DeveloperSettings */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
+	TObjectPtr<UVehicleDataAsset> VehicleDataAsset;
+
+	/** @deprecated 回退用：当 BuildingDataAsset 未设置时使用 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TSubclassOf<class AGridPlaceableActor> OriginBuildingClass;
 
+	/** @deprecated 回退用：当 BuildingDataAsset 未设置时使用 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TSubclassOf<class AGridPlaceableActor> DestinationBuildingClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TSubclassOf<class ARoadTile> RoadTileClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
-	TSubclassOf<class AVehicleActor> VehicleClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Budget")
 	int32 TotalRoadBudget = 200;

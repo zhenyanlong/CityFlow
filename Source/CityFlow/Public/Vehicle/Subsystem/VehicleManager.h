@@ -9,6 +9,7 @@
 class AVehicleActor;
 class ABuilding;
 class UGridManager;
+class UVehicleDataAsset;
 struct FVehicleSpawnEntry;
 
 #include "VehicleManager.generated.h"
@@ -45,6 +46,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetLaneOffsetFactor(float Factor) { LaneOffsetFactor = FMath::Clamp(Factor, 0.0f, 0.45f); }
+
+	/** 设置车辆生成数据资产。优先于 DeveloperSettings 中的配置。 */
+	void SetVehicleDataAsset(UVehicleDataAsset* InDataAsset) { ExternalVehicleDataAsset = InDataAsset; }
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	AVehicleActor* SpawnVehicle(class ABuilding* Origin, class ABuilding* Destination);
@@ -126,6 +130,8 @@ private:
 
 	ECityFlowDrivingSide DrivingSide = ECityFlowDrivingSide::RightHand;
 	float LaneOffsetFactor = 0.2f;
+
+	TObjectPtr<UVehicleDataAsset> ExternalVehicleDataAsset;
 
 	static constexpr float CONGESTION_CHECK_INTERVAL = 1.0f;
 };

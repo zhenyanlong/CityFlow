@@ -570,11 +570,35 @@ TickMovementSpline:
 
 ### 2.7 起点 / 目的地生成与计分
 
-#### 实现状态：✅ 已实现
+#### 实现状态：✅ 已实现 — v0.10 DataAsset 驱动生成 + doorway 验证
+
+#### 车辆生成数据资产
+
+`UVehicleDataAsset::VehicleEntries` 是 `FVehicleSpawnEntry` 的数组。车辆生成使用两级优先级：若 `ACityFlowGameMode::VehicleDataAsset`（`TObjectPtr<UVehicleDataAsset>`）已配置，则传给 `UVehicleManager::SetVehicleDataAsset()` 直接使用；否则 `CacheSpawnEntries()` 回退到 `DeveloperSettings::DefaultVehicleDataAsset`。`PickRandomVehicleClass()` 从加载的数据源按加权随机选择。
+
+每个 `AVehicleActor` 子类在蓝图 Class Defaults 中自行配置 Mesh/MoveSpeed/DebugColor——无需 DataAsset 驱动属性覆盖。
 
 #### 建筑生成
 
-`CityFlowGameMode::InitializeDefaultScene()` 委托给 `GridManager::TryPlaceBuildingsRandom()`，使用可配置的 `OriginBuildingClass` / `DestinationBuildingClass` 数量。建筑随机放置带随机旋转，确保不重叠。
+`CityFlowGameMode::InitializeDefaultScene()` 现在支持两种路径：
+
+**主路径：`UBuildingDataAsset`**（v0.10 新增）——一个 `UPrimaryDataAsset`，包含单个 `BuildingEntries` 数组，每项为 `FBuildingDataEntry`（`TSubclassOf<ABuilding>` + `float SpawnWeight`）。起点/终点的角色由建筑 BP 自身的 `bIsDestination` 标记决定——无需分离的起点/终点数组。
+
+生成数量使用**最大余数法**确定性分配：每个条目获得 `floor(weight / totalWeight × DefaultBuildingCount)`，剩余名额按小数部分从大到小分配。
+
+**回退：** 若 `BuildingDataAsset` 未设置，则使用旧版 `OriginBuildingClass` / `DestinationBuildingClass` 单类配置（各 50%）。
+
+建筑随后通过 `GridManager::TryPlaceBuildingsRandom()` 以随机位置和旋转放置。
+
+#### 建筑 Doorway 放置验证（v0.10）
+
+`ABuilding::ValidatePlacement()` 现在验证每个 doorway 的连接点（建筑占地往外一格）满足两个条件：
+- **边界内：** `IsValidGridPos(ConnPt)` — doorway 格必须在网格边界内。
+- **未被其他建筑占据：** `GetCell(ConnPt).Type != ECellType::Building` — 防止 doorway 格与其他建筑占地重叠。
+
+若任一 doorway 验证失败，`CanPlaceAt()` 返回 `false`，`TryPlaceBuildingRandom()` 自动尝试下一个候选位置/旋转。
+
+新增辅助函数 `GetDoorwayConnectionPointForPosition(Doorway, BasePos)`，在 `GridPosition` 未设置前计算 doorway 对任意候选位置的连接点，支持放置前验证。
 
 #### 车辆生成
 
@@ -725,9 +749,10 @@ TickMovementSpline:
 **已从 GameMode 移除：** `GameWidgetClass` 和 `GameWidgetInstance` — HUD 是唯一 Widget 生命周期所有者。
 
 **蓝图可配置属性：**
-- `OriginBuildingClass` / `DestinationBuildingClass` — 建筑蓝图类
+- `BuildingDataAsset` — `UBuildingDataAsset*` 用于加权建筑生成（主路径；回退：`OriginBuildingClass`/`DestinationBuildingClass`）
+- `VehicleDataAsset` — `UVehicleDataAsset*` 用于加权车辆生成（主路径；回退：`DeveloperSettings::DefaultVehicleDataAsset`）
+- `OriginBuildingClass` / `DestinationBuildingClass` — 建筑蓝图类（旧版回退）
 - `RoadTileClass` — 道路地块蓝图类
-- `VehicleClass` — 车辆蓝图类（未来覆写）
 - `TotalRoadBudget`、`LSystemBudgetShare` — 预算分配
 - `SimulationDuration`、`DefaultBuildingCount`、`DefaultGridWidth/Height/CellSize`
 - `DrivingSide` — `ECityFlowDrivingSide`（右舵/左舵）

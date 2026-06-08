@@ -1,3 +1,17 @@
+## 2026-06-08
+
+### 建筑与车辆生成 DataAsset 重构（v0.10）
+
+- 创建 UBuildingDataAsset（UPrimaryDataAsset），包含 FBuildingDataEntry（BuildingClass + SpawnWeight）和统一的 BuildingEntries 数组
+- 起点/终点角色由建筑 BP 自身的 bIsDestination 标记决定，消除分离的起点/终点数组
+- 实现确定性建筑生成数量分配：使用最大余数法，floor(weight/totalWeight × DefaultBuildingCount)，余量按小数部分分配
+- 在 ACityFlowGameMode 中添加 BuildingDataAsset 和 VehicleDataAsset 属性，保留旧版单类属性作为回退
+- 添加 UVehicleManager::SetVehicleDataAsset() 和 ExternalVehicleDataAsset 成员；CacheSpawnEntries() 优先使用外部 DataAsset，回退到 DeveloperSettings
+- 移除 GameMode 中未使用的 VehicleClass 属性
+- 实现 ABuilding::ValidatePlacement() 覆写：验证 doorway 连接点在边界内且未被其他建筑占据
+- 添加 GetDoorwayConnectionPointForPosition() 辅助函数，支持放置前 doorway 验证
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6、2.7、2.11 节，记录 v0.10 变更
+
 ## 2026-06-07
 
 ### UI 系统精细化（v0.8）

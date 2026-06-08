@@ -585,7 +585,7 @@ struct FVehicleSpawnEntry
 };
 ```
 
-`UVehicleDataAsset::VehicleEntries` is an array of `FVehicleSpawnEntry`. `UVehicleManager::CacheSpawnEntries()` loads the DataAsset referenced by `DeveloperSettings::DefaultVehicleDataAsset` on simulation start, then `PickRandomVehicleClass()` performs weighted random selection per spawn.
+`UVehicleDataAsset::VehicleEntries` is an array of `FVehicleSpawnEntry`. Vehicle spawning uses a two-tier priority: if `ACityFlowGameMode::VehicleDataAsset` (a `TObjectPtr<UVehicleDataAsset>`) is configured, it is passed to `UVehicleManager::SetVehicleDataAsset()` and used directly; otherwise, `CacheSpawnEntries()` falls back to `DeveloperSettings::DefaultVehicleDataAsset`. `PickRandomVehicleClass()` performs weighted random selection per spawn from whichever source was loaded.
 
 Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `VehicleMesh`, `MoveSpeed`, `DebugColor`, etc. directly in its Blueprint defaults — no DataAsset-driven property override is needed.
 
@@ -593,11 +593,29 @@ Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `Ve
 
 ### 2.7 Origin / Destination Generation & Scoring
 
-#### Implementation Status: ✅ Implemented
+#### Implementation Status: ✅ Implemented — v0.10 DataAsset-driven spawn with doorway validation
 
 #### Building Generation
 
-The `CityFlowGameMode::InitializeDefaultScene()` delegates to `GridManager::TryPlaceBuildingsRandom()` with configurable `OriginBuildingClass` / `DestinationBuildingClass` counts. Buildings are randomly placed with random rotations, ensuring no overlaps.
+`CityFlowGameMode::InitializeDefaultScene()` now supports two paths:
+
+**Primary: `UBuildingDataAsset`** (new in v0.10) — a `UPrimaryDataAsset` with a single `BuildingEntries` array of `FBuildingDataEntry` (each specifying `TSubclassOf<ABuilding>` + `float SpawnWeight`). The roles of origin vs. destination are determined by each building BP's own `bIsDestination` flag — no separate origin/destination arrays are needed.
+
+Spawn counts are allocated deterministically using the **largest-remainder method**: each entry receives `floor(weight / totalWeight × DefaultBuildingCount)`, and any remaining slots are assigned to entries with the largest fractional parts.
+
+**Fallback:** If `BuildingDataAsset` is not set, the legacy `OriginBuildingClass` / `DestinationBuildingClass` single-class properties are used as before (50/50 split).
+
+Buildings are then placed via `GridManager::TryPlaceBuildingsRandom()` with random positions and rotations.
+
+#### Building Doorway Placement Validation (v0.10)
+
+`ABuilding::ValidatePlacement()` now validates that every doorway's connection point (the grid cell immediately outside the building footprint in the doorway's facing direction) satisfies two conditions:
+- **In-bounds:** `IsValidGridPos(ConnPt)` — the doorway cell must be within the grid boundary.
+- **Not occupied by another building:** `GetCell(ConnPt).Type != ECellType::Building` — prevents doorway cells from overlapping with other buildings' occupied cells.
+
+If any doorway fails, `CanPlaceAt()` returns `false`, and `TryPlaceBuildingRandom()` automatically retries with the next candidate position/rotation.
+
+A new helper `GetDoorwayConnectionPointForPosition(Doorway, BasePos)` computes a doorway's world-grid connection point against an arbitrary candidate position (before `GridPosition` is set), enabling pre-placement validation.
 
 #### Vehicle Spawning
 
@@ -749,9 +767,10 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 **Removed from GameMode:** `GameWidgetClass` and `GameWidgetInstance` — HUD is now the sole widget lifecycle owner.
 
 **Blueprint-Configurable Properties:**
-- `OriginBuildingClass` / `DestinationBuildingClass` — building BP classes
+- `BuildingDataAsset` — `UBuildingDataAsset*` for weighted building spawn (primary; fallback: `OriginBuildingClass`/`DestinationBuildingClass`)
+- `VehicleDataAsset` — `UVehicleDataAsset*` for weighted vehicle spawn (primary; fallback: `DeveloperSettings::DefaultVehicleDataAsset`)
+- `OriginBuildingClass` / `DestinationBuildingClass` — building BP classes (legacy fallback)
 - `RoadTileClass` — road tile BP class
-- `VehicleClass` — vehicle BP class (future override)
 - `TotalRoadBudget`, `LSystemBudgetShare` — budget split
 - `SimulationDuration`, `DefaultBuildingCount`, `DefaultGridWidth/Height/CellSize`
 - `DrivingSide` — `ECityFlowDrivingSide` (RightHand / LeftHand)

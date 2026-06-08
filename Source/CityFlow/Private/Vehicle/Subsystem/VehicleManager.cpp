@@ -798,21 +798,31 @@ void UVehicleManager::CacheSpawnEntries()
 		return;
 	}
 
-	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
-	if (!Settings || Settings->DefaultVehicleDataAsset.IsNull())
+	// 优先使用 GameMode 传入的 DataAsset
+	if (ExternalVehicleDataAsset)
 	{
-		UE_LOG(LogVehicleManager, Warning, TEXT("CacheSpawnEntries: DefaultVehicleDataAsset is not configured in Project Settings → CityFlow"));
-		return;
+		CachedSpawnEntries = ExternalVehicleDataAsset->VehicleEntries;
+	}
+	else
+	{
+		// 回退到 DeveloperSettings
+		const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
+		if (!Settings || Settings->DefaultVehicleDataAsset.IsNull())
+		{
+			UE_LOG(LogVehicleManager, Warning, TEXT("CacheSpawnEntries: DefaultVehicleDataAsset is not configured in Project Settings → CityFlow"));
+			return;
+		}
+
+		const UVehicleDataAsset* DataAsset = Cast<UVehicleDataAsset>(Settings->DefaultVehicleDataAsset.TryLoad());
+		if (!DataAsset)
+		{
+			UE_LOG(LogVehicleManager, Warning, TEXT("CacheSpawnEntries: failed to load DefaultVehicleDataAsset"));
+			return;
+		}
+
+		CachedSpawnEntries = DataAsset->VehicleEntries;
 	}
 
-	const UVehicleDataAsset* DataAsset = Cast<UVehicleDataAsset>(Settings->DefaultVehicleDataAsset.TryLoad());
-	if (!DataAsset)
-	{
-		UE_LOG(LogVehicleManager, Warning, TEXT("CacheSpawnEntries: failed to load DefaultVehicleDataAsset"));
-		return;
-	}
-
-	CachedSpawnEntries = DataAsset->VehicleEntries;
 	TotalSpawnWeight = 0.0f;
 	for (const FVehicleSpawnEntry& Entry : CachedSpawnEntries)
 	{

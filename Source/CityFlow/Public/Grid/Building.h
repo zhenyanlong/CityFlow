@@ -56,6 +56,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	FGridVector GetDoorwayConnectionPoint(const FBuildingDoorway& Doorway) const;
 
+	/** 计算在指定候选位置时，某个 doorway 的连接点（用于放置前验证） */
+	FGridVector GetDoorwayConnectionPointForPosition(const FBuildingDoorway& Doorway, const FGridVector& BasePos) const;
+
 	UFUNCTION(BlueprintPure, Category = "Building")
 	FGridVector TransformLocalPosition(const FGridVector& LocalPos) const;
 

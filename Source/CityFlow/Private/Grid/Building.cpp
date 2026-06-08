@@ -90,6 +90,25 @@ FGridVector ABuilding::GetDoorwayConnectionPoint(const FBuildingDoorway& Doorway
 	return GridPosition + LocalPos + DirVec;
 }
 
+FGridVector ABuilding::GetDoorwayConnectionPointForPosition(const FBuildingDoorway& Doorway, const FGridVector& BasePos) const
+{
+	const FGridVector LocalPos = TransformLocalPosition(Doorway.RelativePosition);
+	EGridDirection RotatedDir = Doorway.FacingDirection;
+	for (uint8 i = 0; i < static_cast<uint8>(BuildingRotation); ++i)
+	{
+		switch (RotatedDir)
+		{
+		case EGridDirection::Up:    RotatedDir = EGridDirection::Left; break;
+		case EGridDirection::Left:  RotatedDir = EGridDirection::Down; break;
+		case EGridDirection::Down:  RotatedDir = EGridDirection::Right; break;
+		case EGridDirection::Right: RotatedDir = EGridDirection::Up; break;
+		default: break;
+		}
+	}
+	const FGridVector DirVec = GridDirectionUtils::GetVector(RotatedDir);
+	return BasePos + LocalPos + DirVec;
+}
+
 TArray<FGridVector> ABuilding::GetDoorwayWorldPositions() const
 {
 	TArray<FGridVector> Result;
@@ -137,6 +156,30 @@ TArray<FGridVector> ABuilding::CalculateOccupiedCells(const FGridVector& BasePos
 
 bool ABuilding::ValidatePlacement(const FGridVector& BasePos) const
 {
+	UGridManager* GM = GetGridManager();
+	if (!GM || !GM->IsGridInitialized())
+	{
+		return false;
+	}
+
+	for (const FBuildingDoorway& Doorway : Doorways)
+	{
+		const FGridVector ConnPt = GetDoorwayConnectionPointForPosition(Doorway, BasePos);
+
+		// doorway 连接点必须在 grid 范围内
+		if (!GM->IsValidGridPos(ConnPt))
+		{
+			return false;
+		}
+
+		// doorway 连接点不能被其他 building 占据
+		const FGridCell& Cell = GM->GetCell(ConnPt);
+		if (Cell.Type == ECellType::Building)
+		{
+			return false;
+		}
+	}
+
 	return true;
 }
 

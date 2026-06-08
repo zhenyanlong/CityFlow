@@ -1,3 +1,17 @@
+## 2026-06-08
+
+### Building & Vehicle Spawn DataAsset Refactor (v0.10)
+
+- Created UBuildingDataAsset (UPrimaryDataAsset) with FBuildingDataEntry (BuildingClass + SpawnWeight) and single BuildingEntries array
+- Origin/destination roles determined by building BP's own bIsDestination flag, eliminating separate origin/destination arrays
+- Implemented deterministic building spawn count allocation using largest-remainder method: floor(weight/totalWeight × DefaultBuildingCount) with remainder distributed by fractional part
+- Added BuildingDataAsset and VehicleDataAsset properties to ACityFlowGameMode with fallback to legacy single-class properties
+- Added UVehicleManager::SetVehicleDataAsset() and ExternalVehicleDataAsset member; CacheSpawnEntries() now prefers external DataAsset over DeveloperSettings
+- Removed unused VehicleClass property from GameMode
+- Implemented ABuilding::ValidatePlacement() override: validates doorway connection points are in-bounds and not occupied by other buildings
+- Added GetDoorwayConnectionPointForPosition() helper for pre-placement doorway validation
+- Updated TDD.md and TDD_Chinese.md sections 2.6, 2.7, and 2.11 with v0.10 changes
+
 ## 2026-06-07
 
 ### UI System Refinement (v0.8)
