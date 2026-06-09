@@ -33,7 +33,8 @@ TArray<FString> UFoundationComponent::GetCollisionProfileOptions()
 }
 
 void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, float CellSize,
-    bool bTopConnected, bool bRightConnected, bool bBottomConnected, bool bLeftConnected)
+    bool bTopConnected, bool bRightConnected, bool bBottomConnected, bool bLeftConnected,
+    const FVector& InOwnerScale)
 {
     ClearFoundation();
 
@@ -180,10 +181,9 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
     FoundationMesh->SetupAttachment(Owner->GetRootComponent());
     FoundationMesh->SetRelativeLocation(FVector::ZeroVector);
     {
-        const FVector S = Owner->GetActorScale3D();
         FoundationMesh->SetRelativeScale3D(FVector(
-            S.X > KINDA_SMALL_NUMBER ? 1.0f / S.X : 1.0f,
-            S.Y > KINDA_SMALL_NUMBER ? 1.0f / S.Y : 1.0f,
+            InOwnerScale.X > KINDA_SMALL_NUMBER ? 1.0f / InOwnerScale.X : 1.0f,
+            InOwnerScale.Y > KINDA_SMALL_NUMBER ? 1.0f / InOwnerScale.Y : 1.0f,
             1.0f));
     }
     FoundationMesh->CreateMeshSection_LinearColor(0, FoundationVerts, FoundationTris, FoundationNormals, FoundationUVs,

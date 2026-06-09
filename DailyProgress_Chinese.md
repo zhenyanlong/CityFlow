@@ -8,6 +8,14 @@
 - 在 ACityFlowGameMode 中添加 BuildingDataAsset 和 VehicleDataAsset 属性，保留旧版单类属性作为回退
 - 添加 UVehicleManager::SetVehicleDataAsset() 和 ExternalVehicleDataAsset 成员；CacheSpawnEntries() 优先使用外部 DataAsset，回退到 DeveloperSettings
 - 移除 GameMode 中未使用的 VehicleClass 属性
+
+### 拥堵与交叉口 Bug 修复（v0.11）
+
+- 修复 VehicleGridMap 拥堵检测 Bug：将破损的 `TMap<FGridVector, AVehicleActor*>` 替换为每帧 `TMap<FGridVector, int32>` 统计，删除死代码 `UpdateVehicleGridOccupancy()` 和 `IsOccupiedByVehicle()`
+- 新增死锁超时机制：`AVehicleActor` 在 `WaitingCongestion` 中累加 `CongestionWaitTime`，超 `DeadlockTimeout`（默认 3s）后释放所有路口占用，打破相邻路口互锁
+- 修复前向探测零距离过滤：`ProjDist > 0.0f` → `>= 0.0f`，`InterDist <= 0.0f` → `< 0.0f`，使起始位置就在路口内的车辆能正确获取锁
+- 修复 spawn 动画期间地基缩放 Bug：`BuildFoundation` 接收显式 `InOwnerScale` 参数，避免在动画中间值重建地基导致全图巨型地基
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节（拥堵检测、死锁超时、零距离探测修复、运动流控更新）和 2.4b 节（地基缩放修复）
 - 实现 ABuilding::ValidatePlacement() 覆写：验证 doorway 连接点在边界内且未被其他建筑占据
 - 添加 GetDoorwayConnectionPointForPosition() 辅助函数，支持放置前 doorway 验证
 - 更新 TDD.md 和 TDD_Chinese.md 第 2.6、2.7、2.11 节，记录 v0.10 变更

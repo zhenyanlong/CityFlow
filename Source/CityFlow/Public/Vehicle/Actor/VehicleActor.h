@@ -120,6 +120,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Debug")
 	bool bDebugDrawProbe = false;
 
+	/** Max time a vehicle can wait in WaitingCongestion before forcibly releasing all intersection reservations to break deadlocks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Collision")
+	float DeadlockTimeout = 3.0f;
+
 	class ABuilding* Origin = nullptr;
 
 protected:
@@ -142,6 +146,9 @@ private:
 	TWeakObjectPtr<AVehicleActor> FrontVehicle;
 	float FrontVehicleDistance = 0.0f;
 	bool bFrontVehicleTooClose = false;
+
+	/** Accumulated time in WaitingCongestion state; used for deadlock detection. */
+	float CongestionWaitTime = 0.0f;
 
 	/** Intersections this vehicle has reserved via forward-probe. Tracked for cleanup on destruction/arrival. */
 	TArray<TWeakObjectPtr<ARoadTile>> ReservedIntersections;

@@ -303,7 +303,7 @@ ABuilding
 
 **Key design principles:**
 
-- **Actor scale cancellation:** Building actors use `SetActorScale3D` for visual sizing. The procedural mesh vertices are computed in world units, then `SetRelativeScale3D(1/S.X, 1/S.Y, 1)` cancels the parent's scale to prevent double-transformation.
+- **Actor scale cancellation:** Building actors use `SetActorScale3D` for visual sizing. The procedural mesh vertices are computed in world units, then `SetRelativeScale3D(1/S.X, 1/S.Y, 1)` cancels the parent's scale to prevent double-transformation. **v0.11 fix:** `BuildFoundation` now accepts an explicit `InOwnerScale` parameter (computed by `RefreshFoundation` as `TargetScale = EffSize × CellSize / ReferenceMeshSize`) rather than reading `Owner->GetActorScale3D()` at build time, avoiding stale animation-intermediate scale values when the foundation is rebuilt during spawn animation.
 - **Z-axis convention:** Foundation sits on ground (Z=0), extruding upward to `FoundationHeight`. Sidewalk sits on top of the foundation (`FoundationHeight` → `FoundationHeight + SidewalkHeight`). Bottom face included for completeness at Z=0.
 - **Consistent winding order:** UE uses a left-hand coordinate system where **clockwise (CW)** winding is the front face. The outline is generated CCW; all face/top/wall triangles are wound CW to face outward.
 
@@ -550,10 +550,10 @@ TMap<TWeakObjectPtr<AVehicleActor>, float>                 PendingReservationTim
 |---|---|
 | `Idle` | Initial or error state |
 | `Moving` | Following spline path; forward probe runs each frame (two sweeps: Ch1 vehicles + Ch2 intersections) |
-| `WaitingCongestion` | Stopped due to front vehicle or locked intersection ahead; resumes automatically when obstacle clears |
+| `WaitingCongestion` | Stopped due to front vehicle or locked intersection ahead; accumulates `CongestionWaitTime` for deadlock detection; resumes automatically when obstacle clears |
 | `Arrived` | Reached destination; clears all reserved intersections, broadcasts event |
 
-**v0.6 movement flow:**
+**v0.11 movement flow:**
 ```
 TickMovementSpline:
   1. PerformForwardProbe():
@@ -563,14 +563,28 @@ TickMovementSpline:
         - Rejected → treat as virtual obstacle, take min distance
      c. ClosestDist = min(vehicleDist, intersectionDist)
      d. bFrontVehicleTooClose = closest ≤ safeDist (vehicle) or any virtual obstacle
-  2. if bFrontVehicleTooClose → WaitingCongestion → decelerate → return
-  3. if cleared → Moving → accelerate → advance spline
+  2. if bFrontVehicleTooClose:
+     a. State → WaitingCongestion, accumulate CongestionWaitTime
+     b. if CongestionWaitTime >= DeadlockTimeout → release all intersection locks, clear PassedIntersections, reset timer
+     c. decelerate → return
+  3. if cleared → Moving → reset CongestionWaitTime → accelerate → advance spline
 ```
 
-**Congestion Detection:**
-- Each tick, `UpdateCongestion()` maps world positions to grid cells.
-- Cells with > `CongestionThreshold` (default 3) vehicles are flagged congested.
+**Congestion Detection (v0.11 — ✅ Fixed):**
+- `UpdateCongestion()` builds a per-tick `TMap<FGridVector, int32>` by iterating all `ActiveVehicles` and counting vehicles per grid cell via `WorldToGrid()`.
+- Cells with `count > CongestionThreshold` (default 3) are flagged congested.
 - Congestion data is queryable via `GetCongestedCells()` and broadcasts `OnCongestionUpdated`.
+- **v0.11 fix:** Previous design used a persistent `TMap<FGridVector, AVehicleActor*>` (`VehicleGridMap`) which could only store one vehicle per cell (TMap duplicate-key assert). The new per-tick-counting approach is both correct and simpler, eliminating the `UpdateVehicleGridOccupancy()` and `IsOccupiedByVehicle()` dead code.
+
+**Deadlock Timeout (v0.11 — ✅ New):**
+- When two adjacent intersections lock each other (Vehicle A occupies Intersection 1 waiting for Intersection 2, Vehicle B occupies Intersection 2 waiting for Intersection 1), both vehicles enter a hold-and-wait deadlock.
+- `AVehicleActor` accumulates `CongestionWaitTime` while in `WaitingCongestion` state. If it exceeds `DeadlockTimeout` (default 3.0s, Blueprint-configurable), the vehicle forcibly releases all intersection reservations via `ReleaseVehicleFromAllTables()`, clears `ReservedIntersections` and `PassedIntersections`, and resets the timer.
+- This breaks the deadlock: the freed intersection becomes available for the other vehicle, allowing progress.
+- `CongestionWaitTime` resets when exiting `WaitingCongestion` (obstacle cleared) or on receiving a new spline path (`SetSplinePath`).
+
+**Forward Probe — Zero-Distance Fix (v0.11):**
+- `PerformForwardProbe()` previously filtered sweep hits with `ProjDist > 0.0f` (vehicle sweep) and `InterDist <= 0.0f` (intersection sweep), which ignored hits when the probe volume already overlapped a collision body at sweep start.
+- Fixed to `ProjDist >= 0.0f` and `InterDist < 0.0f` respectively, allowing vehicles starting inside an intersection (e.g., spawned at a building whose doorway cell is an intersection) to correctly acquire intersection locks.
 
 #### Vehicle Spawn Table
 

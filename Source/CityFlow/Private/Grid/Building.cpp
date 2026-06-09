@@ -448,12 +448,15 @@ void ABuilding::RefreshFoundation()
 
 	const FVector2D EffSize = GetEffectiveBuildingSize();
 	const float CellSize = GM->GetCellSize();
+	const float RefSize = FMath::Max(ReferenceMeshSize, 1.0f);
+	const FVector TargetScale(EffSize.X * CellSize / RefSize, EffSize.Y * CellSize / RefSize, 1.0f);
 
 	bool bTop, bRight, bBottom, bLeft;
 	DetermineEdgeConnections(bTop, bRight, bBottom, bLeft);
 
 	FoundationComponent->BuildFoundation(EffSize.X, EffSize.Y, CellSize,
-		bTop, bRight, bBottom, bLeft);
+		bTop, bRight, bBottom, bLeft,
+		TargetScale);
 }
 
 void ABuilding::OnDoorwayCellChanged(FGridVector CellPos, const FGridCell& NewCell)

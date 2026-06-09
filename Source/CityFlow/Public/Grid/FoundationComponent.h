@@ -17,7 +17,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Foundation")
 	void BuildFoundation(float EffWidth, float EffHeight, float CellSize,
-		bool bTopConnected, bool bRightConnected, bool bBottomConnected, bool bLeftConnected);
+		bool bTopConnected, bool bRightConnected, bool bBottomConnected, bool bLeftConnected,
+		const FVector& InOwnerScale);
 
 	UFUNCTION(BlueprintCallable, Category = "Foundation")
 	void ClearFoundation();

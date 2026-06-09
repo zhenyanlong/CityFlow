@@ -8,6 +8,14 @@
 - Added BuildingDataAsset and VehicleDataAsset properties to ACityFlowGameMode with fallback to legacy single-class properties
 - Added UVehicleManager::SetVehicleDataAsset() and ExternalVehicleDataAsset member; CacheSpawnEntries() now prefers external DataAsset over DeveloperSettings
 - Removed unused VehicleClass property from GameMode
+
+### Congestion & Intersection Bug Fixes (v0.11)
+
+- Fixed VehicleGridMap congestion detection bug: replaced broken `TMap<FGridVector, AVehicleActor*>` with per-tick `TMap<FGridVector, int32>` counting in `UpdateCongestion()`, removed dead code `UpdateVehicleGridOccupancy()` and `IsOccupiedByVehicle()`
+- Added deadlock timeout mechanism: `AVehicleActor` accumulates `CongestionWaitTime` in `WaitingCongestion`, releases all intersection reservations when exceeding `DeadlockTimeout` (default 3s), breaking adjacent intersection hold-and-wait cycles
+- Fixed forward probe zero-distance filtering: changed `ProjDist > 0.0f` → `>= 0.0f` and `InterDist <= 0.0f` → `< 0.0f` so vehicles starting inside an intersection box (e.g., doorway cell is an intersection) can correctly acquire locks
+- Fixed foundation scale bug during spawn animation: `BuildFoundation` now accepts explicit `InOwnerScale` parameter from `RefreshFoundation` instead of reading `Owner->GetActorScale3D()` at build time, preventing giant foundation meshes when rebuilt mid-animation
+- Updated TDD.md and TDD_Chinese.md sections 2.6 (congestion detection, deadlock timeout, zero-distance probe fix, updated movement flow) and 2.4b (foundation scale fix)
 - Implemented ABuilding::ValidatePlacement() override: validates doorway connection points are in-bounds and not occupied by other buildings
 - Added GetDoorwayConnectionPointForPosition() helper for pre-placement doorway validation
 - Updated TDD.md and TDD_Chinese.md sections 2.6, 2.7, and 2.11 with v0.10 changes

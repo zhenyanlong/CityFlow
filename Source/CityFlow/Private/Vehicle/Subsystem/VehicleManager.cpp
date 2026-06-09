@@ -136,7 +136,6 @@ void UVehicleManager::Tick(float DeltaTime)
 			continue;
 		}
 
-		UpdateVehicleGridOccupancy(Vehicle);
 	}
 
 	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
@@ -223,7 +222,6 @@ void UVehicleManager::ClearAllVehicles()
 	}
 	ActiveVehicles.Empty();
 	ArrivedVehicles.Empty();
-	VehicleGridMap.Empty();
 	CachedSpawnEntries.Empty();
 	TotalSpawnWeight = 0.0f;
 }
@@ -609,32 +607,37 @@ void UVehicleManager::UpdateCongestion()
 		return;
 	}
 
+	UGridManager* GM = GetGridManager();
+	if (!GM)
+	{
+		return;
+	}
+
+	// Build per-cell vehicle count from active vehicles each tick
+	TMap<FGridVector, int32> CellCounts;
+	for (const AVehicleActor* Vehicle : ActiveVehicles)
+	{
+		if (!Vehicle || Vehicle->GetMovementState() == EVehicleMovementState::Arrived)
+		{
+			continue;
+		}
+		const FGridVector GridPos = GM->WorldToGrid(Vehicle->GetActorLocation());
+		++CellCounts.FindOrAdd(GridPos, 0);
+	}
+
 	TSet<FGridVector> CongestedSet;
 	const int32 Threshold = Settings->CongestionThreshold;
 
-	for (const auto& Pair : VehicleGridMap)
+	for (const auto& Pair : CellCounts)
 	{
-		TArray<AVehicleActor*> VehiclesOnCell;
-		for (const auto& P2 : VehicleGridMap)
-		{
-			if (P2.Key == Pair.Key && P2.Value)
-			{
-				VehiclesOnCell.Add(P2.Value);
-			}
-		}
-
-		if (VehiclesOnCell.Num() > Threshold)
+		if (Pair.Value > Threshold)
 		{
 			CongestedSet.Add(Pair.Key);
 
 			if (Settings->bDebugDrawCongestion)
 			{
-				UGridManager* GM = GetGridManager();
-				if (GM)
-				{
-					const FVector WorldPos = GM->GridToWorld(Pair.Key);
-					DrawDebugBox(GetWorld(), WorldPos, FVector(50.0f), FColor::Red, false, CONGESTION_CHECK_INTERVAL * 1.5f, 0, 2.0f);
-				}
+				const FVector WorldPos = GM->GridToWorld(Pair.Key);
+				DrawDebugBox(GetWorld(), WorldPos, FVector(50.0f), FColor::Red, false, CONGESTION_CHECK_INTERVAL * 1.5f, 0, 2.0f);
 			}
 		}
 	}
@@ -664,28 +667,6 @@ bool UVehicleManager::IsIntersection(const FGridVector& Pos) const
 	if (Cell.ConnectedMask & static_cast<uint8>(EGridDirection::Right)) ++ConnCount;
 
 	return ConnCount >= 3;
-}
-
-bool UVehicleManager::IsOccupiedByVehicle(const FGridVector& GridPos) const
-{
-	for (const AVehicleActor* Vehicle : ActiveVehicles)
-	{
-		if (!Vehicle)
-		{
-			continue;
-		}
-
-		UGridManager* GM = GetGridManager();
-		if (GM)
-		{
-			const FGridVector VehicleGridPos = GM->WorldToGrid(Vehicle->GetActorLocation());
-			if (VehicleGridPos == GridPos)
-			{
-				return true;
-			}
-		}
-	}
-	return false;
 }
 
 bool UVehicleManager::IsBuildingBlocked(ABuilding* Building) const
@@ -724,23 +705,6 @@ bool UVehicleManager::IsBuildingBlocked(ABuilding* Building) const
 	}
 
 	return false;
-}
-
-void UVehicleManager::UpdateVehicleGridOccupancy(AVehicleActor* Vehicle)
-{
-	if (!Vehicle)
-	{
-		return;
-	}
-
-	UGridManager* GM = GetGridManager();
-	if (!GM)
-	{
-		return;
-	}
-
-	const FGridVector GridPos = GM->WorldToGrid(Vehicle->GetActorLocation());
-	VehicleGridMap.Add(GridPos, Vehicle);
 }
 
 void UVehicleManager::CollectOriginDestinations(TArray<ABuilding*>& OutOrigins, TArray<ABuilding*>& OutDestinations) const

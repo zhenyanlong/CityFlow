@@ -98,9 +98,7 @@ private:
 	void SanitizeAllIntersectionLocks();
 
 	bool IsIntersection(const FGridVector& Pos) const;
-	bool IsOccupiedByVehicle(const FGridVector& GridPos) const;
 	bool IsBuildingBlocked(class ABuilding* Building) const;
-	void UpdateVehicleGridOccupancy(AVehicleActor* Vehicle);
 
 	static int32 ManhattanDist(const FGridVector& A, const FGridVector& B);
 
@@ -112,9 +110,6 @@ private:
 
 	UPROPERTY()
 	TArray<AVehicleActor*> ArrivedVehicles;
-
-	UPROPERTY()
-	TMap<FGridVector, AVehicleActor*> VehicleGridMap;
 
 	FTimerHandle SpawnTimerHandle;
 	FTimerHandle CongestionTimerHandle;

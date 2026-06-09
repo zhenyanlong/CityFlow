@@ -303,7 +303,7 @@ ABuilding
 
 **核心设计原则：**
 
-- **Actor 缩放抵消：** 建筑 Actor 使用 `SetActorScale3D` 来视觉缩放。程序化顶点以世界单位计算，然后通过 `SetRelativeScale3D(1/S.X, 1/S.Y, 1)` 抵消父级缩放，防止双重变换。
+- **Actor 缩放抵消：** 建筑 Actor 使用 `SetActorScale3D` 来视觉缩放。程序化顶点以世界单位计算，然后通过 `SetRelativeScale3D(1/S.X, 1/S.Y, 1)` 抵消父级缩放，防止双重变换。**v0.11 修复：** `BuildFoundation` 现在接收显式 `InOwnerScale` 参数（由 `RefreshFoundation` 计算 `TargetScale = EffSize × CellSize / ReferenceMeshSize` 并传入），而非在构建时读取 `Owner->GetActorScale3D()`，避免在 spawn 动画期间重建地基时读取到动画中间缩放值。
 - **Z 轴惯例：** 地基落在地面（Z=0），向上挤出至 `FoundationHeight`。人行道落在地基顶部（`FoundationHeight` → `FoundationHeight + SidewalkHeight`）。底面也生成在 Z=0 以保证完整性。
 - **统一缠绕顺序：** UE 使用左手坐标系，**顺时针 (CW)** 缠绕为正面。轮廓为逆时针 (CCW) 生成；所有顶面/墙面三角形的缠绕均转换为 CW 以朝外。
 
@@ -549,10 +549,10 @@ TMap<TWeakObjectPtr<AVehicleActor>, float>                 PendingReservationTim
 |------|------|
 | `Idle` | 初始或错误状态 |
 | `Moving` | 沿样条路径移动；每帧执行前向探测（两次扫描：Ch1 车辆 + Ch2 交叉口） |
-| `WaitingCongestion` | 前车或锁定交叉口导致停车；障碍清除后自动恢复 |
+| `WaitingCongestion` | 前车或锁定交叉口导致停车；累积 `CongestionWaitTime` 用于死锁检测；障碍清除后自动恢复 |
 | `Arrived` | 到达终点；清除所有预留交叉口，广播事件 |
 
-**v0.6 运动流控：**
+**v0.11 运动流控：**
 ```
 TickMovementSpline:
   1. PerformForwardProbe():
@@ -562,11 +562,28 @@ TickMovementSpline:
         - 拒绝 → 视为虚拟障碍，取最小距离
      c. ClosestDist = min(车辆距离, 交叉口距离)
      d. bFrontVehicleTooClose = 最近距离 ≤ 安全距离（车辆）或任意虚拟障碍
-  2. 若 bFrontVehicleTooClose → WaitingCongestion → 减速 → return
-  3. 若已解除 → Moving → 加速 → 推进样条
+  2. 若 bFrontVehicleTooClose：
+     a. 状态 → WaitingCongestion，累加 CongestionWaitTime
+     b. 若 CongestionWaitTime >= DeadlockTimeout → 释放所有路口锁，清空 PassedIntersections，重置计时器
+     c. 减速 → return
+  3. 若已解除 → Moving → 重置 CongestionWaitTime → 加速 → 推进样条
 ```
 
-**拥堵检测：**
+**拥堵检测（v0.11 — ✅ 已修复）：**
+- `UpdateCongestion()` 每帧遍历 `ActiveVehicles` 统计每格车辆数，使用 `WorldToGrid()` 构建临时 `TMap<FGridVector, int32>`。
+- 车辆数 `> CongestionThreshold`（默认 3）的格被标记为拥堵。
+- 拥堵数据可通过 `GetCongestedCells()` 查询，并通过 `OnCongestionUpdated` 广播。
+- **v0.11 修复：** 旧版使用持久化 `TMap<FGridVector, AVehicleActor*>`（`VehicleGridMap`），每格最多存 1 辆车（TMap 重复 key 会断言）。新版逐帧计数的方案既正确又简洁，同时删除了 `UpdateVehicleGridOccupancy()` 和 `IsOccupiedByVehicle()` 两份死代码。
+
+**死锁超时释放（v0.11 — ✅ 新增）：**
+- 当相邻两个路口互锁时（A 车占路口 1 等路口 2，B 车占路口 2 等路口 1），两车陷入"持锁并等待"死锁。
+- `AVehicleActor` 处于 `WaitingCongestion` 时持续累加 `CongestionWaitTime`。超过 `DeadlockTimeout`（默认 3.0 秒，蓝图可配置）后，车辆强制通过 `ReleaseVehicleFromAllTables()` 释放所有路口占用，清空 `ReservedIntersections` 和 `PassedIntersections`，重置计时器。
+- 释放后路口重新空闲，另一车辆获取锁后通行，打破死锁。
+- 退出 `WaitingCongestion` 或接收新样条路径时自动重置 `CongestionWaitTime`。
+
+**前向探测 — 零距离命中修复（v0.11）：**
+- `PerformForwardProbe()` 之前用 `ProjDist > 0.0f`（车辆扫描）和 `InterDist <= 0.0f`（路口扫描）过滤命中，当探测体积起始就与碰撞体重叠时，命中被错误跳过。
+- 分别修正为 `ProjDist >= 0.0f` 和 `InterDist < 0.0f`，使占用位置就在路口内的车辆（如从建筑门口即为路口处生成）能正确获取路口锁。
 
 ### 2.7 起点 / 目的地生成与计分
 

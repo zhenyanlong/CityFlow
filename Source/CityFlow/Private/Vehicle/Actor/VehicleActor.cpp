@@ -134,6 +134,7 @@ void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArr
 
 	CurrentSplineDistance = 0.0f;
 	CurrentSpeed = 0.0f;
+	CongestionWaitTime = 0.0f;
 	MovementState = EVehicleMovementState::Moving;
 
 	SetActorLocation(WorldPoints[0] + FVector(0, 0, VehicleZOffset));
@@ -186,7 +187,38 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 
 	if (bFrontVehicleTooClose)
 	{
+		if (MovementState != EVehicleMovementState::WaitingCongestion)
+		{
+			CongestionWaitTime = 0.0f;
+		}
 		MovementState = EVehicleMovementState::WaitingCongestion;
+
+		CongestionWaitTime += DeltaTime;
+
+		// Deadlock timeout: if we've been waiting too long, release all intersection
+		// reservations. This breaks the hold-and-wait cycle when two vehicles each
+		// occupy one of two adjacent intersections and block each other.
+		if (CongestionWaitTime >= DeadlockTimeout)
+		{
+			for (const TWeakObjectPtr<ARoadTile>& WeakTile : ReservedIntersections)
+			{
+				if (ARoadTile* Tile = WeakTile.Get())
+				{
+					Tile->ReleaseVehicleFromAllTables(this);
+				}
+			}
+			ReservedIntersections.Empty();
+			PassedIntersections.Empty();
+			CongestionWaitTime = 0.0f;
+
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
+					FString::Printf(TEXT("[%s] Deadlock timeout — released all intersection locks"),
+						*GetName()));
+			}
+		}
+
 		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, 0.0f, DeltaTime, StartDeceleration);
 		if (CurrentSpeed < 1.0f) { CurrentSpeed = 0.0f; }
 		if (!VelocityDirection.IsNearlyZero())
@@ -199,6 +231,7 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 	if (MovementState == EVehicleMovementState::WaitingCongestion)
 	{
 		MovementState = EVehicleMovementState::Moving;
+		CongestionWaitTime = 0.0f;
 	}
 
 	{
@@ -278,7 +311,7 @@ void AVehicleActor::PerformForwardProbe()
 		if (!OtherVehicle || OtherVehicle == this) { continue; }
 
 		const float ProjDist = FVector::DotProduct(Hit.ImpactPoint - ProbeStart, MyDir);
-		if (ProjDist > 0.0f && ProjDist < ClosestDist)
+		if (ProjDist >= 0.0f && ProjDist < ClosestDist)
 		{
 			ClosestDist = ProjDist;
 			ClosestVehicle = OtherVehicle;
@@ -303,7 +336,7 @@ void AVehicleActor::PerformForwardProbe()
 		}
 
 		const float InterDist = FVector::DotProduct(Hit.ImpactPoint - ProbeStart, MyDir);
-		if (InterDist <= 0.0f || InterDist > ForwardProbeDistance)
+		if (InterDist < 0.0f || InterDist > ForwardProbeDistance)
 		{
 			continue;
 		}
