@@ -16,6 +16,7 @@ struct FVehicleSpawnEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleSpawned, class AVehicleActor*, Vehicle);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleArrivedAtDest, class AVehicleActor*, Vehicle);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleDied, class AVehicleActor*, Vehicle);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCongestionUpdated);
 
 UCLASS()
@@ -86,6 +87,9 @@ public:
 	FOnVehicleArrivedAtDest OnVehicleArrived;
 
 	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
+	FOnVehicleDied OnVehicleDied;
+
+	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
 	FOnCongestionUpdated OnCongestionUpdated;
 
 private:
@@ -96,6 +100,7 @@ private:
 	TArray<FGridVector> FindRoadPath(const FGridVector& Start, const FGridVector& End) const;
 	void UpdateCongestion();
 	void SanitizeAllIntersectionLocks();
+	void OnVehicleDeathHandler(AVehicleActor* Vehicle);
 
 	bool IsIntersection(const FGridVector& Pos) const;
 	bool IsBuildingBlocked(class ABuilding* Building) const;

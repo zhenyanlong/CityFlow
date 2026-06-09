@@ -343,6 +343,7 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 	Vehicle->SetSplinePath(SplinePoints, SplineTangentDirs, SplineArriveLengths, SplineLeaveLengths, TangentLen);
 
 	ActiveVehicles.Add(Vehicle);
+	Vehicle->OnVehicleDeath.AddDynamic(this, &UVehicleManager::OnVehicleDeathHandler);
 	OnVehicleSpawned.Broadcast(Vehicle);
 
 	UE_LOG(LogVehicleManager, Log, TEXT("Spawned vehicle %s [%s]: (%d,%d) → (%d,%d), %d spline points"),
@@ -644,6 +645,17 @@ void UVehicleManager::UpdateCongestion()
 
 	CongestedCells = CongestedSet;
 	OnCongestionUpdated.Broadcast();
+}
+
+void UVehicleManager::OnVehicleDeathHandler(AVehicleActor* Vehicle)
+{
+	if (!Vehicle)
+	{
+		return;
+	}
+
+	ActiveVehicles.Remove(Vehicle);
+	OnVehicleDied.Broadcast(Vehicle);
 }
 
 bool UVehicleManager::IsIntersection(const FGridVector& Pos) const

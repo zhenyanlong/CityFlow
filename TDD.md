@@ -603,6 +603,111 @@ struct FVehicleSpawnEntry
 
 Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `VehicleMesh`, `MoveSpeed`, `DebugColor`, etc. directly in its Blueprint defaults — no DataAsset-driven property override is needed.
 
+#### Vehicle Death & Stop Flash System (v0.12 — ✅ Implemented)
+
+**Overview:** When a vehicle enters `WaitingCongestion` (speed reaches 0 due to congestion), the base class `AVehicleActor` accumulates a `TotalStopTime` and exposes a modular, virtual-method-based stop/death pipeline. At the base level, the vehicle material pulses red at increasing frequency until `DeathTimeout` is reached, at which point an explosion sequence plays and the vehicle is destroyed.
+
+##### Architectural Design — Virtual Method Hooks
+
+The system is designed for subclass extensibility through four `protected virtual` methods:
+
+| Virtual Method | Base Behaviour | Subclass Override Purpose |
+|---|---|---|
+| `OnVehicleStopped(DeltaTime)` | Accumulates `TotalStopTime`; drives material red flash via dynamic MID | Additional stop effects (e.g. siren sound) |
+| `OnVehicleResumed()` | Resets material emissive to 0 | Stop additional effects |
+| `HandleVehicleDeath()` | Plays VFX/SFX/CameraShake → broadcasts `OnVehicleDeath` → `Destroy()` | Custom death behaviour (no explosion, different visuals) |
+| `ShouldResetStopTime()` | Returns `false` (cumulative → guaranteed death) | Return `true` to never timeout-die |
+
+##### Movement Loop Integration
+
+```
+TickMovementSpline:
+  if bFrontVehicleTooClose:
+    TotalStopTime += DeltaTime
+    OnVehicleStopped(DeltaTime)           ← virtual: material flash
+    if bEnableTimeoutDeath && TotalStopTime >= DeathTimeout:
+      HandleVehicleDeath()                ← virtual: explosion → destroy
+      return
+    decelerate → return
+  if cleared (was WaitingCongestion):
+    OnVehicleResumed()                    ← virtual: reset material
+    TotalStopTime = ShouldResetStopTime() ? 0 : TotalStopTime
+```
+
+`TotalStopTime` is **independent** of `CongestionWaitTime` (which still handles deadlock intersection lock release at `DeadlockTimeout`). Both accumulate in parallel during `WaitingCongestion`.
+
+##### Material Red Flash
+
+On first stop, a `UMaterialInstanceDynamic` is lazily created from `VehicleMesh`'s material (slot 0). Every subsequent frame in `WaitingCongestion`:
+
+- `Progress = TotalStopTime / DeathTimeout` (clamped 0→1)
+- `FlashFrequency = Lerp(0.5 Hz, 4.0 Hz, Progress)` — accelerates as death approaches
+- `Intensity = (sin(TotalStopTime × Freq × 2π) + 1) / 2` — smooth sine pulse 0→1
+- `MID->SetScalarParameterValue("FlashIntensity", Intensity)`
+
+The material must expose a `ScalarParameter` named `FlashIntensity` wired into emissive (multiplied by red, e.g. `(5,0,0)` for visible glow with bloom). On resume, `FlashIntensity` is set to 0.
+
+##### Death Sequence
+
+`HandleVehicleDeath()` base implementation:
+
+1. Release all intersection reservations (same cleanup as arrival/EndPlay)
+2. **VFX:** `UNiagaraFunctionLibrary::SpawnSystemAtLocation()` with `ENCPoolMethod::None` + `bAutoDestroy=true`. After spawning, `SetVariableFloat(ExplosionVFXScaleParamName, ExplosionVFXScale)` pushes the scale float directly to a Niagara User Parameter (e.g. `"Scale"`). The Niagara system's `LoopBehavior` must be set to `Once` for `bAutoDestroy` to trigger.
+3. **SFX:** `UGameplayStatics::PlaySoundAtLocation()`
+4. **Camera Shake:** Distance-proximity scaled — `Scale = Clamp(1.0 - CamDist/DeathShakeMaxDistance, 0, 1)`. Camera closer to explosion = stronger shake; top-down far away = no shake.
+5. **Delegate:** `OnVehicleDeath.Broadcast(this)` — listened by VehicleManager and ScoringManager
+6. `Destroy()`
+
+##### Blueprint-Configurable Properties (all on AVehicleActor)
+
+| Property | Type | Default | Category | Description |
+|---|---|---|---|---|
+| `DeathTimeout` | `float` | `5.0` | `Vehicle\|Death` | Seconds before timeout death triggers |
+| `bEnableTimeoutDeath` | `bool` | `true` | `Vehicle\|Death` | Master toggle; disable for immortal subclasses |
+| `ExplosionVFX` | `UNiagaraSystem*` | — | `Vehicle\|Death\|VFX` | Niagara system asset for explosion |
+| `ExplosionVFXScale` | `float` | `1.0` | `Vehicle\|Death\|VFX` | Float sent to Niagara User Parameter (controlled by `ExplosionVFXScaleParamName`) |
+| `ExplosionVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Death\|VFX` | Name of the Niagara User Parameter to receive scale value |
+| `ExplosionSFX` | `USoundBase*` | — | `Vehicle\|Death\|SFX` | Audio asset for explosion |
+| `DeathCameraShake` | `TSubclassOf<UCameraShakeBase>` | — | `Vehicle\|Death\|Camera` | Camera shake class |
+| `DeathShakeMaxDistance` | `float` | `3000.0` | `Vehicle\|Death\|Camera` | Max distance (cm) for shake falloff |
+| `FlashIntensity` param | ScalarParam in material | — | (Material) | Must be wired into emissive × red diffuse |
+
+##### Event Flow Across Managers
+
+```
+AVehicleActor::HandleVehicleDeath()
+  │
+  ├─► VFX / SFX / CameraShake (local)
+  ├─► OnVehicleDeath.Broadcast(this)
+  │     │
+  │     ├─► UVehicleManager::OnVehicleDeathHandler(Vehicle)
+  │     │     ├─ ActiveVehicles.Remove(Vehicle)
+  │     │     └─ OnVehicleDied.Broadcast(Vehicle)
+  │     │           │
+  │     │           └─► UScoringManager::OnVehicleDeathHandler(Vehicle)
+  │     │                 ├─ DeathCount++
+  │     │                 ├─ DeathPenaltyTotal += Settings->DeathPenalty (default 50)
+  │     │                 ├─ TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
+  │     │                 └─ OnScoreChanged.Broadcast(TotalScore)
+  │     │
+  │     └─ (Blueprint listeners via OnVehicleDeath delegate)
+  │
+  └─► Destroy()
+```
+
+##### Scoring Formula Update (v0.12)
+
+```
+TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
+```
+
+`DeveloperSettings::DeathPenalty` (new, default `50`) controls per-death point deduction. Lifecycle: death penalties are deducted in real-time during simulation; `FullConnectivityBonus` is added at evaluation as before.
+
+##### Dead Vehicle Cleanup
+
+- `VehicleManager::Tick()` only removes `Arrived` and `Idle` state vehicles from `ActiveVehicles`. Since `HandleVehicleDeath()` calls `Destroy()` immediately after broadcasting `OnVehicleDeath`, and the death handler removes the vehicle from `ActiveVehicles` before destruction, no dangling pointer scenario exists.
+- `EndPlay()` (called during `Destroy()`) releases all remaining intersection reservations as before.
+
 ---
 
 ### 2.7 Origin / Destination Generation & Scoring

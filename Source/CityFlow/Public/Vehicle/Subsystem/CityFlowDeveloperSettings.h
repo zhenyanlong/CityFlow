@@ -48,6 +48,9 @@ public:
 	int32 CongestionPenaltyPerSecond = 5;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Scoring", meta = (ClampMin = "0"))
+	int32 DeathPenalty = 50;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring", meta = (ClampMin = "0"))
 	int32 FullConnectivityBonus = 500;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Scoring", meta = (ClampMin = "2"))

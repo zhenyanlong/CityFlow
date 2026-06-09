@@ -45,6 +45,12 @@ public:
 	int32 GetCongestionPenalty() const { return CongestionPenaltyTotal; }
 
 	UFUNCTION(BlueprintPure, Category = "Scoring")
+	int32 GetDeathPenalty() const { return DeathPenaltyTotal; }
+
+	UFUNCTION(BlueprintPure, Category = "Scoring")
+	int32 GetDeathCount() const { return DeathCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Scoring")
 	float GetElapsedSimulationTime() const { return ElapsedSimulationTime; }
 
 	UPROPERTY(BlueprintAssignable, Category = "Scoring|Events")
@@ -60,6 +66,9 @@ private:
 	UFUNCTION()
 	void OnCongestionUpdatedHandler();
 
+	UFUNCTION()
+	void OnVehicleDeathHandler(class AVehicleActor* Vehicle);
+
 	void UpdateCongestionPenalty();
 
 	void ComputeFinalScore(bool bAllConnected);
@@ -70,6 +79,8 @@ private:
 	int32 TotalScore = 0;
 	int32 ArrivalScoreTotal = 0;
 	int32 CongestionPenaltyTotal = 0;
+	int32 DeathPenaltyTotal = 0;
+	int32 DeathCount = 0;
 	int32 TotalArrivalCount = 0;
 	float ElapsedSimulationTime = 0.0f;
 	int32 FinalCongestionCellCount = 0;

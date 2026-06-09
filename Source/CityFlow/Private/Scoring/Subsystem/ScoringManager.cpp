@@ -27,6 +27,8 @@ void UScoringManager::StartScoring()
 	TotalScore = 0;
 	ArrivalScoreTotal = 0;
 	CongestionPenaltyTotal = 0;
+	DeathPenaltyTotal = 0;
+	DeathCount = 0;
 	TotalArrivalCount = 0;
 	ElapsedSimulationTime = 0.0f;
 	CurrentCongestedCells.Empty();
@@ -37,6 +39,7 @@ void UScoringManager::StartScoring()
 	{
 		VM->OnVehicleArrived.AddDynamic(this, &UScoringManager::OnVehicleArrivedHandler);
 		VM->OnCongestionUpdated.AddDynamic(this, &UScoringManager::OnCongestionUpdatedHandler);
+		VM->OnVehicleDied.AddDynamic(this, &UScoringManager::OnVehicleDeathHandler);
 	}
 
 	UWorld* World = GetWorld();
@@ -68,6 +71,7 @@ void UScoringManager::StopScoring()
 	{
 		VM->OnVehicleArrived.RemoveDynamic(this, &UScoringManager::OnVehicleArrivedHandler);
 		VM->OnCongestionUpdated.RemoveDynamic(this, &UScoringManager::OnCongestionUpdatedHandler);
+		VM->OnVehicleDied.RemoveDynamic(this, &UScoringManager::OnVehicleDeathHandler);
 	}
 
 	bIsScoring = false;
@@ -76,8 +80,8 @@ void UScoringManager::StopScoring()
 
 FString UScoringManager::GetPhaseSummary() const
 {
-	return FString::Printf(TEXT("Score: %d | Arrivals: %d (+%d) | Penalty: -%d"),
-		TotalScore, TotalArrivalCount, ArrivalScoreTotal, CongestionPenaltyTotal);
+	return FString::Printf(TEXT("Score: %d | Arrivals: %d (+%d) | Congestion: -%d | Deaths: %d (-%d)"),
+		TotalScore, TotalArrivalCount, ArrivalScoreTotal, CongestionPenaltyTotal, DeathCount, DeathPenaltyTotal);
 }
 
 void UScoringManager::RecordVehicleArrival(AVehicleActor* Vehicle)
@@ -92,7 +96,7 @@ void UScoringManager::RecordVehicleArrival(AVehicleActor* Vehicle)
 
 	++TotalArrivalCount;
 	ArrivalScoreTotal += ArrivalPoints;
-	TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal;
+	TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal;
 
 	OnScoreChanged.Broadcast(TotalScore);
 }
@@ -105,6 +109,23 @@ void UScoringManager::RecordCongestion(const TSet<FGridVector>& CongestedCells)
 void UScoringManager::OnVehicleArrivedHandler(AVehicleActor* Vehicle)
 {
 	RecordVehicleArrival(Vehicle);
+}
+
+void UScoringManager::OnVehicleDeathHandler(AVehicleActor* Vehicle)
+{
+	if (!Vehicle || !bIsScoring)
+	{
+		return;
+	}
+
+	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
+	const int32 Penalty = Settings ? Settings->DeathPenalty : 50;
+
+	++DeathCount;
+	DeathPenaltyTotal += Penalty;
+	TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal;
+
+	OnScoreChanged.Broadcast(TotalScore);
 }
 
 void UScoringManager::OnCongestionUpdatedHandler()
@@ -139,7 +160,7 @@ void UScoringManager::UpdateCongestionPenalty()
 		FinalCongestionCellCount = FMath::Max(FinalCongestionCellCount, CongestedCount);
 	}
 
-	TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal;
+	TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal;
 	OnScoreChanged.Broadcast(TotalScore);
 }
 

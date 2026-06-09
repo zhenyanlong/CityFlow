@@ -7,6 +7,12 @@
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
 #include "DrawDebugHelpers.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Camera/CameraShakeBase.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVehicleActor, Log, All);
 
@@ -135,6 +141,8 @@ void AVehicleActor::SetSplinePath(const TArray<FVector>& WorldPoints, const TArr
 	CurrentSplineDistance = 0.0f;
 	CurrentSpeed = 0.0f;
 	CongestionWaitTime = 0.0f;
+	TotalStopTime = 0.0f;
+	FlashMaterialInstance = nullptr;
 	MovementState = EVehicleMovementState::Moving;
 
 	SetActorLocation(WorldPoints[0] + FVector(0, 0, VehicleZOffset));
@@ -219,6 +227,16 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 			}
 		}
 
+		// === Death / Stop System ===
+		TotalStopTime += DeltaTime;
+		OnVehicleStopped(DeltaTime);
+
+		if (bEnableTimeoutDeath && TotalStopTime >= DeathTimeout)
+		{
+			HandleVehicleDeath();
+			return;
+		}
+
 		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, 0.0f, DeltaTime, StartDeceleration);
 		if (CurrentSpeed < 1.0f) { CurrentSpeed = 0.0f; }
 		if (!VelocityDirection.IsNearlyZero())
@@ -232,6 +250,11 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 	{
 		MovementState = EVehicleMovementState::Moving;
 		CongestionWaitTime = 0.0f;
+		OnVehicleResumed();
+		if (ShouldResetStopTime())
+		{
+			TotalStopTime = 0.0f;
+		}
 	}
 
 	{
@@ -453,4 +476,106 @@ void AVehicleActor::SetDebugColor(FLinearColor Color)
 			DynMat->SetVectorParameterValue(TEXT("BaseColor"), Color);
 		}
 	}
+}
+
+// ===== Death / Stop System =====
+
+static const FName FlashIntensityParamName(TEXT("FlashIntensity"));
+
+void AVehicleActor::OnVehicleStopped(float DeltaTime)
+{
+	if (!VehicleMesh)
+	{
+		return;
+	}
+
+	// Create dynamic material instance lazily on first stop
+	if (!FlashMaterialInstance)
+	{
+		UMaterialInterface* BaseMat = VehicleMesh->GetMaterial(0);
+		if (BaseMat)
+		{
+			FlashMaterialInstance = VehicleMesh->CreateAndSetMaterialInstanceDynamic(0);
+		}
+	}
+
+	if (FlashMaterialInstance)
+	{
+		// Flash frequency increases with stop duration: 0.5 Hz → 4.0 Hz
+		const float Progress = FMath::Clamp(TotalStopTime / FMath::Max(DeathTimeout, 1.0f), 0.0f, 1.0f);
+		const float Freq = FMath::Lerp(0.5f, 4.0f, Progress);
+
+		// Pulsing red emissive: sin wave 0→1
+		const float Intensity = (FMath::Sin(TotalStopTime * Freq * 2.0f * PI) + 1.0f) * 0.5f;
+		FlashMaterialInstance->SetScalarParameterValue(FlashIntensityParamName, Intensity);
+	}
+}
+
+void AVehicleActor::OnVehicleResumed()
+{
+	if (FlashMaterialInstance)
+	{
+		FlashMaterialInstance->SetScalarParameterValue(FlashIntensityParamName, 0.0f);
+	}
+}
+
+void AVehicleActor::HandleVehicleDeath()
+{
+	const FVector DeathLocation = GetActorLocation();
+
+	// 1. Release all intersection reservations
+	for (const TWeakObjectPtr<ARoadTile>& WeakTile : ReservedIntersections)
+	{
+		if (ARoadTile* Tile = WeakTile.Get())
+		{
+			Tile->ReleaseVehicleFromAllTables(this);
+		}
+	}
+	ReservedIntersections.Empty();
+	PassedIntersections.Empty();
+
+	// 2. Spawn explosion VFX (one-shot, auto-destroy on finish)
+	if (ExplosionVFX)
+	{
+		UNiagaraComponent* VFXComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			GetWorld(), ExplosionVFX, DeathLocation, FRotator::ZeroRotator,
+			FVector::OneVector, true, true, ENCPoolMethod::None);
+		if (VFXComp)
+		{
+			if (!ExplosionVFXScaleParamName.IsNone())
+			{
+				VFXComp->SetVariableFloat(ExplosionVFXScaleParamName, ExplosionVFXScale);
+			}
+		}
+	}
+
+	// 3. Play explosion SFX
+	if (ExplosionSFX)
+	{
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), ExplosionSFX, DeathLocation);
+	}
+
+	// 4. Proximity-scaled camera shake
+	if (DeathCameraShake)
+	{
+		if (APlayerCameraManager* CamMgr = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0))
+		{
+			const FVector CamLoc = CamMgr->GetCameraLocation();
+			const float Dist = FVector::Dist(CamLoc, DeathLocation);
+			const float Scale = (DeathShakeMaxDistance > 0.0f)
+				? FMath::Clamp(1.0f - Dist / DeathShakeMaxDistance, 0.0f, 1.0f)
+				: 1.0f;
+
+			if (Scale > 0.0f)
+			{
+				CamMgr->StartCameraShake(DeathCameraShake, Scale);
+			}
+		}
+	}
+
+	// 5. Broadcast death event
+	OnVehicleDeath.Broadcast(this);
+
+	// 6. Destroy this actor
+	Destroy();
 }

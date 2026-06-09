@@ -1,3 +1,21 @@
+## 2026-06-09
+
+### 车辆死亡与停车闪烁系统（v0.12）
+
+- 在 AVehicleActor 上实现了基于 virtual 方法的停车/死亡管线：OnVehicleStopped()、OnVehicleResumed()、HandleVehicleDeath()、ShouldResetStopTime()
+- 新增 TotalStopTime 累加，与 CongestionWaitTime（死锁释放）互相独立
+- 通过 UMaterialInstanceDynamic 实现材质红光闪烁，ScalarParameter "FlashIntensity" 驱动正弦波发射（频率 0.5→4 Hz 递增）
+- 实现爆炸死亡序列：Niagara VFX 生成 + SetVariableFloat 控制缩放、SoundBase SFX、距离衰减 CameraShake
+- 新增蓝图可配置死亡属性：DeathTimeout（5s）、bEnableTimeoutDeath、ExplosionVFX、ExplosionVFXScale、ExplosionVFXScaleParamName、ExplosionSFX、DeathCameraShake、DeathShakeMaxDistance
+- 新增 AVehicleActor::FOnVehicleDeath 委托和 UVehicleManager::FOnVehicleDied 委托
+- 在 VehicleManager 中集成 OnVehicleDeathHandler，销毁前从 ActiveVehicles 移除死亡车辆
+- 在 UScoringManager 中新增死亡罚分：DeathPenaltyTotal 追踪，TotalScore = 到达分 - 拥堵罚分 - 死亡罚分
+- 在 UCityFlowDeveloperSettings 中新增 DeathPenalty 配置（默认 50）
+- Build.cs 新增 Niagara 模块依赖
+- 修复 VFX 自动清除：Niagara 系统 LoopBehavior 需设为 Once；使用 ENCPoolMethod::None + bAutoDestroy=true
+- 修复 VFX 缩放：使用 SetVariableFloat() 将缩放值直接推入 Niagara User Parameter，替代 SetWorldScale3D
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节，记录车辆死亡与停车闪烁系统（v0.12）
+
 ## 2026-06-08
 
 ### 建筑与车辆生成 DataAsset 重构（v0.10）

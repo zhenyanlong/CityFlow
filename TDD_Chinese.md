@@ -585,6 +585,113 @@ TickMovementSpline:
 - `PerformForwardProbe()` 之前用 `ProjDist > 0.0f`（车辆扫描）和 `InterDist <= 0.0f`（路口扫描）过滤命中，当探测体积起始就与碰撞体重叠时，命中被错误跳过。
 - 分别修正为 `ProjDist >= 0.0f` 和 `InterDist < 0.0f`，使占用位置就在路口内的车辆（如从建筑门口即为路口处生成）能正确获取路口锁。
 
+#### 车辆死亡与停车闪烁系统（v0.12 — ✅ 已实现）
+
+**概述：** 当车辆进入 `WaitingCongestion` 状态（因拥堵而车速归零），基类 `AVehicleActor` 会累加 `TotalStopTime` 并暴露一套模块化、基于 virtual 方法的停车/死亡管线。基类行为是车辆材质以递增频率闪烁红光，直到超过 `DeathTimeout` 后触发爆炸序列，车辆销毁。
+
+##### 架构设计 — Virtual 方法钩子
+
+系统通过 4 个 `protected virtual` 方法实现子类可扩展性：
+
+| Virtual 方法 | 基类行为 | 子类覆写用途 |
+|---|---|---|
+| `OnVehicleStopped(DeltaTime)` | 累加 `TotalStopTime`；驱动材质红光闪烁 | 附加停车效果（如警报声） |
+| `OnVehicleResumed()` | 重置材质 emissive 为 0 | 停止附加效果 |
+| `HandleVehicleDeath()` | 播放 VFX/SFX/CameraShake → 广播 `OnVehicleDeath` → `Destroy()` | 自定义死亡行为（无爆炸、不同视觉） |
+| `ShouldResetStopTime()` | 返回 `false`（持续累计 → 一定死亡） | 返回 `true` 则永不超时死亡 |
+
+##### 运动循环集成
+
+```
+TickMovementSpline:
+  if bFrontVehicleTooClose:
+    TotalStopTime += DeltaTime
+    OnVehicleStopped(DeltaTime)           ← virtual: 材质闪烁
+    if bEnableTimeoutDeath && TotalStopTime >= DeathTimeout:
+      HandleVehicleDeath()                ← virtual: 爆炸 → 销毁
+      return
+    减速 → return
+  if 恢复通行 (之前是 WaitingCongestion):
+    OnVehicleResumed()                    ← virtual: 重置材质
+    TotalStopTime = ShouldResetStopTime() ? 0 : TotalStopTime
+```
+
+`TotalStopTime` 与 `CongestionWaitTime`（仍用于死锁超时释放路口锁）**互相独立**，二者在 `WaitingCongestion` 期间并行累加。
+
+##### 材质红光闪烁
+
+首次停车时从 `VehicleMesh` 的材质（slot 0）惰性创建 `UMaterialInstanceDynamic`。之后每帧在 `WaitingCongestion` 中：
+
+- `Progress = TotalStopTime / DeathTimeout`（钳位 0→1）
+- `频率 = Lerp(0.5 Hz, 4.0 Hz, Progress)` — 越接近死亡越快
+- `强度 = (sin(TotalStopTime × 频率 × 2π) + 1) / 2` — 平滑正弦脉冲 0→1
+- `MID->SetScalarParameterValue("FlashIntensity", 强度)`
+
+材质需暴露 `ScalarParameter` 名为 `FlashIntensity`，连接到 emissive 通道（乘以红色，如 `(5,0,0)` 配合 Bloom 实现可见辉光）。恢复行驶时 `FlashIntensity` 置为 0。
+
+##### 死亡序列
+
+`HandleVehicleDeath()` 基类实现：
+
+1. 释放所有路口占用（与到达/EndPlay 相同的清理逻辑）
+2. **VFX：** `UNiagaraFunctionLibrary::SpawnSystemAtLocation()` 使用 `ENCPoolMethod::None` + `bAutoDestroy=true`。生成后通过 `SetVariableFloat(ExplosionVFXScaleParamName, ExplosionVFXScale)` 将缩放浮点值直接推入 Niagara User Parameter（如 `"Scale"`）。Niagara 系统的 `LoopBehavior` 必须设置为 `Once`，`bAutoDestroy` 才会触发。
+3. **SFX：** `UGameplayStatics::PlaySoundAtLocation()`
+4. **Camera Shake：** 距离衰减 — `强度 = Clamp(1.0 - 相机距离/DeathShakeMaxDistance, 0, 1)`。相机离爆炸越近震感越强；俯视远距离不震。
+5. **委托：** `OnVehicleDeath.Broadcast(this)` — VehicleManager 和 ScoringManager 均监听
+6. `Destroy()`
+
+##### 蓝图可配置属性（均在 AVehicleActor 上）
+
+| 属性 | 类型 | 默认值 | 分类 | 描述 |
+|---|---|---|---|---|
+| `DeathTimeout` | `float` | `5.0` | `Vehicle\|Death` | 超时死亡触发秒数 |
+| `bEnableTimeoutDeath` | `bool` | `true` | `Vehicle\|Death` | 总开关；不死子类设为 false |
+| `ExplosionVFX` | `UNiagaraSystem*` | — | `Vehicle\|Death\|VFX` | 爆炸 Niagara 系统资产 |
+| `ExplosionVFXScale` | `float` | `1.0` | `Vehicle\|Death\|VFX` | 发送至 Niagara User Parameter 的浮点值（由 `ExplosionVFXScaleParamName` 指定参数名） |
+| `ExplosionVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Death\|VFX` | Niagara 中接收缩放值的 User Parameter 名称 |
+| `ExplosionSFX` | `USoundBase*` | — | `Vehicle\|Death\|SFX` | 爆炸音效资产 |
+| `DeathCameraShake` | `TSubclassOf<UCameraShakeBase>` | — | `Vehicle\|Death\|Camera` | 震屏类 |
+| `DeathShakeMaxDistance` | `float` | `3000.0` | `Vehicle\|Death\|Camera` | 震屏衰减最大距离（cm） |
+| `FlashIntensity` 参数 | 材质 ScalarParam | — | （材质） | 需接入 emissive × 红色漫反射 |
+
+##### 跨管理器事件流
+
+```
+AVehicleActor::HandleVehicleDeath()
+  │
+  ├─► VFX / SFX / CameraShake（本地）
+  ├─► OnVehicleDeath.Broadcast(this)
+  │     │
+  │     ├─► UVehicleManager::OnVehicleDeathHandler(Vehicle)
+  │     │     ├─ ActiveVehicles.Remove(Vehicle)
+  │     │     └─ OnVehicleDied.Broadcast(Vehicle)
+  │     │           │
+  │     │           └─► UScoringManager::OnVehicleDeathHandler(Vehicle)
+  │     │                 ├─ DeathCount++
+  │     │                 ├─ DeathPenaltyTotal += Settings->DeathPenalty（默认 50）
+  │     │                 ├─ TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
+  │     │                 └─ OnScoreChanged.Broadcast(TotalScore)
+  │     │
+  │     └─（蓝图通过 OnVehicleDeath 委托监听）
+  │
+  └─► Destroy()
+```
+
+##### 计分公式更新（v0.12）
+
+```
+TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
+```
+
+`DeveloperSettings::DeathPenalty`（新增，默认 `50`）控制每死亡扣分。生命周期：死亡罚分在模拟期间实时扣除；`FullConnectivityBonus` 仍在结算时添加。
+
+##### 死亡车辆清理
+
+- `VehicleManager::Tick()` 只从 `ActiveVehicles` 中移除 `Arrived` 和 `Idle` 状态的车辆。`HandleVehicleDeath()` 在广播 `OnVehicleDeath` 后立即调用 `Destroy()`，且死亡处理器在销毁前从 `ActiveVehicles` 中移除车辆，因此不存在悬空指针。
+- `EndPlay()`（在 `Destroy()` 期间调用）释放所有剩余路口占用，与之前一致。
+
+---
+
 ### 2.7 起点 / 目的地生成与计分
 
 #### 实现状态：✅ 已实现 — v0.10 DataAsset 驱动生成 + doorway 验证

@@ -1,3 +1,21 @@
+## 2026-06-09
+
+### Vehicle Death & Stop Flash System (v0.12)
+
+- Implemented virtual-method-based stop/death pipeline on AVehicleActor: OnVehicleStopped(), OnVehicleResumed(), HandleVehicleDeath(), ShouldResetStopTime()
+- Added TotalStopTime accumulation independent of CongestionWaitTime (deadlock release)
+- Implemented material red flash via UMaterialInstanceDynamic with accelerating sine-driven emissive (0.5→4 Hz) controlled by ScalarParameter "FlashIntensity"
+- Added explosion death sequence: Niagara VFX spawn with SetVariableFloat for scale, SoundBase SFX, proximity-scaled CameraShake
+- Added blueprint-configurable death properties: DeathTimeout (5s), bEnableTimeoutDeath, ExplosionVFX, ExplosionVFXScale, ExplosionVFXScaleParamName, ExplosionSFX, DeathCameraShake, DeathShakeMaxDistance
+- Added FOnVehicleDeath delegate on AVehicleActor and FOnVehicleDied delegate on UVehicleManager
+- Integrated OnVehicleDeathHandler in VehicleManager to remove dead vehicles from ActiveVehicles before Destroy()
+- Added death penalty scoring in UScoringManager: DeathPenaltyTotal tracking, TotalScore = ArrivalScore - CongestionPenalty - DeathPenalty
+- Added DeathPenalty (default 50) to UCityFlowDeveloperSettings
+- Added Niagara module dependency to Build.cs
+- Fixed VFX auto-cleanup: Niagara system LoopBehavior must be set to Once; ENCPoolMethod::None + bAutoDestroy=true
+- Fixed VFX scale: use SetVariableFloat() to push scale value directly to Niagara User Parameter instead of SetWorldScale3D
+- Updated TDD.md and TDD_Chinese.md section 2.6 with Vehicle Death & Stop Flash System (v0.12)
+
 ## 2026-06-08
 
 ### Building & Vehicle Spawn DataAsset Refactor (v0.10)

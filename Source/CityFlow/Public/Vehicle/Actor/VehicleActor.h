@@ -9,8 +9,13 @@
 
 class UStaticMeshComponent;
 class ARoadTile;
+class UNiagaraSystem;
+class USoundBase;
+class UCameraShakeBase;
+class UMaterialInstanceDynamic;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleArrived, class AVehicleActor*, Vehicle);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleDeath, class AVehicleActor*, Vehicle);
 
 UCLASS(Blueprintable, BlueprintType)
 class CITYFLOW_API AVehicleActor : public AActor
@@ -59,6 +64,45 @@ public:
 
 	/** Returns true if this vehicle has already passed through (exited) the given intersection. */
 	bool HasPassedIntersection(class ARoadTile* Tile) const;
+
+	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
+	FOnVehicleDeath OnVehicleDeath;
+
+	/** Total stopped time (only accumulates when speed=0 and bFrontVehicleTooClose). Used for death timeout. */
+	UFUNCTION(BlueprintPure, Category = "Vehicle|Death")
+	float GetTotalStopTime() const { return TotalStopTime; }
+
+	/** Time before timeout death is triggered (seconds). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death")
+	float DeathTimeout = 5.0f;
+
+	/** Enable timeout-triggered explosion death. Disable for subclasses that never die from waiting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death")
+	bool bEnableTimeoutDeath = true;
+
+	/** Stylized explosion VFX (Niagara). Configurable per-vehicle Blueprint. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death|VFX")
+	TObjectPtr<UNiagaraSystem> ExplosionVFX;
+
+	/** Float value pushed to the Niagara User Parameter specified by ExplosionVFXScaleParamName. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death|VFX")
+	float ExplosionVFXScale = 1.0f;
+
+	/** Niagara User Parameter name to receive ExplosionVFXScale (e.g. "Scale"). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death|VFX")
+	FName ExplosionVFXScaleParamName = TEXT("Scale");
+
+	/** Explosion sound effect. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death|SFX")
+	TObjectPtr<USoundBase> ExplosionSFX;
+
+	/** Camera shake class triggered on death. Proximity-scaled by distance from camera. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death|Camera")
+	TSubclassOf<UCameraShakeBase> DeathCameraShake;
+
+	/** Max distance (cm) at which camera shake is still felt. Beyond this, shake=0. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death|Camera")
+	float DeathShakeMaxDistance = 3000.0f;
 
 	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
 	FOnVehicleArrived OnVehicleArrived;
@@ -130,9 +174,40 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	// ===== Death / Stop System (virtual — subclasses may override) =====
+
+	/** Called every frame while vehicle speed reaches 0 (stuck in congestion).
+	 *  Base: accumulates TotalStopTime, drives material flash effect.
+	 */
+	virtual void OnVehicleStopped(float DeltaTime);
+
+	/** Called when vehicle resumes movement after being stopped.
+	 *  Base: resets emissive flash on material.
+	 */
+	virtual void OnVehicleResumed();
+
+	/** Triggers vehicle death. Base: plays VFX/SFX/CameraShake, broadcasts OnVehicleDeath, destroys actor.
+	 *  Subclasses may override for custom death behavior.
+	 */
+	virtual void HandleVehicleDeath();
+
+	/** Whether to reset TotalStopTime when vehicle resumes from stop.
+	 *  Base: false (stop time accumulates continuously, leading to death).
+	 *  Subclasses that don't die from waiting should return true.
+	 */
+	virtual bool ShouldResetStopTime() const { return false; }
+
+	/** Accumulated stopped time. Independent of CongestionWaitTime (deadlock release). */
+	float TotalStopTime = 0.0f;
+
+	/** Dynamic material instance for emissive pulsing during stop. Created lazily. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> FlashMaterialInstance;
+
+	void HandleArrival();
+
 private:
 	void TickMovementSpline(float DeltaTime);
-	void HandleArrival();
 
 	EVehicleMovementState MovementState = EVehicleMovementState::Idle;
 	FVector VelocityDirection = FVector::ZeroVector;
