@@ -187,8 +187,10 @@ void UVehicleManager::StartSpawning()
 	TArray<ABuilding*> Origins, Destinations;
 	CollectOriginDestinations(Origins, Destinations);
 
-	if (Origins.Num() == 0 || Destinations.Num() == 0)
+	// 所有 building 均可作为起点和终点，但需要至少 2 个建筑才能选到不同的起点/终点
+	if (Origins.Num() < 2)
 	{
+		UE_LOG(LogVehicleManager, Warning, TEXT("StartSpawning: need at least 2 buildings, found %d"), Origins.Num());
 		return;
 	}
 
@@ -746,14 +748,8 @@ void UVehicleManager::CollectOriginDestinations(TArray<ABuilding*>& OutOrigins, 
 			continue;
 		}
 
-		if (Building->bIsDestination)
-		{
-			OutDestinations.Add(Building);
-		}
-		else
-		{
-			OutOrigins.Add(Building);
-		}
+		OutOrigins.Add(Building);
+		OutDestinations.Add(Building);
 	}
 }
 

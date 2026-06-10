@@ -16,6 +16,23 @@
 - 修复 VFX 缩放：使用 SetVariableFloat() 将缩放值直接推入 Niagara User Parameter，替代 SetWorldScale3D
 - 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节，记录车辆死亡与停车闪烁系统（v0.12）
 
+### 建筑起点/终点解耦（v0.13）
+
+- 移除 CollectOriginDestinations() 中基于 bIsDestination 的起点/终点分流 —— 所有建筑现在同时担任起点和终点
+- 更新 StartSpawning() 守卫条件为要求 2+ 个建筑，替代非空起点+终点数组检查
+- 更新 CF_SpawnVehicle 作弊命令，从任意两个不同建筑选择，不再检查 bIsDestination
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.7 节，记录 v0.13 变更
+
+### 路口占用指示器（v0.13）
+
+- 在 ARoadTile 上添加 IndicatorPlane（UStaticMeshComponent），使用引擎内置 Plane mesh
+- 实现 UpdateIndicator()，管理位置/大小/可见性，带缩放补偿
+- 实现 UpdateIndicatorState()，通过 IsAnyDirectionOccupied() 和 DMI 实现绿/红颜色切换
+- 将指示器刷新挂接到 5 个事件点：UpdateIntersectionBox、BeginOverlap、EndOverlap、SanitizeOccupants、ExpirePendingReservations
+- 新增 6 个蓝图可配置属性：IndicatorMaterial、IndicatorSize（0.4）、IndicatorZOffset（80）、IndicatorFreeColor（绿）、IndicatorOccupiedColor（红）
+- 修复 Plane 缩放：除以 100 以补偿引擎 Plane 默认 100×100 的世界尺寸
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节，记录路口占用指示器（v0.13）
+
 ## 2026-06-08
 
 ### 建筑与车辆生成 DataAsset 重构（v0.10）

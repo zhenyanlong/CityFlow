@@ -585,6 +585,44 @@ TickMovementSpline:
 - `PerformForwardProbe()` 之前用 `ProjDist > 0.0f`（车辆扫描）和 `InterDist <= 0.0f`（路口扫描）过滤命中，当探测体积起始就与碰撞体重叠时，命中被错误跳过。
 - 分别修正为 `ProjDist >= 0.0f` 和 `InterDist < 0.0f`，使占用位置就在路口内的车辆（如从建筑门口即为路口处生成）能正确获取路口锁。
 
+#### 路口占用指示器（v0.13 — ✅ 已实现）
+
+每个启用了 `IntersectionBox` 的 `ARoadTile`（十字 / T 型路口）在路口上方悬浮一个平面指示器，一目了然地展示占用状态。
+
+**架构：**
+- `UStaticMeshComponent IndicatorPlane` — 挂载到 `RootSceneComponent` 的 Plane mesh，碰撞禁用。
+- 使用引擎内置 Plane（`/Engine/BasicShapes/Plane`），缩放到 `CellSize × IndicatorSize / 100.0f`（Plane 默认为 100×100 单位）。
+- `UMaterialInstanceDynamic` 在首次 `UpdateIndicator()` 时从 `IndicatorMaterial` 惰性创建。
+- 材质需暴露名为 `"Color"` 的 `VectorParameter` 并接入 emissive；半透明/无光照混合模式。
+
+**状态刷新触发点：**
+| 触发条件 | 位置 |
+|---|---|
+| IntersectionBox 启用/禁用 | `UpdateIntersectionBox()` → `UpdateIndicator()` |
+| 车辆进入 Box | `OnIntersectionBoxBeginOverlap()` → `UpdateIndicatorState()` |
+| 车辆离开 Box | `OnIntersectionBoxEndOverlap()` → `UpdateIndicatorState()` |
+| 定期物理校验 | `SanitizeOccupants()` → `UpdateIndicatorState()` |
+| 预占用过期 | `ExpirePendingReservations()` → `UpdateIndicatorState()` |
+
+**颜色逻辑：**
+- `IsAnyDirectionOccupied()` 返回 `false` → `IndicatorFreeColor`（默认绿色）
+- `IsAnyDirectionOccupied()` 返回 `true` → `IndicatorOccupiedColor`（默认红色）
+
+**蓝图可配置属性（均在 ARoadTile 上）：**
+
+| 属性 | 默认值 | 描述 |
+|---|---|---|
+| `IndicatorMaterial` | — | DMI 基础材质（必须有 "Color" VectorParameter） |
+| `IndicatorSize` | `0.4` | 平面相对单元格大小的比例（0.0–1.0） |
+| `IndicatorZOffset` | `80.0` | IntersectionBox 顶部上方的 Z 偏移 |
+| `IndicatorFreeColor` | `(0,1,0)` | 绿色 — 路口空闲 |
+| `IndicatorOccupiedColor` | `(1,0,0)` | 红色 — 路口被占用 |
+
+**材质设置（需在编辑器中创建）：**
+- Domain: Surface, Blend Mode: Translucent, Shading Model: Unlit, Two Sided: true
+- 节点图：`TexCoord → ComponentMask(RG) → Add(-0.5,-0.5) → Length → OneMinus → SmoothStep(Min,Max) → Multiply(VectorParameter"Color") → Emissive Color`
+- SmoothStep Min/Max 根据期望圆半径调整（推荐 `0.48`/`0.52` 可获得完整内切圆）
+
 #### 车辆死亡与停车闪烁系统（v0.12 — ✅ 已实现）
 
 **概述：** 当车辆进入 `WaitingCongestion` 状态（因拥堵而车速归零），基类 `AVehicleActor` 会累加 `TotalStopTime` 并暴露一套模块化、基于 virtual 方法的停车/死亡管线。基类行为是车辆材质以递增频率闪烁红光，直到超过 `DeathTimeout` 后触发爆炸序列，车辆销毁。
@@ -706,7 +744,9 @@ TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
 
 `CityFlowGameMode::InitializeDefaultScene()` 现在支持两种路径：
 
-**主路径：`UBuildingDataAsset`**（v0.10 新增）——一个 `UPrimaryDataAsset`，包含单个 `BuildingEntries` 数组，每项为 `FBuildingDataEntry`（`TSubclassOf<ABuilding>` + `float SpawnWeight`）。起点/终点的角色由建筑 BP 自身的 `bIsDestination` 标记决定——无需分离的起点/终点数组。
+**主路径：`UBuildingDataAsset`**（v0.10 新增）——一个 `UPrimaryDataAsset`，包含单个 `BuildingEntries` 数组，每项为 `FBuildingDataEntry`（`TSubclassOf<ABuilding>` + `float SpawnWeight`）。
+
+**v0.13 更新：** 所有建筑现在同时作为起点和终点。`CollectOriginDestinations()` 将每个建筑同时加入起点和终点数组。`ABuilding` 上的 `bIsDestination` 标记不再用于生成逻辑。生成守卫条件要求至少 2 个建筑（`StartSpawning()` 中检查），以保证不同的起点/终点。已有的生成循环去重（`Dest == Origin` 跳过）确保同一个建筑不会被同时选为起点和终点。
 
 生成数量使用**最大余数法**确定性分配：每个条目获得 `floor(weight / totalWeight × DefaultBuildingCount)`，剩余名额按小数部分从大到小分配。
 

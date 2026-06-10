@@ -16,6 +16,23 @@
 - Fixed VFX scale: use SetVariableFloat() to push scale value directly to Niagara User Parameter instead of SetWorldScale3D
 - Updated TDD.md and TDD_Chinese.md section 2.6 with Vehicle Death & Stop Flash System (v0.12)
 
+### Building Origin/Destination Decoupling (v0.13)
+
+- Removed bIsDestination-based origin/destination split in CollectOriginDestinations() — all buildings now serve as both
+- Updated StartSpawning() guard to require 2+ buildings instead of non-empty origin+destination arrays
+- Updated CF_SpawnVehicle cheat command to pick any two different buildings without bIsDestination check
+- Updated TDD.md and TDD_Chinese.md section 2.7 with v0.13 change
+
+### Intersection Occupancy Indicator (v0.13)
+
+- Added IndicatorPlane (UStaticMeshComponent) to ARoadTile using engine built-in Plane mesh
+- Implemented UpdateIndicator() for position/size/visibility management with scale compensation
+- Implemented UpdateIndicatorState() using IsAnyDirectionOccupied() for green/red colour switching via DMI
+- Hooked indicator refresh into 5 event points: UpdateIntersectionBox, BeginOverlap, EndOverlap, SanitizeOccupants, ExpirePendingReservations
+- Added 6 blueprint-configurable properties: IndicatorMaterial, IndicatorSize (0.4), IndicatorZOffset (80), IndicatorFreeColor (green), IndicatorOccupiedColor (red)
+- Fixed Plane scale: divided by 100 to compensate for engine Plane's default 100x100 world size
+- Updated TDD.md and TDD_Chinese.md section 2.6 with Intersection Occupancy Indicator (v0.13)
+
 ## 2026-06-08
 
 ### Building & Vehicle Spawn DataAsset Refactor (v0.10)

@@ -42,6 +42,32 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Road|Intersection")
 	float IntersectionBoxHalfHeight = 200.0f;
 
+	// ---- Intersection occupancy indicator ----
+
+	/** Plane mesh floating above the intersection to indicate occupancy. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Road|Intersection|Indicator")
+	TObjectPtr<UStaticMeshComponent> IndicatorPlane;
+
+	/** Material for the indicator plane. Must expose a VectorParameter named "Color" (emissive). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Road|Intersection|Indicator")
+	TObjectPtr<UMaterialInterface> IndicatorMaterial;
+
+	/** Size of the indicator relative to cell size (0.0~1.0). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Road|Intersection|Indicator")
+	float IndicatorSize = 0.4f;
+
+	/** Z offset above the intersection box top. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Road|Intersection|Indicator")
+	float IndicatorZOffset = 80.0f;
+
+	/** Color when the intersection is free. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Road|Intersection|Indicator")
+	FLinearColor IndicatorFreeColor = FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
+
+	/** Color when the intersection is occupied. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Road|Intersection|Indicator")
+	FLinearColor IndicatorOccupiedColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+
 	UFUNCTION(BlueprintCallable, Category = "Road")
 	void UpdateAppearance();
 
@@ -108,6 +134,8 @@ private:
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 	void UpdateIntersectionBox();
+	void UpdateIndicator();
+	void UpdateIndicatorState();
 
 	EGridDirection FindEntryDirForVehicle(class AVehicleActor* Vehicle) const;
 
@@ -132,6 +160,11 @@ private:
 	 * Key = entry direction.
 	 */
 	TMap<EGridDirection, TSet<TWeakObjectPtr<class AVehicleActor>>> PendingReservations;
+
+	// ---- Indicator ----
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> IndicatorDMI;
 
 	/**
 	 * Reverse-lookup: for a given vehicle, which entry direction was it granted/last recorded for.

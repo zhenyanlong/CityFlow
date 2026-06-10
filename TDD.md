@@ -586,6 +586,44 @@ TickMovementSpline:
 - `PerformForwardProbe()` previously filtered sweep hits with `ProjDist > 0.0f` (vehicle sweep) and `InterDist <= 0.0f` (intersection sweep), which ignored hits when the probe volume already overlapped a collision body at sweep start.
 - Fixed to `ProjDist >= 0.0f` and `InterDist < 0.0f` respectively, allowing vehicles starting inside an intersection (e.g., spawned at a building whose doorway cell is an intersection) to correctly acquire intersection locks.
 
+#### Intersection Occupancy Indicator (v0.13 — ✅ Implemented)
+
+Each `ARoadTile` with an active `IntersectionBox` (Cross / T-Junction) displays a floating plane indicator above the intersection to visualise occupancy at a glance.
+
+**Architecture:**
+- `UStaticMeshComponent IndicatorPlane` — a Plane mesh attached to `RootSceneComponent`, collision disabled.
+- Uses engine built-in Plane (`/Engine/BasicShapes/Plane`) scaled down to `CellSize × IndicatorSize / 100.0f` (Plane is 100×100 by default).
+- `UMaterialInstanceDynamic` created lazily from `IndicatorMaterial` on first `UpdateIndicator()`.
+- Material must expose a `VectorParameter` named `"Color"` wired into emissive; Translucent/Unlit blend mode.
+
+**State refresh triggers:**
+| Trigger | Where |
+|---|---|
+| IntersectionBox enabled/disabled | `UpdateIntersectionBox()` → `UpdateIndicator()` |
+| Vehicle enters box | `OnIntersectionBoxBeginOverlap()` → `UpdateIndicatorState()` |
+| Vehicle exits box | `OnIntersectionBoxEndOverlap()` → `UpdateIndicatorState()` |
+| Periodic sanitise | `SanitizeOccupants()` → `UpdateIndicatorState()` |
+| Pending reservation expiry | `ExpirePendingReservations()` → `UpdateIndicatorState()` |
+
+**Colour logic:**
+- `IsAnyDirectionOccupied()` returns `false` → `IndicatorFreeColor` (default green)
+- `IsAnyDirectionOccupied()` returns `true` → `IndicatorOccupiedColor` (default red)
+
+**Blueprint-configurable properties (all on ARoadTile):**
+
+| Property | Default | Description |
+|---|---|---|
+| `IndicatorMaterial` | — | DMI base material (must have "Color" VectorParameter) |
+| `IndicatorSize` | `0.4` | Plane size relative to cell size (0.0–1.0) |
+| `IndicatorZOffset` | `80.0` | Z offset above IntersectionBox top |
+| `IndicatorFreeColor` | `(0,1,0)` | Green — intersection is free |
+| `IndicatorOccupiedColor` | `(1,0,0)` | Red — intersection is occupied |
+
+**Material setup (to be created in editor):**
+- Domain: Surface, Blend Mode: Translucent, Shading Model: Unlit, Two Sided: true
+- Graph: `TexCoord → ComponentMask(RG) → Add(-0.5,-0.5) → Length → OneMinus → SmoothStep(Min,Max) → Multiply(VectorParameter"Color") → Emissive Color`
+- SmoothStep Min/Max tuned for desired circle radius (recommended `0.48`/`0.52` for full inscribed circle)
+
 #### Vehicle Spawn Table
 
 `UVehicleDataAsset` (`UPrimaryDataAsset`) acts as a **vehicle class registry**:
@@ -718,7 +756,9 @@ TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
 
 `CityFlowGameMode::InitializeDefaultScene()` now supports two paths:
 
-**Primary: `UBuildingDataAsset`** (new in v0.10) — a `UPrimaryDataAsset` with a single `BuildingEntries` array of `FBuildingDataEntry` (each specifying `TSubclassOf<ABuilding>` + `float SpawnWeight`). The roles of origin vs. destination are determined by each building BP's own `bIsDestination` flag — no separate origin/destination arrays are needed.
+**Primary: `UBuildingDataAsset`** (new in v0.10) — a `UPrimaryDataAsset` with a single `BuildingEntries` array of `FBuildingDataEntry` (each specifying `TSubclassOf<ABuilding>` + `float SpawnWeight`).
+
+**v0.13 update:** All buildings now serve as **both** origin and destination. `CollectOriginDestinations()` adds every building to both the origin and destination arrays. The `bIsDestination` flag on `ABuilding` is no longer used for spawn logic. Spawning requires at least 2 buildings (guard in `StartSpawning()`) to guarantee different origin/destination. Existing spawn-loop deduplication (`Dest == Origin` skip) ensures the same building is never picked for both roles.
 
 Spawn counts are allocated deterministically using the **largest-remainder method**: each entry receives `floor(weight / totalWeight × DefaultBuildingCount)`, and any remaining slots are assigned to entries with the largest fractional parts.
 

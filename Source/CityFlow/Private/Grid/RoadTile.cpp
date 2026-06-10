@@ -2,6 +2,7 @@
 #include "Grid/GridManager.h"
 #include "Vehicle/Actor/VehicleActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogRoadTile, Log, All);
 
@@ -43,6 +44,16 @@ ARoadTile::ARoadTile()
 	IntersectionBox->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Block);
 	IntersectionBox->SetCollisionResponseToChannel(ECollisionChannel::ECC_Vehicle, ECR_Overlap);
 	IntersectionBox->SetGenerateOverlapEvents(true);
+
+	IndicatorPlane = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("IndicatorPlane"));
+	IndicatorPlane->SetupAttachment(RootSceneComponent);
+	IndicatorPlane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	IndicatorPlane->SetVisibility(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMeshFinder(TEXT("/Engine/BasicShapes/Plane"));
+	if (PlaneMeshFinder.Succeeded())
+	{
+		IndicatorPlane->SetStaticMesh(PlaneMeshFinder.Object);
+	}
 }
 
 void ARoadTile::BeginPlay()
@@ -356,6 +367,50 @@ void ARoadTile::UpdateIntersectionBox()
 	{
 		IntersectionBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
+
+	UpdateIndicator();
+}
+
+void ARoadTile::UpdateIndicator()
+{
+	const bool bIsIntersection = IsIntersection();
+
+	if (!IsPlacedOnGrid() || !bIsIntersection)
+	{
+		IndicatorPlane->SetVisibility(false);
+		return;
+	}
+
+	UGridManager* GM = GetGridManager();
+	if (!GM) return;
+
+	const float CellSize = GM->GetCellSize();
+	const float ActorScaleXY = GetActorScale3D().X;
+	const float InvScale = (FMath::Abs(ActorScaleXY) > KINDA_SMALL_NUMBER) ? (1.0f / ActorScaleXY) : 1.0f;
+
+	const float ZPos = (IntersectionBoxHalfHeight * 2.0f + IndicatorZOffset) * InvScale;
+	// Plane mesh is 100x100 world units by default; divide to get correct world-space size
+	const float PlaneScale = CellSize * IndicatorSize * InvScale / 100.0f;
+
+	IndicatorPlane->SetRelativeLocation(FVector(0.0f, 0.0f, ZPos));
+	IndicatorPlane->SetRelativeScale3D(FVector(PlaneScale, PlaneScale, 1.0f));
+	IndicatorPlane->SetVisibility(true);
+
+	if (!IndicatorDMI && IndicatorMaterial)
+	{
+		IndicatorDMI = UMaterialInstanceDynamic::Create(IndicatorMaterial, this);
+		IndicatorPlane->SetMaterial(0, IndicatorDMI);
+	}
+
+	UpdateIndicatorState();
+}
+
+void ARoadTile::UpdateIndicatorState()
+{
+	if (!IndicatorDMI) return;
+
+	const bool bOccupied = IsAnyDirectionOccupied();
+	IndicatorDMI->SetVectorParameterValue(TEXT("Color"), bOccupied ? IndicatorOccupiedColor : IndicatorFreeColor);
 }
 
 bool ARoadTile::IsIntersection() const
@@ -670,6 +725,8 @@ void ARoadTile::OnIntersectionBoxBeginOverlap(UPrimitiveComponent* OverlappedCom
 				*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), TotalInBox,
 				PendingReservations.Contains(EntryDir) ? PendingReservations[EntryDir].Num() : 0));
 	}
+
+	UpdateIndicatorState();
 }
 
 void ARoadTile::OnIntersectionBoxEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -770,6 +827,8 @@ void ARoadTile::OnIntersectionBoxEndOverlap(UPrimitiveComponent* OverlappedCompo
 				*GetName(), *Vehicle->GetName(), *DirToString(EntryDir),
 				bStillOccupied ? TEXT("no") : TEXT("YES")));
 	}
+
+	UpdateIndicatorState();
 }
 
 // ---- Safety nets ----
@@ -840,6 +899,8 @@ void ARoadTile::SanitizeOccupants()
 			ServedCount = 0;
 		}
 	}
+
+	UpdateIndicatorState();
 }
 
 void ARoadTile::ExpirePendingReservations(float MaxAgeSeconds)
@@ -884,4 +945,6 @@ void ARoadTile::ExpirePendingReservations(float MaxAgeSeconds)
 	{
 		if (It.Value().Num() == 0) It.RemoveCurrent();
 	}
+
+	UpdateIndicatorState();
 }

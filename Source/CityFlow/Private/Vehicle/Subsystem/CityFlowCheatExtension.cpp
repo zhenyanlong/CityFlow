@@ -61,8 +61,7 @@ void UCityFlowCheatExtension::CF_SpawnVehicle()
 	}
 
 	const TArray<FGridVector> BuildingCells = GridM->GetCellsOfType(ECellType::Building);
-	ABuilding* Origin = nullptr;
-	ABuilding* Destination = nullptr;
+	TArray<ABuilding*> Buildings;
 
 	TSet<int32> Seen;
 	for (const FGridVector& Pos : BuildingCells)
@@ -75,28 +74,16 @@ void UCityFlowCheatExtension::CF_SpawnVehicle()
 		Seen.Add(Cell.BuildingID);
 
 		ABuilding* Building = Cast<ABuilding>(Cell.RoadActor);
-		if (!Building)
+		if (Building)
 		{
-			continue;
-		}
-
-		if (!Origin && !Building->bIsDestination)
-		{
-			Origin = Building;
-		}
-		if (!Destination && Building->bIsDestination)
-		{
-			Destination = Building;
-		}
-
-		if (Origin && Destination)
-		{
-			break;
+			Buildings.Add(Building);
 		}
 	}
 
-	if (Origin && Destination)
+	if (Buildings.Num() >= 2)
 	{
+		ABuilding* Origin = Buildings[0];
+		ABuilding* Destination = Buildings[Buildings.Num() - 1];
 		AVehicleActor* Vehicle = VM->SpawnVehicle(Origin, Destination);
 		if (Vehicle)
 		{
@@ -106,7 +93,7 @@ void UCityFlowCheatExtension::CF_SpawnVehicle()
 	}
 	else
 	{
-		UE_LOG(LogCityFlowCheat, Warning, TEXT("Need at least one Origin and one Destination building"));
+		UE_LOG(LogCityFlowCheat, Warning, TEXT("Need at least 2 buildings, found %d"), Buildings.Num());
 	}
 }
 
