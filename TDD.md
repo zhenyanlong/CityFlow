@@ -586,6 +586,12 @@ TickMovementSpline:
 - `PerformForwardProbe()` previously filtered sweep hits with `ProjDist > 0.0f` (vehicle sweep) and `InterDist <= 0.0f` (intersection sweep), which ignored hits when the probe volume already overlapped a collision body at sweep start.
 - Fixed to `ProjDist >= 0.0f` and `InterDist < 0.0f` respectively, allowing vehicles starting inside an intersection (e.g., spawned at a building whose doorway cell is an intersection) to correctly acquire intersection locks.
 
+**Forward Probe — Spline-Sampled Segment (v0.15):**
+- `PerformForwardProbe()` now builds its sweep segment through `BuildForwardProbeSegment()` instead of using `GetActorLocation() + VelocityDirection`.
+- Probe start is sampled from the current spline at `CurrentSplineDistance + SelfAvoidOffset`; probe end is sampled at `StartDistance + ForwardProbeDistance`, clamped to spline length.
+- The sweep direction is derived from the sampled spline segment, and both vehicle detection (Channel1) and intersection reservation (Channel2) use the same spline-sampled endpoints.
+- `PerformRamKill()` reuses the same helper so rampage vehicles kill along their actual spline path rather than a potentially stale actor transform direction.
+
 #### Intersection Occupancy Indicator (v0.13 — ✅ Implemented)
 
 Each `ARoadTile` with an active `IntersectionBox` (Cross / T-Junction) displays a floating plane indicator above the intersection to visualise occupancy at a glance.
@@ -643,17 +649,18 @@ Each `AVehicleActor` subclass (e.g. `BP_Car`, `BP_Truck`) configures its own `Ve
 
 #### Vehicle Death & Stop Flash System (v0.12 — ✅ Implemented)
 
-**Overview:** When a vehicle enters `WaitingCongestion` (speed reaches 0 due to congestion), the base class `AVehicleActor` accumulates a `TotalStopTime` and exposes a modular, virtual-method-based stop/death pipeline. At the base level, the vehicle material pulses red at increasing frequency until `DeathTimeout` is reached, at which point an explosion sequence plays and the vehicle is destroyed.
+**Overview:** When a vehicle enters `WaitingCongestion` (speed reaches 0 due to congestion), the base class `AVehicleActor` accumulates a `TotalStopTime` and exposes a modular, virtual-method-based stop/death pipeline. At the base level, the vehicle material pulses red at increasing frequency until `DeathTimeout` is reached, at which point the timeout behaviour virtual method fires. The base implementation triggers death via `HandleVehicleDeath()`; subclasses may override for alternative behaviour.
 
 ##### Architectural Design — Virtual Method Hooks
 
-The system is designed for subclass extensibility through four `protected virtual` methods:
+The system is designed for subclass extensibility through five `protected virtual` methods:
 
 | Virtual Method | Base Behaviour | Subclass Override Purpose |
 |---|---|---|
 | `OnVehicleStopped(DeltaTime)` | Accumulates `TotalStopTime`; drives material red flash via dynamic MID | Additional stop effects (e.g. siren sound) |
 | `OnVehicleResumed()` | Resets material emissive to 0 | Stop additional effects |
 | `HandleVehicleDeath()` | Plays VFX/SFX/CameraShake → broadcasts `OnVehicleDeath` → `Destroy()` | Custom death behaviour (no explosion, different visuals) |
+| `HandleWaitTimeout()` | Calls `HandleVehicleDeath()` → destroy | **v0.14:** Custom timeout behaviour (e.g., enter berserk rampage mode instead of dying) |
 | `ShouldResetStopTime()` | Returns `false` (cumulative → guaranteed death) | Return `true` to never timeout-die |
 
 ##### Movement Loop Integration
@@ -663,10 +670,14 @@ TickMovementSpline:
   if bFrontVehicleTooClose:
     TotalStopTime += DeltaTime
     OnVehicleStopped(DeltaTime)           ← virtual: material flash
-    if bEnableTimeoutDeath && TotalStopTime >= DeathTimeout:
-      HandleVehicleDeath()                ← virtual: explosion → destroy
-      return
-    decelerate → return
+    if TotalStopTime >= DeathTimeout:
+      HandleWaitTimeout()                 ← virtual: base→death, subclass→berserk
+      if IsActorBeingDestroyed(): return
+      // else: fall through to movement (berserk mode)
+    else:
+      decelerate → return
+  if bBerserk:
+    PerformRamKill()                      ← sweep-kill vehicles ahead
   if cleared (was WaitingCongestion):
     OnVehicleResumed()                    ← virtual: reset material
     TotalStopTime = ShouldResetStopTime() ? 0 : TotalStopTime
@@ -700,8 +711,7 @@ The material must expose a `ScalarParameter` named `FlashIntensity` wired into e
 
 | Property | Type | Default | Category | Description |
 |---|---|---|---|---|
-| `DeathTimeout` | `float` | `5.0` | `Vehicle\|Death` | Seconds before timeout death triggers |
-| `bEnableTimeoutDeath` | `bool` | `true` | `Vehicle\|Death` | Master toggle; disable for immortal subclasses |
+| `DeathTimeout` | `float` | `5.0` | `Vehicle\|Death` | Seconds before timeout triggers `HandleWaitTimeout()` |
 | `ExplosionVFX` | `UNiagaraSystem*` | — | `Vehicle\|Death\|VFX` | Niagara system asset for explosion |
 | `ExplosionVFXScale` | `float` | `1.0` | `Vehicle\|Death\|VFX` | Float sent to Niagara User Parameter (controlled by `ExplosionVFXScaleParamName`) |
 | `ExplosionVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Death\|VFX` | Name of the Niagara User Parameter to receive scale value |
@@ -745,6 +755,113 @@ TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
 
 - `VehicleManager::Tick()` only removes `Arrived` and `Idle` state vehicles from `ActiveVehicles`. Since `HandleVehicleDeath()` calls `Destroy()` immediately after broadcasting `OnVehicleDeath`, and the death handler removes the vehicle from `ActiveVehicles` before destruction, no dangling pointer scenario exists.
 - `EndPlay()` (called during `Destroy()`) releases all remaining intersection reservations as before.
+
+#### Rampage Vehicle (v0.14 — ✅ Implemented)
+
+`ARampageVehicle` is a subclass of `AVehicleActor` that, instead of dying when wait timeout expires, enters a **berserk rampage mode**: ignores all forward probes, drives at increased speed, and kills any vehicle in its path.
+
+##### Class Hierarchy
+
+```
+AVehicleActor
+  └─ ARampageVehicle   ← berserk timeout behaviour + ram kill
+```
+
+##### Berserk Timeout Behaviour
+
+When `TotalStopTime >= DeathTimeout`, `ARampageVehicle::HandleWaitTimeout()` is called instead of dying:
+
+1. Sets `bBerserk = true` — the vehicle is now in rampage mode.
+2. Releases all intersection reservations (`ReservedIntersections`, `PassedIntersections`).
+3. Resets `TotalStopTime`, `CongestionWaitTime`, and flash material.
+4. Sets `MovementState` to `Moving`.
+5. The caller (`TickMovementSpline`) detects `!IsActorBeingDestroyed()` and falls through to the movement logic on the same frame.
+
+##### Rampage Mode Behaviour
+
+While `bBerserk` is true, each frame in `TickMovementSpline`:
+
+| Behaviour | Detail |
+|---|---|
+| **Skip forward probe** | `PerformForwardProbe()` is not called — no vehicle or intersection stops the rampage vehicle |
+| **Speed multiplier** | `EffectiveMoveSpeed = MoveSpeed × GetBerserkSpeedMultiplier()` (default 1.2×) |
+| **Ram kill** | `PerformRamKill()` sweeps ahead with `ECC_GameTraceChannel1`, calling `HandleVehicleDeath()` on every active vehicle in front |
+| **Urgent flash** | `Tick()` continuously drives material `FlashIntensity` with high-frequency sine flashing while `bBerserk` is true |
+
+##### PerformRamKill
+
+Uses the same sweep parameters as `PerformForwardProbe` (radius, distance, offset), but instead of treating hits as obstacles, it **kills** them:
+
+- Sweeps with `SweepMultiByChannel` (ECC_GameTraceChannel1), ignoring self.
+- For each hit `AVehicleActor` in front (projected distance in [0, ForwardProbeDistance]):
+  - Skips if the target is already being destroyed.
+  - Skips if the target's state is `Arrived` or `Idle`.
+  - Calls `OtherVehicle->HandleVehicleDeath()` — full explosion VFX/SFX sequence.
+- Killed vehicles properly broadcast `OnVehicleDeath` → VehicleManager removes them → ScoringManager adds death penalty.
+
+##### Blueprint-Configurable Properties (on ARampageVehicle)
+
+| Property | Type | Default | Category | Description |
+|---|---|---|---|---|
+| `RampageSpeedMultiplier` | `float` | `1.2` | `Vehicle\|Berserk` | Speed multiplier applied during rampage |
+| `RampageFlashFrequency` | `float` | `18.0` | `Vehicle\|Berserk` | Red material flash frequency while in rampage mode |
+
+##### Base-Class Berserk Infrastructure (AVehicleActor)
+
+To support rampage, `AVehicleActor` gained these protected members:
+
+| Member | Type | Description |
+|---|---|---|
+| `bBerserk` | `bool` | Set by subclass `HandleWaitTimeout()`; when true, skips forward probe and calls `PerformRamKill` each frame |
+| `GetBerserkSpeedMultiplier()` | `virtual float` | Base returns `1.0`; `ARampageVehicle` returns `RampageSpeedMultiplier` when `bBerserk` |
+| `PerformRamKill()` | `void` | Sweep-kills vehicles directly ahead |
+| `HandleWaitTimeout()` | `virtual void` | **v0.14:** Replaces the removed `bEnableTimeoutDeath` boolean; base calls `HandleVehicleDeath()`, subclasses may override |
+
+#### Teleport Vehicle (v0.15 — ✅ Implemented)
+
+`ATeleportVehicle` is a subclass of `AVehicleActor` that, instead of dying when its wait timeout expires, teleports forward toward its destination along the current spline path. If the teleport destination overlaps other active vehicles, those vehicles are killed through the normal `HandleVehicleDeath()` pipeline.
+
+##### Class Hierarchy
+
+```
+AVehicleActor
+  └─ ATeleportVehicle   ← timeout teleport + overlap death
+```
+
+##### Timeout Teleport Behaviour
+
+When `TotalStopTime >= DeathTimeout`, `ATeleportVehicle::HandleWaitTimeout()` is called:
+
+1. Spawns `TeleportBeforeVFX` at the current actor location, if configured, and pushes `TeleportVFXScale` to the Niagara User Parameter named by `TeleportVFXScaleParamName`.
+2. Randomly picks a forward teleport distance in `[TeleportMinDistance, TeleportMaxDistance]` (defaults 1200-3000 cm).
+3. Moves `CurrentSplineDistance` forward by that distance, clamped to `[0, SplineLength]`.
+4. Samples the spline at the new distance and moves the actor to `NewPos + VehicleZOffset`.
+5. Updates `VelocityDirection`, actor rotation, and `PreviousGridPosition`.
+6. Spawns `TeleportAfterVFX` at the new actor location, if configured, using the same scale parameter push.
+7. Releases all reserved/passed intersection references because the vehicle changed position abruptly.
+8. Resets `TotalStopTime`, `CongestionWaitTime`, `bFrontVehicleTooClose`, flash material intensity, and returns to `Moving`.
+9. Calls `KillOverlappingVehicles(TeleportOverlapRadius)` immediately after teleport.
+
+##### Overlap Death
+
+`AVehicleActor::KillOverlappingVehicles()` performs an `OverlapMultiByChannel` on `ECC_GameTraceChannel1` at the current actor location:
+
+- Uses a configurable sphere radius from the subclass.
+- Ignores self, already-destroying vehicles, and vehicles in `Arrived` / `Idle`.
+- Calls `OtherVehicle->HandleVehicleDeath()` for every unique overlapping active vehicle.
+- Death events flow through the existing VehicleManager and ScoringManager pipeline, so death penalties and cleanup remain unchanged.
+
+##### Blueprint-Configurable Properties (on ATeleportVehicle)
+
+| Property | Type | Default | Category | Description |
+|---|---|---|---|---|
+| `TeleportMinDistance` | `float` | `1200.0` | `Vehicle\|Teleport` | Minimum distance in cm to move forward along the current spline on timeout |
+| `TeleportMaxDistance` | `float` | `3000.0` | `Vehicle\|Teleport` | Maximum distance in cm to move forward along the current spline on timeout |
+| `TeleportOverlapRadius` | `float` | `120.0` | `Vehicle\|Teleport` | Sphere radius used after teleport to detect vehicles to kill |
+| `TeleportBeforeVFX` | `UNiagaraSystem*` | — | `Vehicle\|Teleport\|VFX` | VFX spawned before teleport at the old location |
+| `TeleportAfterVFX` | `UNiagaraSystem*` | — | `Vehicle\|Teleport\|VFX` | VFX spawned after teleport at the new location |
+| `TeleportVFXScale` | `float` | `1.0` | `Vehicle\|Teleport\|VFX` | Float sent to both teleport Niagara systems via User Parameter |
+| `TeleportVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Teleport\|VFX` | Niagara User Parameter name that receives `TeleportVFXScale` |
 
 ---
 

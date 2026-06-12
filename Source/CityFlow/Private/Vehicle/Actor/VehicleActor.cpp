@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/OverlapResult.h"
 #include "UObject/ConstructorHelpers.h"
 #include "DrawDebugHelpers.h"
 #include "NiagaraFunctionLibrary.h"
@@ -191,7 +192,16 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		return;
 	}
 
-	PerformForwardProbe();
+	// ---- Berserk mode: skip forward probe, ram through ----
+	if (!bBerserk)
+	{
+		PerformForwardProbe();
+	}
+	else
+	{
+		bFrontVehicleTooClose = false;
+		PerformRamKill();
+	}
 
 	if (bFrontVehicleTooClose)
 	{
@@ -231,19 +241,26 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		TotalStopTime += DeltaTime;
 		OnVehicleStopped(DeltaTime);
 
-		if (bEnableTimeoutDeath && TotalStopTime >= DeathTimeout)
+		if (TotalStopTime >= DeathTimeout)
 		{
-			HandleVehicleDeath();
+			HandleWaitTimeout();
+			if (IsActorBeingDestroyed())
+			{
+				return; // Vehicle died
+			}
+			// Vehicle didn't die (e.g., entered berserk mode) — fall through to movement
+			bFrontVehicleTooClose = false;
+		}
+		else
+		{
+			CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, 0.0f, DeltaTime, StartDeceleration);
+			if (CurrentSpeed < 1.0f) { CurrentSpeed = 0.0f; }
+			if (!VelocityDirection.IsNearlyZero())
+			{
+				VehicleRoot->SetWorldRotation(VelocityDirection.Rotation());
+			}
 			return;
 		}
-
-		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, 0.0f, DeltaTime, StartDeceleration);
-		if (CurrentSpeed < 1.0f) { CurrentSpeed = 0.0f; }
-		if (!VelocityDirection.IsNearlyZero())
-		{
-			VehicleRoot->SetWorldRotation(VelocityDirection.Rotation());
-		}
-		return;
 	}
 
 	if (MovementState == EVehicleMovementState::WaitingCongestion)
@@ -261,7 +278,8 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 		const float RemainingDist = SplineLength - CurrentSplineDistance;
 		const float SpeedRatio = (DecelerationDistance > 0.0f)
 			? FMath::Min(RemainingDist / DecelerationDistance, 1.0f) : 1.0f;
-		const float BaseTarget = MoveSpeed * SpeedRatio;
+		const float EffectiveMoveSpeed = MoveSpeed * GetBerserkSpeedMultiplier();
+		const float BaseTarget = EffectiveMoveSpeed * SpeedRatio;
 		const float Accel = (BaseTarget > CurrentSpeed + 100.0f) ? StartAcceleration : Acceleration;
 		CurrentSpeed = FMath::FInterpConstantTo(CurrentSpeed, BaseTarget, DeltaTime, Accel);
 	}
@@ -296,25 +314,25 @@ void AVehicleActor::PerformForwardProbe()
 	FrontVehicleDistance = 0.0f;
 	bFrontVehicleTooClose = false;
 
-	if (VelocityDirection.IsNearlyZero())
-	{
-		return;
-	}
-
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
 
-	const FVector MyDir = VelocityDirection.GetSafeNormal();
-	const FVector BasePos = GetActorLocation() + FVector(0, 0, ProbeVerticalOffset);
-	const FVector ProbeStart = BasePos + MyDir * SelfAvoidOffset;
-	const FVector ProbeEnd = ProbeStart + MyDir * ForwardProbeDistance;
+	FVector ProbeStart;
+	FVector ProbeEnd;
+	FVector MyDir;
+	if (!BuildForwardProbeSegment(ProbeStart, ProbeEnd, MyDir))
+	{
+		return;
+	}
+
+	const float ProbeSegmentDistance = FVector::Distance(ProbeStart, ProbeEnd);
 	const FCollisionShape ProbeShape = FCollisionShape::MakeSphere(ForwardProbeRadius);
 
 	// Derive grid entry direction from our current velocity
-	const EGridDirection EntryDir = GridDirectionUtils::DirectionFromWorldVector(VelocityDirection);
+	const EGridDirection EntryDir = GridDirectionUtils::DirectionFromWorldVector(MyDir);
 
 	// ---- Pass 1: Physical vehicle sweep (Channel1 = Vehicle) ----
 	FCollisionQueryParams VehQueryParams;
@@ -326,7 +344,7 @@ void AVehicleActor::PerformForwardProbe()
 		ECC_GameTraceChannel1, ProbeShape, VehQueryParams);
 
 	AVehicleActor* ClosestVehicle = nullptr;
-	float ClosestDist = ForwardProbeDistance;
+	float ClosestDist = ProbeSegmentDistance;
 
 	for (const FHitResult& Hit : VehHits)
 	{
@@ -359,7 +377,7 @@ void AVehicleActor::PerformForwardProbe()
 		}
 
 		const float InterDist = FVector::DotProduct(Hit.ImpactPoint - ProbeStart, MyDir);
-		if (InterDist < 0.0f || InterDist > ForwardProbeDistance)
+		if (InterDist < 0.0f || InterDist > ProbeSegmentDistance)
 		{
 			continue;
 		}
@@ -379,7 +397,7 @@ void AVehicleActor::PerformForwardProbe()
 	}
 
 	// ---- Combine results ----
-	if (ClosestDist < ForwardProbeDistance)
+	if (ClosestDist < ProbeSegmentDistance)
 	{
 		FrontVehicle = ClosestVehicle;
 		FrontVehicleDistance = ClosestDist;
@@ -400,7 +418,7 @@ void AVehicleActor::PerformForwardProbe()
 	{
 		DrawDebugSphere(World, ProbeStart, 10.0f, 8, FColor::Green, false, -1.0f, 0, 2.0f);
 
-		const int32 NumSegments = FMath::Max(1, FMath::CeilToInt(ForwardProbeDistance / ForwardProbeRadius));
+		const int32 NumSegments = FMath::Max(1, FMath::CeilToInt(ProbeSegmentDistance / ForwardProbeRadius));
 		for (int32 i = 0; i <= NumSegments; ++i)
 		{
 			const float Alpha = static_cast<float>(i) / NumSegments;
@@ -578,4 +596,150 @@ void AVehicleActor::HandleVehicleDeath()
 
 	// 6. Destroy this actor
 	Destroy();
+}
+
+void AVehicleActor::HandleWaitTimeout()
+{
+	// Base: die on timeout
+	HandleVehicleDeath();
+}
+
+bool AVehicleActor::BuildForwardProbeSegment(FVector& OutProbeStart, FVector& OutProbeEnd, FVector& OutDirection) const
+{
+	if (!PathSpline || PathSpline->GetNumberOfSplinePoints() < 2)
+	{
+		return false;
+	}
+
+	const float SplineLength = PathSpline->GetSplineLength();
+	if (SplineLength <= 0.0f || CurrentSplineDistance >= SplineLength)
+	{
+		return false;
+	}
+
+	const float StartDistance = FMath::Clamp(CurrentSplineDistance + SelfAvoidOffset, 0.0f, SplineLength);
+	const float EndDistance = FMath::Clamp(StartDistance + ForwardProbeDistance, 0.0f, SplineLength);
+	if (EndDistance <= StartDistance)
+	{
+		return false;
+	}
+
+	OutProbeStart = PathSpline->GetLocationAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::World)
+		+ FVector(0, 0, ProbeVerticalOffset);
+	OutProbeEnd = PathSpline->GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World)
+		+ FVector(0, 0, ProbeVerticalOffset);
+
+	OutDirection = (OutProbeEnd - OutProbeStart).GetSafeNormal();
+	if (OutDirection.IsNearlyZero())
+	{
+		OutDirection = PathSpline->GetDirectionAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::World).GetSafeNormal();
+	}
+
+	return !OutDirection.IsNearlyZero();
+}
+
+void AVehicleActor::PerformRamKill()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FVector ProbeStart;
+	FVector ProbeEnd;
+	FVector MyDir;
+	if (!BuildForwardProbeSegment(ProbeStart, ProbeEnd, MyDir))
+	{
+		return;
+	}
+
+	const float ProbeSegmentDistance = FVector::Distance(ProbeStart, ProbeEnd);
+	const FCollisionShape ProbeShape = FCollisionShape::MakeSphere(ForwardProbeRadius);
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.bTraceComplex = false;
+	QueryParams.AddIgnoredActor(this);
+
+	TArray<FHitResult> Hits;
+	World->SweepMultiByChannel(Hits, ProbeStart, ProbeEnd, FQuat::Identity,
+		ECC_GameTraceChannel1, ProbeShape, QueryParams);
+
+	for (const FHitResult& Hit : Hits)
+	{
+		AVehicleActor* OtherVehicle = Cast<AVehicleActor>(Hit.GetActor());
+		if (!OtherVehicle || OtherVehicle == this)
+		{
+			continue;
+		}
+
+		// Only kill vehicles that are in front (skip behind)
+		const float ProjDist = FVector::DotProduct(Hit.ImpactPoint - ProbeStart, MyDir);
+		if (ProjDist < 0.0f || ProjDist > ProbeSegmentDistance)
+		{
+			continue;
+		}
+
+		// Skip vehicles that are already dying or dead
+		if (OtherVehicle->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		// Skip vehicles that have already arrived
+		if (OtherVehicle->GetMovementState() == EVehicleMovementState::Arrived ||
+			OtherVehicle->GetMovementState() == EVehicleMovementState::Idle)
+		{
+			continue;
+		}
+
+		OtherVehicle->HandleVehicleDeath();
+	}
+}
+
+void AVehicleActor::KillOverlappingVehicles(float OverlapRadius)
+{
+	if (OverlapRadius <= 0.0f)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.bTraceComplex = false;
+	QueryParams.AddIgnoredActor(this);
+
+	TArray<FOverlapResult> Overlaps;
+	const FCollisionShape OverlapShape = FCollisionShape::MakeSphere(OverlapRadius);
+	World->OverlapMultiByChannel(Overlaps, GetActorLocation(), FQuat::Identity,
+		ECC_GameTraceChannel1, OverlapShape, QueryParams);
+
+	TSet<AVehicleActor*> KilledVehicles;
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AVehicleActor* OtherVehicle = Cast<AVehicleActor>(Overlap.GetActor());
+		if (!OtherVehicle || OtherVehicle == this || KilledVehicles.Contains(OtherVehicle))
+		{
+			continue;
+		}
+
+		if (OtherVehicle->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		if (OtherVehicle->GetMovementState() == EVehicleMovementState::Arrived ||
+			OtherVehicle->GetMovementState() == EVehicleMovementState::Idle)
+		{
+			continue;
+		}
+
+		KilledVehicles.Add(OtherVehicle);
+		OtherVehicle->HandleVehicleDeath();
+	}
 }

@@ -585,6 +585,12 @@ TickMovementSpline:
 - `PerformForwardProbe()` 之前用 `ProjDist > 0.0f`（车辆扫描）和 `InterDist <= 0.0f`（路口扫描）过滤命中，当探测体积起始就与碰撞体重叠时，命中被错误跳过。
 - 分别修正为 `ProjDist >= 0.0f` 和 `InterDist < 0.0f`，使占用位置就在路口内的车辆（如从建筑门口即为路口处生成）能正确获取路口锁。
 
+**前向探测 — Spline 采样段（v0.15）：**
+- `PerformForwardProbe()` 现在通过 `BuildForwardProbeSegment()` 构建扫描段，不再使用 `GetActorLocation() + VelocityDirection`。
+- 探测起点从当前 spline 的 `CurrentSplineDistance + SelfAvoidOffset` 处采样；终点从 `StartDistance + ForwardProbeDistance` 处采样，并钳位到 spline 长度内。
+- 扫描方向由采样出的 spline 线段推导，车辆检测（Channel1）和路口预占（Channel2）使用同一组 spline 采样起终点。
+- `PerformRamKill()` 复用同一个辅助函数，使暴走车辆沿实际 spline 路径击杀，而不是依赖可能滞后的 Actor transform 方向。
+
 #### 路口占用指示器（v0.13 — ✅ 已实现）
 
 每个启用了 `IntersectionBox` 的 `ARoadTile`（十字 / T 型路口）在路口上方悬浮一个平面指示器，一目了然地展示占用状态。
@@ -625,17 +631,18 @@ TickMovementSpline:
 
 #### 车辆死亡与停车闪烁系统（v0.12 — ✅ 已实现）
 
-**概述：** 当车辆进入 `WaitingCongestion` 状态（因拥堵而车速归零），基类 `AVehicleActor` 会累加 `TotalStopTime` 并暴露一套模块化、基于 virtual 方法的停车/死亡管线。基类行为是车辆材质以递增频率闪烁红光，直到超过 `DeathTimeout` 后触发爆炸序列，车辆销毁。
+**概述：** 当车辆进入 `WaitingCongestion` 状态（因拥堵而车速归零），基类 `AVehicleActor` 会累加 `TotalStopTime` 并暴露一套模块化、基于 virtual 方法的停车/死亡管线。基类行为是车辆材质以递增频率闪烁红光，直到超过 `DeathTimeout` 后触发超时行为 virtual 方法。基类实现通过 `HandleVehicleDeath()` 触发死亡；子类可覆写以实现替代行为。
 
 ##### 架构设计 — Virtual 方法钩子
 
-系统通过 4 个 `protected virtual` 方法实现子类可扩展性：
+系统通过 5 个 `protected virtual` 方法实现子类可扩展性：
 
 | Virtual 方法 | 基类行为 | 子类覆写用途 |
 |---|---|---|
 | `OnVehicleStopped(DeltaTime)` | 累加 `TotalStopTime`；驱动材质红光闪烁 | 附加停车效果（如警报声） |
 | `OnVehicleResumed()` | 重置材质 emissive 为 0 | 停止附加效果 |
 | `HandleVehicleDeath()` | 播放 VFX/SFX/CameraShake → 广播 `OnVehicleDeath` → `Destroy()` | 自定义死亡行为（无爆炸、不同视觉） |
+| `HandleWaitTimeout()` | 调用 `HandleVehicleDeath()` → 销毁 | **v0.14:** 自定义超时行为（如进入狂暴冲撞模式而非死亡） |
 | `ShouldResetStopTime()` | 返回 `false`（持续累计 → 一定死亡） | 返回 `true` 则永不超时死亡 |
 
 ##### 运动循环集成
@@ -645,10 +652,14 @@ TickMovementSpline:
   if bFrontVehicleTooClose:
     TotalStopTime += DeltaTime
     OnVehicleStopped(DeltaTime)           ← virtual: 材质闪烁
-    if bEnableTimeoutDeath && TotalStopTime >= DeathTimeout:
-      HandleVehicleDeath()                ← virtual: 爆炸 → 销毁
-      return
-    减速 → return
+    if TotalStopTime >= DeathTimeout:
+      HandleWaitTimeout()                 ← virtual: 基类→死亡, 子类→狂暴
+      if IsActorBeingDestroyed(): return
+      // else: 落入移动逻辑（狂暴模式）
+    else:
+      减速 → return
+  if bBerserk:
+    PerformRamKill()                      ← 扫荡击杀前方车辆
   if 恢复通行 (之前是 WaitingCongestion):
     OnVehicleResumed()                    ← virtual: 重置材质
     TotalStopTime = ShouldResetStopTime() ? 0 : TotalStopTime
@@ -682,8 +693,7 @@ TickMovementSpline:
 
 | 属性 | 类型 | 默认值 | 分类 | 描述 |
 |---|---|---|---|---|
-| `DeathTimeout` | `float` | `5.0` | `Vehicle\|Death` | 超时死亡触发秒数 |
-| `bEnableTimeoutDeath` | `bool` | `true` | `Vehicle\|Death` | 总开关；不死子类设为 false |
+| `DeathTimeout` | `float` | `5.0` | `Vehicle\|Death` | 超时触发 `HandleWaitTimeout()` 的秒数 |
 | `ExplosionVFX` | `UNiagaraSystem*` | — | `Vehicle\|Death\|VFX` | 爆炸 Niagara 系统资产 |
 | `ExplosionVFXScale` | `float` | `1.0` | `Vehicle\|Death\|VFX` | 发送至 Niagara User Parameter 的浮点值（由 `ExplosionVFXScaleParamName` 指定参数名） |
 | `ExplosionVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Death\|VFX` | Niagara 中接收缩放值的 User Parameter 名称 |
@@ -727,6 +737,113 @@ TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
 
 - `VehicleManager::Tick()` 只从 `ActiveVehicles` 中移除 `Arrived` 和 `Idle` 状态的车辆。`HandleVehicleDeath()` 在广播 `OnVehicleDeath` 后立即调用 `Destroy()`，且死亡处理器在销毁前从 `ActiveVehicles` 中移除车辆，因此不存在悬空指针。
 - `EndPlay()`（在 `Destroy()` 期间调用）释放所有剩余路口占用，与之前一致。
+
+#### 狂暴车辆（v0.14 — ✅ 已实现）
+
+`ARampageVehicle` 是 `AVehicleActor` 的子类，等待超时时不死亡，而是进入**狂暴冲撞模式**：忽略所有前向探测，以更高速度行驶，撞死沿途所有车辆。
+
+##### 类层级
+
+```
+AVehicleActor
+  └─ ARampageVehicle   ← 狂暴超时行为 + 冲撞击杀
+```
+
+##### 狂暴超时行为
+
+当 `TotalStopTime >= DeathTimeout` 时，调用 `ARampageVehicle::HandleWaitTimeout()` 而非死亡：
+
+1. 设置 `bBerserk = true` — 车辆进入冲撞模式。
+2. 释放所有路口占用（`ReservedIntersections`、`PassedIntersections`）。
+3. 重置 `TotalStopTime`、`CongestionWaitTime` 和闪烁材质。
+4. 将 `MovementState` 设置为 `Moving`。
+5. 调用者（`TickMovementSpline`）检测到 `!IsActorBeingDestroyed()` 后在同一帧落入移动逻辑。
+
+##### 冲撞模式行为
+
+`bBerserk` 为 true 时，`TickMovementSpline` 每帧：
+
+| 行为 | 详情 |
+|---|---|
+| **跳过前向探测** | 不调用 `PerformForwardProbe()` — 无车辆或路口能阻挡冲撞车辆 |
+| **速度倍率** | `有效速度 = MoveSpeed × GetBerserkSpeedMultiplier()`（默认 1.2×） |
+| **冲撞击杀** | `PerformRamKill()` 通过 `ECC_GameTraceChannel1` 扫荡前方，对每辆活跃车辆调用 `HandleVehicleDeath()` |
+| **急促闪烁** | `Tick()` 在 `bBerserk` 为 true 时持续用高频正弦写入材质 `FlashIntensity` |
+
+##### PerformRamKill
+
+使用与 `PerformForwardProbe` 相同的扫荡参数（半径、距离、偏移），但将命中视为击杀目标：
+
+- 通过 `SweepMultiByChannel`（ECC_GameTraceChannel1）扫荡，忽略自身。
+- 对前方（投影距离在 [0, ForwardProbeDistance] 内）的每个命中 `AVehicleActor`：
+  - 跳过已在销毁中的目标。
+  - 跳过状态为 `Arrived` 或 `Idle` 的目标。
+  - 调用 `OtherVehicle->HandleVehicleDeath()` — 完整爆炸 VFX/SFX 序列。
+- 被击杀车辆正常广播 `OnVehicleDeath` → VehicleManager 移除 → ScoringManager 计死亡罚分。
+
+##### 蓝图可配置属性（在 ARampageVehicle 上）
+
+| 属性 | 类型 | 默认值 | 分类 | 描述 |
+|---|---|---|---|---|
+| `RampageSpeedMultiplier` | `float` | `1.2` | `Vehicle\|Berserk` | 冲撞期间的速度倍率 |
+| `RampageFlashFrequency` | `float` | `18.0` | `Vehicle\|Berserk` | 暴走模式下红色材质闪烁频率 |
+
+##### 基类狂暴基础设施（AVehicleActor）
+
+为支持冲撞模式，`AVehicleActor` 新增以下 protected 成员：
+
+| 成员 | 类型 | 描述 |
+|---|---|---|
+| `bBerserk` | `bool` | 由子类 `HandleWaitTimeout()` 设置；为 true 时跳过前向探测，每帧调用 `PerformRamKill` |
+| `GetBerserkSpeedMultiplier()` | `virtual float` | 基类返回 `1.0`；`ARampageVehicle` 在 `bBerserk` 时返回 `RampageSpeedMultiplier` |
+| `PerformRamKill()` | `void` | 扫荡击杀前方车辆 |
+| `HandleWaitTimeout()` | `virtual void` | **v0.14:** 替换已删除的 `bEnableTimeoutDeath` 布尔值；基类调用 `HandleVehicleDeath()`，子类可覆写 |
+
+#### 瞬移车辆（v0.15 — ✅ 已实现）
+
+`ATeleportVehicle` 是 `AVehicleActor` 的子类，等待超时时不死亡，而是沿当前 spline 路径朝目的地方向向前瞬移一段距离。如果瞬移落点与其他活跃车辆重叠，则通过标准 `HandleVehicleDeath()` 管线击杀这些车辆。
+
+##### 类层级
+
+```
+AVehicleActor
+  └─ ATeleportVehicle   ← 超时瞬移 + 重叠死亡
+```
+
+##### 超时瞬移行为
+
+当 `TotalStopTime >= DeathTimeout` 时，调用 `ATeleportVehicle::HandleWaitTimeout()`：
+
+1. 若配置了 `TeleportBeforeVFX`，先在当前 Actor 位置生成特效，并将 `TeleportVFXScale` 写入 `TeleportVFXScaleParamName` 指定的 Niagara User Parameter。
+2. 在 `[TeleportMinDistance, TeleportMaxDistance]` 中随机选取向前瞬移距离（默认 1200-3000 cm）。
+3. 将 `CurrentSplineDistance` 向前移动该距离，并钳位到 `[0, SplineLength]`。
+4. 在新的 spline 距离采样位置，并将 Actor 移动到 `NewPos + VehicleZOffset`。
+5. 更新 `VelocityDirection`、Actor 旋转和 `PreviousGridPosition`。
+6. 若配置了 `TeleportAfterVFX`，在新的 Actor 位置生成特效，并使用同一套缩放参数写入。
+7. 释放所有已预占/已通过的路口引用，因为车辆发生了瞬时位移。
+8. 重置 `TotalStopTime`、`CongestionWaitTime`、`bFrontVehicleTooClose`、闪烁材质强度，并回到 `Moving`。
+9. 瞬移后立即调用 `KillOverlappingVehicles(TeleportOverlapRadius)`。
+
+##### 重叠死亡
+
+`AVehicleActor::KillOverlappingVehicles()` 在当前 Actor 位置通过 `ECC_GameTraceChannel1` 执行 `OverlapMultiByChannel`：
+
+- 使用子类提供的可配置球体半径。
+- 忽略自身、已经销毁中的车辆，以及 `Arrived` / `Idle` 状态车辆。
+- 对每辆唯一的重叠活跃车辆调用 `OtherVehicle->HandleVehicleDeath()`。
+- 死亡事件继续走现有 VehicleManager 和 ScoringManager 管线，因此死亡罚分和清理逻辑保持不变。
+
+##### 蓝图可配置属性（在 ATeleportVehicle 上）
+
+| 属性 | 类型 | 默认值 | 分类 | 描述 |
+|---|---|---|---|---|
+| `TeleportMinDistance` | `float` | `1200.0` | `Vehicle\|Teleport` | 超时时沿当前 spline 向前移动的最小距离（cm） |
+| `TeleportMaxDistance` | `float` | `3000.0` | `Vehicle\|Teleport` | 超时时沿当前 spline 向前移动的最大距离（cm） |
+| `TeleportOverlapRadius` | `float` | `120.0` | `Vehicle\|Teleport` | 瞬移后用于检测待击杀车辆的球体半径 |
+| `TeleportBeforeVFX` | `UNiagaraSystem*` | — | `Vehicle\|Teleport\|VFX` | 瞬移前在旧位置生成的特效 |
+| `TeleportAfterVFX` | `UNiagaraSystem*` | — | `Vehicle\|Teleport\|VFX` | 瞬移后在新位置生成的特效 |
+| `TeleportVFXScale` | `float` | `1.0` | `Vehicle\|Teleport\|VFX` | 写入两个瞬移 Niagara 系统 User Parameter 的缩放浮点值 |
+| `TeleportVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Teleport\|VFX` | 接收 `TeleportVFXScale` 的 Niagara User Parameter 名称 |
 
 ---
 

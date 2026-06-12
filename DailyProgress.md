@@ -1,3 +1,15 @@
+## 2026-06-12
+
+### Teleport Vehicle Type (v0.15)
+
+- Added ATeleportVehicle, a vehicle subclass that teleports forward along its spline when wait timeout expires instead of dying
+- Added TeleportMinDistance, TeleportMaxDistance, TeleportOverlapRadius, TeleportBeforeVFX, and TeleportAfterVFX Blueprint-configurable properties for timeout teleport tuning
+- Added TeleportVFXScale and TeleportVFXScaleParamName so teleport VFX can receive a Niagara scale parameter like death VFX
+- Added AVehicleActor::KillOverlappingVehicles() helper to kill active vehicles overlapping the teleport destination through the existing death pipeline
+- Fixed forward probe and rampage ram-kill sweep endpoints to sample from the current spline rather than actor transform/velocity
+- Added urgent red material flashing while ARampageVehicle is in berserk mode
+- Updated TDD.md and TDD_Chinese.md section 2.6 with Teleport Vehicle documentation
+
 ## 2026-06-09
 
 ### Vehicle Death & Stop Flash System (v0.12)

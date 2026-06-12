@@ -76,10 +76,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death")
 	float DeathTimeout = 5.0f;
 
-	/** Enable timeout-triggered explosion death. Disable for subclasses that never die from waiting. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death")
-	bool bEnableTimeoutDeath = true;
-
 	/** Stylized explosion VFX (Niagara). Configurable per-vehicle Blueprint. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Death|VFX")
 	TObjectPtr<UNiagaraSystem> ExplosionVFX;
@@ -191,11 +187,35 @@ protected:
 	 */
 	virtual void HandleVehicleDeath();
 
+	/** Called when TotalStopTime exceeds DeathTimeout.
+	 *  Base: calls HandleVehicleDeath() to destroy the vehicle.
+	 *  Subclasses may override for custom timeout behavior (e.g., enter berserk mode).
+	 */
+	virtual void HandleWaitTimeout();
+
 	/** Whether to reset TotalStopTime when vehicle resumes from stop.
 	 *  Base: false (stop time accumulates continuously, leading to death).
 	 *  Subclasses that don't die from waiting should return true.
 	 */
 	virtual bool ShouldResetStopTime() const { return false; }
+
+	/** Speed multiplier applied while in berserk mode.
+	 *  Base: 1.0. Subclasses may override (e.g., RampageVehicle returns 1.2).
+	 */
+	virtual float GetBerserkSpeedMultiplier() const { return 1.0f; }
+
+	/** Builds a forward probe segment by sampling the current spline rather than actor transform. */
+	bool BuildForwardProbeSegment(FVector& OutProbeStart, FVector& OutProbeEnd, FVector& OutDirection) const;
+
+	/** Whether this vehicle is currently in berserk (rampage) mode. */
+	UPROPERTY(BlueprintReadOnly, Category = "Vehicle|Berserk")
+	bool bBerserk = false;
+
+	/** Kills all vehicles directly ahead in the movement direction. Called each frame when bBerserk is true. */
+	void PerformRamKill();
+
+	/** Kills all active vehicles overlapping the current actor location. Used by special vehicle subclasses. */
+	void KillOverlappingVehicles(float OverlapRadius);
 
 	/** Accumulated stopped time. Independent of CongestionWaitTime (deadlock release). */
 	float TotalStopTime = 0.0f;
@@ -206,7 +226,6 @@ protected:
 
 	void HandleArrival();
 
-private:
 	void TickMovementSpline(float DeltaTime);
 
 	EVehicleMovementState MovementState = EVehicleMovementState::Idle;

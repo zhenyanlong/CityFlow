@@ -1,3 +1,15 @@
+## 2026-06-12
+
+### 瞬移车辆类型（v0.15）
+
+- 新增 ATeleportVehicle 车辆子类，等待超时时不死亡，而是沿自身 spline 朝目的地方向向前随机瞬移一段距离
+- 新增 TeleportMinDistance、TeleportMaxDistance、TeleportOverlapRadius、TeleportBeforeVFX 和 TeleportAfterVFX 蓝图可配置属性，用于调整超时瞬移距离、重叠检测范围和前后特效
+- 新增 TeleportVFXScale 和 TeleportVFXScaleParamName，使瞬移特效能像死亡特效一样接收 Niagara 缩放参数
+- 新增 AVehicleActor::KillOverlappingVehicles() 辅助函数，通过现有死亡管线击杀瞬移落点重叠的活跃车辆
+- 修复前向探测和暴走冲撞扫荡的起终点，现在从当前 spline 采样，而不是依赖 Actor transform/velocity
+- 新增 ARampageVehicle 暴走状态下的急促红色材质闪烁
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节，记录瞬移车辆设计
+
 ## 2026-06-09
 
 ### 车辆死亡与停车闪烁系统（v0.12）
