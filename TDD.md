@@ -15,7 +15,7 @@ Core management classes are gathered in the `GameMode` or delegated Manager comp
 | **GridManager** | `UWorldSubsystem` | Maintains a 2D logical grid. Provides grid snapping, placement validation, neighbour queries, connected-mask calculation, and building interface registration. **Manages the shared road budget** — both player and L-system placement consume from a single pool tracked by `RoadBudget`. |
 | **LSystemManager** | `UWorldSubsystem` | **Optional** auxiliary capillary road generator. Extracts branch starting points from dead-ends and straight segments, then executes breadth-first, attraction-biased growth. Consumes from the **shared road budget** alongside the player. Triggered manually by player (UI button or console command). |
 | **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | Spawns and manages all vehicle Actors. Provides **A\* pathfinding** on the road graph, converts grid paths to world-space spline-based movement plans, handles **congestion detection** (per-cell vehicle count). Ticks every frame for vehicle state updates and periodic intersection lock sanitization. |
-| **ScoringManager** | `UWorldSubsystem` | Tracks arrival count, arrival score, and congestion penalties during the Simulation Phase. Uses a periodic timer for congestion penalty deduction. Computes final score including full-connectivity bonus on evaluation. |
+| **ScoringManager** | `UWorldSubsystem` | Tracks arrival count, arrival score, death penalties, and congestion penalties during the Simulation Phase. Emits score-delta popup requests with world anchors for the HUD, uses a periodic timer for congestion penalty deduction, and computes final score including full-connectivity bonus on evaluation. |
 | **CityFlowGameMode** | `AGameModeBase` | Owns the **state machine** (`ECityFlowGamePhase`: Planning → Simulating → Evaluation). Initializes the grid, spawns default buildings, manages the shared road budget split (Player vs L-System), and triggers phase transitions. Provides Blueprint-callable API for UI control. |
 
 Managers communicate through an **event bus** (e.g., `OnRoadPlaced`, `OnVehicleArrived`) to avoid hard references.
@@ -902,11 +902,14 @@ A new helper `GetDoorwayConnectionPointForPosition(Doorway, BasePos)` computes a
 | Component | Rule |
 |---|---|
 | **Base Arrival Points** | Each vehicle arriving at destination grants **+ArrivalScore** (default 100, configurable via DeveloperSettings) |
+| **Death Penalty** | Each vehicle death deducts **-DeathPenalty** (default 50). `ScoringManager` binds directly to each spawned vehicle's `OnVehicleDeath` and also listens to `VehicleManager::OnVehicleDied`; `ScoredDeathVehicles` deduplicates these two possible notifications. |
 | **Congestion Penalty** | Every second, `UpdateCongestionPenalty()` checks `GetCongestedCells()`; penalises **−CongestionPenaltyPerSecond × congested_cell_count** (default 5/cell/s) |
 | **Full-Connectivity Bonus** | If all buildings connected at evaluation, **+FullConnectivityBonus** (default 500) |
 | **Efficiency Bonus** | Remaining road budget at end (future: proportional bonus) |
 
 Scoring starts on `StartScoring()` (called by GameMode on Simulation begin) and stops on `StopScoring()` (on Evaluation). Final score computed in `ComputeFinalScore()`.
+
+`OnScorePopupRequested(FVector WorldLocation, int32 DeltaScore)` is broadcast for arrival and death score deltas. Scoring does not spawn UI actors; it only reports the world anchor and signed score delta to the HUD layer.
 
 ---
 
@@ -1147,7 +1150,7 @@ Pause overlay widget with `BindWidget` controls:
 #### CityFlowGameWidget (Planning / Simulation overlay)
 
 `UUserWidget` C++ base using `BindWidget` for UMG controls:
-- **Bound controls:** `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`, `Txt_Countdown` (BindWidgetOptional)
+- **Bound controls:** `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`, `Txt_Countdown` (BindWidgetOptional), `PopupLayer` (BindWidgetOptional `CanvasPanel`)
 - **Button auto-binding:** `NativeConstruct()` binds `OnClicked` via `AddDynamic` (callbacks are `UFUNCTION()` — required by `BindUFunction`); `NativeDestruct()` cleans up.
 - **Button visibility:** `UpdateButtonStates(Phase)`:
   - Planning: `Btn_TriggerLSystem` + `Btn_StartSimulation` visible
@@ -1157,7 +1160,17 @@ Pause overlay widget with `BindWidget` controls:
 - **Auto-updating text:** `HandleGamePhaseChanged`, `HandleScoreChanged`, `HandleLSystemStep` update `Txt_*` in C++. Budget reads from `GridManager::GetRemainingBudget()` via `HandleCellChanged` bound to `OnCellChanged`, ensuring real-time updates on every placement/removal.
 - **Countdown timer:** When phase transitions to `Simulating`, `StartCountdown()` reads `SimulationDuration` and starts a 1-second recurring `TickCountdown()` (marked `UFUNCTION()`). Each tick decrements `CountdownSeconds` and updates `Txt_Countdown` to `MM:SS` format. The timer stops when seconds reach zero or the phase changes away from Simulating.
 - **BlueprintImplementableEvents:** `OnPhaseChanged_BP`, `OnScoreChanged_BP`, `OnBudgetChanged_BP`, `OnSimulationTick_BP`, `OnEvaluation_BP`, `OnLSystemStep_BP`, `OnLSystemFinished_BP`.
-- **Delegates bound in `NativeConstruct()`:** `GameMode::OnGamePhaseChanged`, `ScoringManager::OnScoreChanged`, `LSystemManager::OnGenerationStep`, `LSystemManager::OnGenerationFinished`, `GridManager::OnCellChanged`.
+- **Delegates bound in `NativeConstruct()`:** `GameMode::OnGamePhaseChanged`, `ScoringManager::OnScoreChanged`, `ScoringManager::OnScorePopupRequested`, `LSystemManager::OnGenerationStep`, `LSystemManager::OnGenerationFinished`, `GridManager::OnCellChanged`.
+
+#### Score Popup Feedback
+
+Score change feedback is implemented as **screen-space UMG**, not a world-space `WidgetComponent`.
+
+- `UCityFlowGameWidget` creates a `UScorePopupWidget` when `ScoringManager::OnScorePopupRequested(WorldLocation, DeltaScore)` fires.
+- The popup is added to `PopupLayer` when that optional `CanvasPanel` exists; otherwise it falls back to `AddToViewport(20)`.
+- `UScorePopupWidget` stores the world anchor and calls `ProjectWorldLocationToWidgetPosition()` every tick during its lifetime, keeping the popup visually attached to the vehicle/death location while rendering in UI space. This prevents scene occlusion and camera-facing issues.
+- The widget applies a screen-space upward offset, alpha fade, and small scale settle, then removes itself from its parent.
+- `ScorePopupWidgetClass`, `PositivePopupColor`, and `NegativePopupColor` are configurable on `UCityFlowGameWidget`; a native `STextBlock` fallback renders if no Blueprint widget is assigned.
 
 #### Ownership
 

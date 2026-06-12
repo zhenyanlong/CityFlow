@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/Button.h"
+#include "Components/CanvasPanel.h"
 #include "Components/TextBlock.h"
 #include "GameMode/Types/CityFlowGameTypes.h"
 #include "Grid/CityFlowGridTypes.h"
@@ -40,6 +41,18 @@ protected:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Countdown;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UCanvasPanel> PopupLayer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Score Popup")
+	TSubclassOf<class UScorePopupWidget> ScorePopupWidgetClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Score Popup")
+	FLinearColor PositivePopupColor = FLinearColor(0.15f, 1.0f, 0.35f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Score Popup")
+	FLinearColor NegativePopupColor = FLinearColor(1.0f, 0.12f, 0.08f, 1.0f);
 
 	// ---- 蓝图事件回调 ----
 
@@ -81,6 +94,9 @@ private:
 
 	UFUNCTION()
 	void HandleScoreChanged(int32 NewScore);
+
+	UFUNCTION()
+	void HandleScorePopupRequested(FVector WorldLocation, int32 DeltaScore);
 
 	UFUNCTION()
 	void HandleLSystemStep(int32 RemainingBudget);

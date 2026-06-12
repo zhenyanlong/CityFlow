@@ -10,6 +10,15 @@
 - Added urgent red material flashing while ARampageVehicle is in berserk mode
 - Updated TDD.md and TDD_Chinese.md section 2.6 with Teleport Vehicle documentation
 
+### Screen-Space Score Popup Feedback
+
+- Reworked vehicle score popups from world-space WidgetComponent actors into screen-space UMG feedback owned by `UCityFlowGameWidget`
+- Added `UScoringManager::OnScorePopupRequested(WorldLocation, DeltaScore)` so scoring reports signed score deltas without spawning UI actors
+- Added `UScorePopupWidget` with per-frame world-to-widget projection, rise/fade/scale animation, and native TextBlock fallback
+- Added optional `PopupLayer` CanvasPanel support and `ScorePopupWidgetClass` configuration to `UCityFlowGameWidget`
+- Fixed death popup reliability by binding `UScoringManager` directly to each spawned vehicle's `OnVehicleDeath`, while keeping the `VehicleManager::OnVehicleDied` fallback and deduplicating with `ScoredDeathVehicles`
+- Updated TDD.md and TDD_Chinese.md scoring/UI sections with the popup event flow and screen-space rendering design
+
 ## 2026-06-09
 
 ### Vehicle Death & Stop Flash System (v0.12)

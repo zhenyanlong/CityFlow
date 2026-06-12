@@ -2,10 +2,12 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "UObject/ObjectKey.h"
 #include "Grid/CityFlowGridTypes.h"
 #include "ScoringManager.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnScoreChanged, int32, NewTotalScore);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnScorePopupRequested, FVector, WorldLocation, int32, DeltaScore);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSimulationEvaluation);
 
 UCLASS()
@@ -57,6 +59,9 @@ public:
 	FOnScoreChanged OnScoreChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "Scoring|Events")
+	FOnScorePopupRequested OnScorePopupRequested;
+
+	UPROPERTY(BlueprintAssignable, Category = "Scoring|Events")
 	FOnSimulationEvaluation OnSimulationEvaluation;
 
 private:
@@ -68,6 +73,13 @@ private:
 
 	UFUNCTION()
 	void OnVehicleDeathHandler(class AVehicleActor* Vehicle);
+
+	UFUNCTION()
+	void OnVehicleSpawnedHandler(class AVehicleActor* Vehicle);
+
+	void BindVehicleDeathEvent(class AVehicleActor* Vehicle);
+	void UnbindVehicleDeathEvent(class AVehicleActor* Vehicle);
+	void RequestScorePopup(class AVehicleActor* Vehicle, int32 DeltaScore);
 
 	void UpdateCongestionPenalty();
 
@@ -88,6 +100,7 @@ private:
 	bool bIsScoring = false;
 	float CongestionUpdateTimer = 0.0f;
 	TSet<FGridVector> CurrentCongestedCells;
+	TSet<TObjectKey<class AVehicleActor>> ScoredDeathVehicles;
 
 	FTimerHandle PenaltyTimerHandle;
 	static constexpr float PENALTY_CHECK_INTERVAL = 1.0f;

@@ -56,6 +56,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Scoring", meta = (ClampMin = "2"))
 	int32 CongestionThreshold = 3;
 
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Popup")
+	bool bEnableScorePopups = true;
+
 	UPROPERTY(Config, EditAnywhere, Category = "Buildings", meta = (ClampMin = "2"))
 	int32 DefaultBuildingCount = 8;
 

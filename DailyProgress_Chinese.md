@@ -10,6 +10,15 @@
 - 新增 ARampageVehicle 暴走状态下的急促红色材质闪烁
 - 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节，记录瞬移车辆设计
 
+### 屏幕空间分数 Popup 反馈
+
+- 将车辆分数 popup 从世界空间 `WidgetComponent` Actor 重构为由 `UCityFlowGameWidget` 管理的屏幕空间 UMG 反馈
+- 新增 `UScoringManager::OnScorePopupRequested(WorldLocation, DeltaScore)`，计分层只广播带符号分数变化和世界锚点，不再生成 UI Actor
+- 新增 `UScorePopupWidget`：每帧执行世界坐标到 UI 坐标投影，支持上升、淡出、缩放回落动画，并提供原生 TextBlock fallback
+- 在 `UCityFlowGameWidget` 中新增可选 `PopupLayer` CanvasPanel 支持和 `ScorePopupWidgetClass` 配置
+- 修复死亡 popup 可靠性：`UScoringManager` 直接绑定每辆新生成车辆的 `OnVehicleDeath`，同时保留 `VehicleManager::OnVehicleDied` 兜底，并通过 `ScoredDeathVehicles` 防重复计分/重复 popup
+- 更新 TDD.md 和 TDD_Chinese.md 的计分/UI 章节，记录 popup 事件流和屏幕空间渲染设计
+
 ## 2026-06-09
 
 ### 车辆死亡与停车闪烁系统（v0.12）

@@ -2,8 +2,10 @@
 #include "GameMode/CityFlowGameMode.h"
 #include "Grid/GridManager.h"
 #include "Scoring/Subsystem/ScoringManager.h"
+#include "UI/ScorePopupWidget.h"
 #include "LSystem/Subsystem/LSystemManager.h"
 #include "Player/CityFlowPlayerController.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -28,7 +30,10 @@ void UCityFlowGameWidget::NativeConstruct()
 		GM->OnGamePhaseChanged.AddDynamic(this, &UCityFlowGameWidget::HandleGamePhaseChanged);
 
 	if (UScoringManager* SM = GetScoringManager())
+	{
 		SM->OnScoreChanged.AddDynamic(this, &UCityFlowGameWidget::HandleScoreChanged);
+		SM->OnScorePopupRequested.AddDynamic(this, &UCityFlowGameWidget::HandleScorePopupRequested);
+	}
 
 	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
 	{
@@ -56,7 +61,10 @@ void UCityFlowGameWidget::NativeDestruct()
 		GM->OnGamePhaseChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleGamePhaseChanged);
 
 	if (UScoringManager* SM = GetScoringManager())
+	{
 		SM->OnScoreChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleScoreChanged);
+		SM->OnScorePopupRequested.RemoveDynamic(this, &UCityFlowGameWidget::HandleScorePopupRequested);
+	}
 
 	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
 	{
@@ -125,6 +133,44 @@ void UCityFlowGameWidget::HandleScoreChanged(int32 NewScore)
 		Txt_Score->SetText(FText::FromString(FString::Printf(TEXT("Score: %d"), NewScore)));
 
 	OnScoreChanged_BP(NewScore);
+}
+
+void UCityFlowGameWidget::HandleScorePopupRequested(FVector WorldLocation, int32 DeltaScore)
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
+	{
+		return;
+	}
+
+	TSubclassOf<UScorePopupWidget> PopupClass = ScorePopupWidgetClass;
+	if (!PopupClass)
+	{
+		PopupClass = UScorePopupWidget::StaticClass();
+	}
+
+	UScorePopupWidget* Popup = CreateWidget<UScorePopupWidget>(PC, PopupClass);
+	if (!Popup)
+	{
+		return;
+	}
+
+	if (PopupLayer)
+	{
+		UCanvasPanelSlot* CanvasSlot = PopupLayer->AddChildToCanvas(Popup);
+		if (CanvasSlot)
+		{
+			CanvasSlot->SetAutoSize(true);
+			CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		}
+	}
+	else
+	{
+		Popup->AddToViewport(20);
+	}
+
+	const FLinearColor PopupColor = DeltaScore >= 0 ? PositivePopupColor : NegativePopupColor;
+	Popup->InitializeScreenPopup(PC, WorldLocation, DeltaScore, PopupColor);
 }
 
 void UCityFlowGameWidget::HandleLSystemStep(int32 RemainingBudget)
