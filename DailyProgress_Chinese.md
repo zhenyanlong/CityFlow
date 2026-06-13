@@ -1,3 +1,14 @@
+## 2026-06-13
+
+### Debug Screen Message 开关
+
+- 将交叉口相关 `AddOnScreenDebugMessage` 接入 `UCityFlowDeveloperSettings::bDebugDrawIntersections`，包括交叉口锁拒绝/通过、进入/离开 overlap、deadlock 释放锁提示
+- 在 `UCityFlowDeveloperSettings` 中新增 `bDebugVehicleAbilities`，默认 `false`
+- 在 `UCityFlowCheatExtension` 中新增 `CF_ToggleVehicleAbilityDebug`
+- 将暴走和瞬移车辆能力触发的 screen debug message 接入 `bDebugVehicleAbilities`
+- 已通过 `CityFlowEditor Win64 Development` 编译验证
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.13 节，记录新的 debug 控制项
+
 ## 2026-06-12
 
 ### 瞬移车辆类型（v0.15）

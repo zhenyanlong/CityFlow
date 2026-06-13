@@ -137,6 +137,16 @@ void UCityFlowCheatExtension::CF_ToggleCongestionDebug()
 	}
 }
 
+void UCityFlowCheatExtension::CF_ToggleVehicleAbilityDebug()
+{
+	UCityFlowDeveloperSettings* Settings = GetMutableDefault<UCityFlowDeveloperSettings>();
+	if (Settings)
+	{
+		Settings->bDebugVehicleAbilities = !Settings->bDebugVehicleAbilities;
+		UE_LOG(LogCityFlowCheat, Log, TEXT("Vehicle ability debug: %s"), Settings->bDebugVehicleAbilities ? TEXT("ON") : TEXT("OFF"));
+	}
+}
+
 void UCityFlowCheatExtension::CF_SetBudget(int32 Amount)
 {
 	UGridManager* GM = GetGridManager();

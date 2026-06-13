@@ -5,6 +5,7 @@
 #include "UI/ScorePopupWidget.h"
 #include "LSystem/Subsystem/LSystemManager.h"
 #include "Player/CityFlowPlayerController.h"
+#include "Vehicle/Subsystem/VehicleManager.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -16,6 +17,12 @@
 void UCityFlowGameWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+
+	if (Txt_VehicleAbilityAlert)
+	{
+		Txt_VehicleAbilityAlert->SetVisibility(ESlateVisibility::Collapsed);
+		Txt_VehicleAbilityAlert->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+	}
 
 	// 绑定按钮（回调必须是 UFUNCTION，否则 AddDynamic 静默失败）
 	if (Btn_TriggerLSystem)
@@ -39,6 +46,11 @@ void UCityFlowGameWidget::NativeConstruct()
 	{
 		LSM->OnGenerationStep.AddDynamic(this, &UCityFlowGameWidget::HandleLSystemStep);
 		LSM->OnGenerationFinished.AddDynamic(this, &UCityFlowGameWidget::HandleLSystemFinished);
+	}
+
+	if (UVehicleManager* VM = GetWorld()->GetSubsystem<UVehicleManager>())
+	{
+		VM->OnVehicleAbilityActivated.AddDynamic(this, &UCityFlowGameWidget::HandleVehicleAbilityActivated);
 	}
 
 	// 监听网格变化，随时刷新预算显示
@@ -72,10 +84,26 @@ void UCityFlowGameWidget::NativeDestruct()
 		LSM->OnGenerationFinished.RemoveDynamic(this, &UCityFlowGameWidget::HandleLSystemFinished);
 	}
 
+	if (UVehicleManager* VM = GetWorld()->GetSubsystem<UVehicleManager>())
+	{
+		VM->OnVehicleAbilityActivated.RemoveDynamic(this, &UCityFlowGameWidget::HandleVehicleAbilityActivated);
+	}
+
 	if (UGridManager* GridMgr = GetWorld()->GetSubsystem<UGridManager>())
 		GridMgr->OnCellChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleCellChanged);
 
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(VehicleAbilityAlertTimerHandle);
+	}
+
 	Super::NativeDestruct();
+}
+
+void UCityFlowGameWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	UpdateVehicleAbilityAlertFallback(InDeltaTime);
 }
 
 // ============================================================================
@@ -173,6 +201,11 @@ void UCityFlowGameWidget::HandleScorePopupRequested(FVector WorldLocation, int32
 	Popup->InitializeScreenPopup(PC, WorldLocation, DeltaScore, PopupColor);
 }
 
+void UCityFlowGameWidget::HandleVehicleAbilityActivated(AVehicleActor* Vehicle, EVehicleAbilityAlertType AlertType)
+{
+	ShowVehicleAbilityAlert(AlertType);
+}
+
 void UCityFlowGameWidget::HandleLSystemStep(int32 RemainingBudget)
 {
 	if (Txt_Budget)
@@ -222,6 +255,82 @@ void UCityFlowGameWidget::UpdateButtonStates(ECityFlowGamePhase Phase)
 	if (Btn_TriggerLSystem)   Btn_TriggerLSystem->SetVisibility(bPlanning ? EVis::Visible : EVis::Collapsed);
 	if (Btn_StartSimulation)  Btn_StartSimulation->SetVisibility(bPlanning ? EVis::Visible : EVis::Collapsed);
 	if (Btn_RestartPlanning)  Btn_RestartPlanning->SetVisibility(bSimulating ? EVis::Visible : EVis::Collapsed);
+}
+
+void UCityFlowGameWidget::ShowVehicleAbilityAlert(EVehicleAbilityAlertType AlertType)
+{
+	if (!Txt_VehicleAbilityAlert)
+	{
+		return;
+	}
+
+	const FText AlertText = AlertType == EVehicleAbilityAlertType::Rampage
+		? FText::FromString(TEXT("A vehicle has gone out of control!!!"))
+		: FText::FromString(TEXT("A vehicle teleported!!!"));
+
+	Txt_VehicleAbilityAlert->SetText(AlertText);
+	Txt_VehicleAbilityAlert->SetVisibility(ESlateVisibility::HitTestInvisible);
+	Txt_VehicleAbilityAlert->SetColorAndOpacity(FSlateColor(VehicleAbilityAlertColorA));
+	Txt_VehicleAbilityAlert->SetRenderOpacity(1.0f);
+	Txt_VehicleAbilityAlert->SetRenderScale(FVector2D(VehicleAbilityAlertMaxScale, VehicleAbilityAlertMaxScale));
+
+	VehicleAbilityAlertAge = 0.0f;
+	bVehicleAbilityAlertActive = true;
+	bVehicleAbilityAlertUsesNativeAnimation = Anim_VehicleAbilityAlert != nullptr;
+
+	if (Anim_VehicleAbilityAlert)
+	{
+		StopAnimation(Anim_VehicleAbilityAlert);
+		PlayAnimation(Anim_VehicleAbilityAlert, 0.0f, 1);
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(VehicleAbilityAlertTimerHandle);
+		World->GetTimerManager().SetTimer(
+			VehicleAbilityAlertTimerHandle,
+			this,
+			&UCityFlowGameWidget::HideVehicleAbilityAlert,
+			VehicleAbilityAlertDuration,
+			false);
+	}
+
+	OnVehicleAbilityAlert_BP(AlertType, AlertText);
+}
+
+void UCityFlowGameWidget::HideVehicleAbilityAlert()
+{
+	bVehicleAbilityAlertActive = false;
+	bVehicleAbilityAlertUsesNativeAnimation = false;
+	VehicleAbilityAlertAge = 0.0f;
+
+	if (Txt_VehicleAbilityAlert)
+	{
+		Txt_VehicleAbilityAlert->SetVisibility(ESlateVisibility::Collapsed);
+		Txt_VehicleAbilityAlert->SetRenderOpacity(0.0f);
+		Txt_VehicleAbilityAlert->SetRenderScale(FVector2D(1.0f, 1.0f));
+	}
+}
+
+void UCityFlowGameWidget::UpdateVehicleAbilityAlertFallback(float DeltaTime)
+{
+	if (!bVehicleAbilityAlertActive || bVehicleAbilityAlertUsesNativeAnimation || !Txt_VehicleAbilityAlert)
+	{
+		return;
+	}
+
+	VehicleAbilityAlertAge += DeltaTime;
+	const float Duration = FMath::Max(VehicleAbilityAlertDuration, KINDA_SMALL_NUMBER);
+	const float NormalizedAge = FMath::Clamp(VehicleAbilityAlertAge / Duration, 0.0f, 1.0f);
+	const float PulseAlpha = (FMath::Sin(VehicleAbilityAlertAge * VehicleAbilityAlertPulseFrequency * 2.0f * PI) + 1.0f) * 0.5f;
+	const float Scale = FMath::Lerp(VehicleAbilityAlertMinScale, VehicleAbilityAlertMaxScale, PulseAlpha);
+
+	FLinearColor AlertColor = FMath::Lerp(VehicleAbilityAlertColorA, VehicleAbilityAlertColorB, PulseAlpha);
+	AlertColor.A = 1.0f - FMath::SmoothStep(0.75f, 1.0f, NormalizedAge);
+
+	Txt_VehicleAbilityAlert->SetColorAndOpacity(FSlateColor(AlertColor));
+	Txt_VehicleAbilityAlert->SetRenderOpacity(AlertColor.A);
+	Txt_VehicleAbilityAlert->SetRenderScale(FVector2D(Scale, Scale));
 }
 
 // ============================================================================

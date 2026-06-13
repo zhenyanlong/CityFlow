@@ -1195,6 +1195,7 @@ All commands prefixed with `CF_`, accessible via console (~):
 | `CF_TogglePathDebug` | Toggles path line drawing |
 | `CF_ToggleIntersectionDebug` | Toggles intersection box drawing |
 | `CF_ToggleCongestionDebug` | Toggles congestion box drawing |
+| `CF_ToggleVehicleAbilityDebug` | Toggles rampage/teleport vehicle ability screen debug messages |
 | `CF_SetBudget N` | Sets absolute budget |
 | `CF_AddBudget N` | Adds budget |
 | `CF_ShowGridStats` | Prints grid statistics |
@@ -1205,7 +1206,8 @@ All commands prefixed with `CF_`, accessible via console (~):
 #### Visual Debug (DeveloperSettings toggles)
 - `bDebugDrawPaths` — Draws vehicle path lines + waypoints
 - `bDebugDrawCongestion` — Draws red boxes on congested cells
-- `bDebugDrawIntersections` — Draws orange/red boxes on intersections
+- `bDebugDrawIntersections` — Draws orange/red boxes on intersections and gates intersection lock/enter/exit screen messages
+- `bDebugVehicleAbilities` — Gates rampage and teleport vehicle ability screen debug messages; defaults to false
 
 #### DeveloperSettings (Config=Game)
 `UCityFlowDeveloperSettings` defaults all gameplay parameters (`TotalRoadBudget`, `SimulationDurationSeconds`, `VehicleSpawnInterval`, `ArrivalScore`, `CongestionPenaltyPerSecond`, `CongestionThreshold`, etc.) with in-editor configuration via Project Settings → CityFlow.

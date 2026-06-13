@@ -38,6 +38,9 @@ public:
 	void CF_ToggleCongestionDebug();
 
 	UFUNCTION(Exec, Category = "CityFlow|Debug")
+	void CF_ToggleVehicleAbilityDebug();
+
+	UFUNCTION(Exec, Category = "CityFlow|Debug")
 	void CF_SetBudget(int32 Amount);
 
 	UFUNCTION(Exec, Category = "CityFlow|Debug")

@@ -14,6 +14,13 @@ enum class EVehicleMovementState : uint8
 	Arrived
 };
 
+UENUM(BlueprintType)
+enum class EVehicleAbilityAlertType : uint8
+{
+	Rampage,
+	Teleport
+};
+
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FVehiclePathNode
 {

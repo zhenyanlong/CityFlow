@@ -72,6 +72,9 @@ public:
 	bool bDebugDrawIntersections = false;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Debug")
+	bool bDebugVehicleAbilities = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Debug")
 	bool bDebugLogVehicles = false;
 
 	UFUNCTION(BlueprintPure, Category = "CityFlow|Settings")

@@ -1,4 +1,6 @@
 #include "Vehicle/Actor/TeleportVehicle.h"
+#include "Vehicle/Subsystem/VehicleManager.h"
+#include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "Grid/GridManager.h"
 #include "Grid/RoadTile.h"
 #include "Components/SplineComponent.h"
@@ -93,9 +95,18 @@ void ATeleportVehicle::HandleWaitTimeout()
 
 	KillOverlappingVehicles(TeleportOverlapRadius);
 
-	if (GEngine)
+	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
+	if (GEngine && Settings && Settings->bDebugVehicleAbilities)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Purple,
 			FString::Printf(TEXT("[%s] Teleported forward %.0f cm"), *GetName(), TeleportDistance));
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UVehicleManager* VehicleManager = World->GetSubsystem<UVehicleManager>())
+		{
+			VehicleManager->NotifyVehicleAbilityActivated(this, EVehicleAbilityAlertType::Teleport);
+		}
 	}
 }

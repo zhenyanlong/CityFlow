@@ -660,6 +660,16 @@ void UVehicleManager::OnVehicleDeathHandler(AVehicleActor* Vehicle)
 	OnVehicleDied.Broadcast(Vehicle);
 }
 
+void UVehicleManager::NotifyVehicleAbilityActivated(AVehicleActor* Vehicle, EVehicleAbilityAlertType AlertType)
+{
+	if (!Vehicle)
+	{
+		return;
+	}
+
+	OnVehicleAbilityActivated.Broadcast(Vehicle, AlertType);
+}
+
 bool UVehicleManager::IsIntersection(const FGridVector& Pos) const
 {
 	UGridManager* GM = GetGridManager();

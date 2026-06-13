@@ -1182,6 +1182,7 @@ HUD 是**唯一的 Widget 生命周期所有者** — GameMode 不再创建 Widg
 | `CF_TogglePathDebug` | 切换路径线绘制 |
 | `CF_ToggleIntersectionDebug` | 切换交叉口框绘制 |
 | `CF_ToggleCongestionDebug` | 切换拥堵框绘制 |
+| `CF_ToggleVehicleAbilityDebug` | 切换暴走/瞬移车辆能力 screen debug message |
 | `CF_SetBudget N` | 设置绝对预算 |
 | `CF_AddBudget N` | 增加预算 |
 | `CF_ShowGridStats` | 打印网格统计信息 |
@@ -1192,7 +1193,8 @@ HUD 是**唯一的 Widget 生命周期所有者** — GameMode 不再创建 Widg
 #### 可视化调试（DeveloperSettings 开关）
 - `bDebugDrawPaths` — 绘制车辆路径线 + 航点
 - `bDebugDrawCongestion` — 在拥堵格上绘制红色框
-- `bDebugDrawIntersections` — 在交叉口上绘制橙/红色框
+- `bDebugDrawIntersections` — 在交叉口上绘制橙/红色框，并控制交叉口锁定/进入/离开的 screen debug message
+- `bDebugVehicleAbilities` — 控制暴走和瞬移车辆能力触发时的 screen debug message；默认 false
 
 #### DeveloperSettings（Config=Game）
 `UCityFlowDeveloperSettings` 默认所有游戏参数，通过 项目设置 → CityFlow 进行编辑器内配置。

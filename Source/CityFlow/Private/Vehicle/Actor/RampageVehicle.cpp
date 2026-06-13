@@ -1,4 +1,6 @@
 #include "Vehicle/Actor/RampageVehicle.h"
+#include "Vehicle/Subsystem/VehicleManager.h"
+#include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "Grid/RoadTile.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -30,6 +32,13 @@ void ARampageVehicle::Tick(float DeltaTime)
 
 void ARampageVehicle::HandleWaitTimeout()
 {
+	if (bBerserk)
+	{
+		TotalStopTime = 0.0f;
+		CongestionWaitTime = 0.0f;
+		return;
+	}
+
 	// Instead of dying, enter berserk rampage mode
 	bBerserk = true;
 
@@ -51,10 +60,19 @@ void ARampageVehicle::HandleWaitTimeout()
 	// Set state back to Moving so we drive through
 	MovementState = EVehicleMovementState::Moving;
 
-	if (GEngine)
+	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
+	if (GEngine && Settings && Settings->bDebugVehicleAbilities)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
 			FString::Printf(TEXT("[%s] RAMPAGE MODE ACTIVATED!"), *GetName()));
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UVehicleManager* VehicleManager = World->GetSubsystem<UVehicleManager>())
+		{
+			VehicleManager->NotifyVehicleAbilityActivated(this, EVehicleAbilityAlertType::Rampage);
+		}
 	}
 }
 

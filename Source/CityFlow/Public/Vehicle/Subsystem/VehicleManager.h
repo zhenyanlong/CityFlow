@@ -17,6 +17,7 @@ struct FVehicleSpawnEntry;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleSpawned, class AVehicleActor*, Vehicle);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleArrivedAtDest, class AVehicleActor*, Vehicle);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleDied, class AVehicleActor*, Vehicle);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVehicleAbilityActivated, class AVehicleActor*, Vehicle, EVehicleAbilityAlertType, AlertType);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCongestionUpdated);
 
 UCLASS()
@@ -74,6 +75,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	const TSet<FGridVector>& GetCongestedCells() const { return CongestedCells; }
 
+	void NotifyVehicleAbilityActivated(AVehicleActor* Vehicle, EVehicleAbilityAlertType AlertType);
+
 	UFUNCTION(BlueprintCallable, Category = "Vehicle|Debug")
 	void DebugDrawPaths() const;
 
@@ -88,6 +91,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
 	FOnVehicleDied OnVehicleDied;
+
+	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
+	FOnVehicleAbilityActivated OnVehicleAbilityActivated;
 
 	UPROPERTY(BlueprintAssignable, Category = "Vehicle|Events")
 	FOnCongestionUpdated OnCongestionUpdated;

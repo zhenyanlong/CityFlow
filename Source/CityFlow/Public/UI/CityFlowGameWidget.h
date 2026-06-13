@@ -7,7 +7,10 @@
 #include "Components/TextBlock.h"
 #include "GameMode/Types/CityFlowGameTypes.h"
 #include "Grid/CityFlowGridTypes.h"
+#include "Vehicle/Types/CityFlowVehicleTypes.h"
 #include "CityFlowGameWidget.generated.h"
+
+class UWidgetAnimation;
 
 UCLASS()
 class CITYFLOW_API UCityFlowGameWidget : public UUserWidget
@@ -17,6 +20,7 @@ class CITYFLOW_API UCityFlowGameWidget : public UUserWidget
 public:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 protected:
 	// ---- BindWidget 控件：蓝图放同名控件即自动绑定 ----
@@ -45,6 +49,12 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCanvasPanel> PopupLayer;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_VehicleAbilityAlert;
+
+	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> Anim_VehicleAbilityAlert;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Score Popup")
 	TSubclassOf<class UScorePopupWidget> ScorePopupWidgetClass;
 
@@ -53,6 +63,24 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Score Popup")
 	FLinearColor NegativePopupColor = FLinearColor(1.0f, 0.12f, 0.08f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
+	float VehicleAbilityAlertDuration = 2.75f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
+	FLinearColor VehicleAbilityAlertColorA = FLinearColor(1.0f, 0.85f, 0.05f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
+	FLinearColor VehicleAbilityAlertColorB = FLinearColor(1.0f, 0.05f, 0.02f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
+	float VehicleAbilityAlertPulseFrequency = 6.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
+	float VehicleAbilityAlertMinScale = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
+	float VehicleAbilityAlertMaxScale = 1.12f;
 
 	// ---- 蓝图事件回调 ----
 
@@ -77,6 +105,9 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "CityFlow|UI")
 	void OnLSystemFinished_BP(bool bAllConnected);
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "CityFlow|UI")
+	void OnVehicleAbilityAlert_BP(EVehicleAbilityAlertType AlertType, const FText& AlertText);
+
 private:
 	// ---- 按钮回调（必须是 UFUNCTION，否则 AddDynamic 绑定静默失败）----
 	UFUNCTION()
@@ -99,6 +130,9 @@ private:
 	void HandleScorePopupRequested(FVector WorldLocation, int32 DeltaScore);
 
 	UFUNCTION()
+	void HandleVehicleAbilityActivated(class AVehicleActor* Vehicle, EVehicleAbilityAlertType AlertType);
+
+	UFUNCTION()
 	void HandleLSystemStep(int32 RemainingBudget);
 
 	UFUNCTION()
@@ -111,6 +145,9 @@ private:
 	void UpdatePhaseText(ECityFlowGamePhase Phase);
 	void UpdateBudgetText();
 	void UpdateButtonStates(ECityFlowGamePhase Phase);
+	void ShowVehicleAbilityAlert(EVehicleAbilityAlertType AlertType);
+	void HideVehicleAbilityAlert();
+	void UpdateVehicleAbilityAlertFallback(float DeltaTime);
 	void StartCountdown();
 	UFUNCTION()
 	void TickCountdown();
@@ -122,5 +159,9 @@ private:
 	int32 GetRemainingBudget() const;
 
 	FTimerHandle CountdownTimerHandle;
+	FTimerHandle VehicleAbilityAlertTimerHandle;
 	int32 CountdownSeconds = 0;
+	float VehicleAbilityAlertAge = 0.0f;
+	bool bVehicleAbilityAlertActive = false;
+	bool bVehicleAbilityAlertUsesNativeAnimation = false;
 };

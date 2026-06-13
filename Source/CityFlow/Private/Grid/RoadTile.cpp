@@ -1,6 +1,7 @@
 #include "Grid/RoadTile.h"
 #include "Grid/GridManager.h"
 #include "Vehicle/Actor/VehicleActor.h"
+#include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -28,6 +29,12 @@ static FString DirToString(EGridDirection Dir)
 	case EGridDirection::Right: return TEXT("Right");
 	default:                    return TEXT("None");
 	}
+}
+
+static bool ShouldShowIntersectionScreenDebug()
+{
+	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
+	return Settings && Settings->bDebugDrawIntersections;
 }
 
 ARoadTile::ARoadTile()
@@ -577,7 +584,7 @@ bool ARoadTile::TryAcquireIntersectionLock(AVehicleActor* Vehicle, EGridDirectio
 			*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), *Reason, *OccupiedStr,
 			*DirToString(ServingDirection), ServedCount);
 
-		if (GEngine)
+		if (GEngine && ShouldShowIntersectionScreenDebug())
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red,
 				FString::Printf(TEXT("[%s] REJECT %s dir=%s (%s)"),
@@ -657,7 +664,7 @@ bool ARoadTile::TryAcquireIntersectionLock(AVehicleActor* Vehicle, EGridDirectio
 		PendingReservations.Contains(EntryDir) ? PendingReservations[EntryDir].Num() : 0,
 		DirectionOccupants.Contains(EntryDir) ? DirectionOccupants[EntryDir].Num() : 0);
 
-	if (GEngine)
+	if (GEngine && ShouldShowIntersectionScreenDebug())
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
 			FString::Printf(TEXT("[%s] GRANT %s dir=%s (pending=%d)"),
@@ -718,7 +725,7 @@ void ARoadTile::OnIntersectionBoxBeginOverlap(UPrimitiveComponent* OverlappedCom
 	UE_LOG(LogRoadTile, Verbose, TEXT("[%s] Vehicle %s ENTERED box dir=%s (occupants: %d)"),
 		*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), TotalInBox);
 
-	if (GEngine)
+	if (GEngine && ShouldShowIntersectionScreenDebug())
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
 			FString::Printf(TEXT("[%s] ENTER %s dir=%s (inside: %d, pending: %d)"),
@@ -820,7 +827,7 @@ void ARoadTile::OnIntersectionBoxEndOverlap(UPrimitiveComponent* OverlappedCompo
 	UE_LOG(LogRoadTile, Verbose, TEXT("[%s] Vehicle %s EXITED box dir=%s (anyOccluded=%s)"),
 		*GetName(), *Vehicle->GetName(), *DirToString(EntryDir), bStillOccupied ? TEXT("YES") : TEXT("no"));
 
-	if (GEngine)
+	if (GEngine && ShouldShowIntersectionScreenDebug())
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange,
 			FString::Printf(TEXT("[%s] EXIT %s dir=%s (cleared=%s)"),

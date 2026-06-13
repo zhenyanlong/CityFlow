@@ -1,5 +1,6 @@
 #include "Vehicle/Actor/VehicleActor.h"
 #include "Vehicle/Subsystem/VehicleManager.h"
+#include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "Grid/GridManager.h"
 #include "Grid/RoadTile.h"
 #include "Components/StaticMeshComponent.h"
@@ -229,7 +230,8 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 			PassedIntersections.Empty();
 			CongestionWaitTime = 0.0f;
 
-			if (GEngine)
+			const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
+			if (GEngine && Settings && Settings->bDebugDrawIntersections)
 			{
 				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
 					FString::Printf(TEXT("[%s] Deadlock timeout — released all intersection locks"),

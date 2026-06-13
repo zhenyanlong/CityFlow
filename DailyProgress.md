@@ -1,3 +1,14 @@
+## 2026-06-13
+
+### Debug Screen Message Toggles
+
+- Gated intersection-related `AddOnScreenDebugMessage` output behind `UCityFlowDeveloperSettings::bDebugDrawIntersections`, including intersection lock reject/grant, enter/exit overlap, and deadlock lock-release messages
+- Added `bDebugVehicleAbilities` to `UCityFlowDeveloperSettings` with default `false`
+- Added `CF_ToggleVehicleAbilityDebug` to `UCityFlowCheatExtension`
+- Gated rampage and teleport vehicle ability screen debug messages behind `bDebugVehicleAbilities`
+- Verified with `CityFlowEditor Win64 Development` build
+- Updated TDD.md and TDD_Chinese.md section 2.13 with the new debug controls
+
 ## 2026-06-12
 
 ### Teleport Vehicle Type (v0.15)
