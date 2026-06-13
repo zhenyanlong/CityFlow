@@ -845,6 +845,46 @@ AVehicleActor
 | `TeleportVFXScale` | `float` | `1.0` | `Vehicle\|Teleport\|VFX` | 写入两个瞬移 Niagara 系统 User Parameter 的缩放浮点值 |
 | `TeleportVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Teleport\|VFX` | 接收 `TeleportVFXScale` 的 Niagara User Parameter 名称 |
 
+#### 车辆 Hover 目的地方向指示器（v0.16 — ✅ 已实现）
+
+模拟阶段中，当鼠标悬停在车辆上时，该车辆会被高亮描边，并在车辆上方显示一个指向目的地的方向箭头。
+
+##### PlayerController Hover 检测
+
+`ACityFlowPlayerController::Tick()` 每帧调用 `UpdateVehicleHover()`：
+
+1. `IsSimulationPhaseActive()` 检查 `ACityFlowGameMode::GetCurrentPhase() == ECityFlowGamePhase::Simulating`。
+2. 若不在模拟阶段，`ClearHoveredVehicle()` 会关闭上一辆车的 hover 状态。
+3. 模拟阶段中，Controller 先使用 `ECC_GameTraceChannel1`（Vehicle 通道）执行鼠标下方 trace，若未命中车辆则回退到 `ECC_Visibility`。
+4. 当命中的 Actor 发生变化时，上一辆 `HoveredVehicle` 接收 `SetHovered(false)`，新的 `AVehicleActor` 接收 `SetHovered(true)`。
+
+这样规划阶段的放置预览逻辑与车辆查看逻辑保持独立，并避免模拟阶段之外出现 hover 效果。
+
+##### 车辆 Hover 渲染
+
+`AVehicleActor::SetHovered()` 切换两个效果：
+
+- **描边 Mask：** `ApplyHoverRenderState()` 遍历车辆 Actor 下所有 `UPrimitiveComponent` 子组件，并统一应用 `SetRenderCustomDepth()` 与 `SetCustomDepthStencilValue(HoverStencilValue)`。这会覆盖蓝图中额外添加的子 Mesh，而不只处理基础 `VehicleMesh`。
+- **目的地箭头：** `DestinationArrowWidget` 随 hover 状态显示/隐藏。该组件会从 CustomDepth 遍历中排除，因此箭头本身不会被纳入车辆描边 Mask。
+
+`PathSpline` 同样会从 CustomDepth 写入中排除。
+
+##### 目的地箭头朝向
+
+`DestinationArrowWidget` 是挂在 `VehicleRoot` 下的世界空间 `UWidgetComponent`。车辆处于 hover 状态时，`UpdateDestinationArrow()` 会执行：
+
+- 计算车辆当前位置到 `Destination->GetActorLocation()` 的水平向量。
+- 将 Widget 旋转到该方向，并叠加 `DestinationArrowRotationOffset`。
+- Widget 保持作为车辆子组件跟随车辆移动；高度由 `DestinationArrowHeight` 控制，并在 `OnConstruction()` 和 `BeginPlay()` 中通过 `RefreshDestinationArrowOffset()` 写入组件相对 Z。
+
+##### 蓝图 / 编辑器要求
+
+车辆蓝图需要为 `DestinationArrowWidget` 指定 Widget Class（例如一个只包含箭头图片的简单 Widget）。项目还需要开启 `Custom Depth-Stencil Pass`，并提供一个读取 `CustomStencil == HoverStencilValue`（默认 252）的后处理描边材质。
+
+##### 已知限制
+
+由于描边由后处理材质绘制，在某些渲染顺序下可能会视觉上盖到世界空间 3D Widget 上方。当前接受此限制，不进行修复；该实现保留世界空间箭头，避免引入额外的屏幕空间 Widget 通信逻辑。
+
 ---
 
 ### 2.7 起点 / 目的地生成与计分

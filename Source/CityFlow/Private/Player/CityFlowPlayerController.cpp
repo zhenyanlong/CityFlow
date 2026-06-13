@@ -1,12 +1,15 @@
 #include "Player/CityFlowPlayerController.h"
+#include "GameMode/CityFlowGameMode.h"
 #include "Grid/GridManager.h"
 #include "Grid/GridPlaceableActor.h"
 #include "UI/CityFlowHUD.h"
+#include "Vehicle/Actor/VehicleActor.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
 #define CF_DEBUG(fmt, ...) if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, FString::Printf(TEXT(fmt), ##__VA_ARGS__)); }
 
@@ -71,6 +74,8 @@ void ACityFlowPlayerController::Tick(float DeltaTime)
 	{
 		UpdatePreviewPosition();
 	}
+
+	UpdateVehicleHover();
 }
 
 void ACityFlowPlayerController::SpawnPreview()
@@ -297,6 +302,55 @@ void ACityFlowPlayerController::OnPausePressed_Implementation()
 {
 	if (ACityFlowHUD* HUD = GetHUD<ACityFlowHUD>())
 		HUD->TogglePause();
+}
+
+void ACityFlowPlayerController::UpdateVehicleHover()
+{
+	if (!IsSimulationPhaseActive())
+	{
+		ClearHoveredVehicle();
+		return;
+	}
+
+	AVehicleActor* HitVehicle = nullptr;
+	FHitResult Hit;
+	if (GetHitResultUnderCursor(ECC_GameTraceChannel1, false, Hit))
+	{
+		HitVehicle = Cast<AVehicleActor>(Hit.GetActor());
+	}
+
+	if (!HitVehicle && GetHitResultUnderCursor(ECC_Visibility, false, Hit))
+	{
+		HitVehicle = Cast<AVehicleActor>(Hit.GetActor());
+	}
+
+	if (HoveredVehicle.Get() == HitVehicle)
+	{
+		return;
+	}
+
+	ClearHoveredVehicle();
+
+	if (HitVehicle)
+	{
+		HoveredVehicle = HitVehicle;
+		HitVehicle->SetHovered(true);
+	}
+}
+
+void ACityFlowPlayerController::ClearHoveredVehicle()
+{
+	if (AVehicleActor* Vehicle = HoveredVehicle.Get())
+	{
+		Vehicle->SetHovered(false);
+	}
+	HoveredVehicle.Reset();
+}
+
+bool ACityFlowPlayerController::IsSimulationPhaseActive() const
+{
+	const ACityFlowGameMode* CityFlowGameMode = Cast<ACityFlowGameMode>(UGameplayStatics::GetGameMode(this));
+	return CityFlowGameMode && CityFlowGameMode->GetCurrentPhase() == ECityFlowGamePhase::Simulating;
 }
 
 UGridManager* ACityFlowPlayerController::GetGridManager() const

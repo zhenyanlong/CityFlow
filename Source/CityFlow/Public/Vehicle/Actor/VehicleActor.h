@@ -8,6 +8,8 @@
 #include "VehicleActor.generated.h"
 
 class UStaticMeshComponent;
+class UPrimitiveComponent;
+class UWidgetComponent;
 class ARoadTile;
 class UNiagaraSystem;
 class USoundBase;
@@ -24,6 +26,8 @@ class CITYFLOW_API AVehicleActor : public AActor
 
 public:
 	AVehicleActor();
+
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void Tick(float DeltaTime) override;
 
@@ -58,6 +62,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle|Debug")
 	void SetDebugColor(FLinearColor Color);
+
+	UFUNCTION(BlueprintCallable, Category = "Vehicle|Hover")
+	void SetHovered(bool bInHovered);
+
+	UFUNCTION(BlueprintPure, Category = "Vehicle|Hover")
+	bool IsHovered() const { return bHovered; }
 
 	/** Mark this intersection as passed — the vehicle can never re-acquire its lock. */
 	void MarkIntersectionPassed(class ARoadTile* Tile);
@@ -111,6 +121,21 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USplineComponent> PathSpline;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> DestinationArrowWidget;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Hover")
+	bool bEnableHoverIndicator = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Hover", meta = (ClampMin = "0", ClampMax = "255"))
+	int32 HoverStencilValue = 252;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Hover")
+	float DestinationArrowHeight = 160.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Hover")
+	FRotator DestinationArrowRotationOffset = FRotator(-90.0f, 0.0f, 0.0f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
 	float MoveSpeed = 600.0f;
@@ -223,6 +248,14 @@ protected:
 	/** Dynamic material instance for emissive pulsing during stop. Created lazily. */
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> FlashMaterialInstance;
+
+	bool bHovered = false;
+
+	void ApplyHoverRenderState(bool bInHovered);
+
+	void RefreshDestinationArrowOffset();
+
+	void UpdateDestinationArrow();
 
 	void HandleArrival();
 

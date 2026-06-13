@@ -9,6 +9,15 @@
 - Verified with `CityFlowEditor Win64 Development` build
 - Updated TDD.md and TDD_Chinese.md section 2.13 with the new debug controls
 
+### Vehicle Hover Destination Indicator (v0.16)
+
+- Added simulation-only vehicle hover detection in `ACityFlowPlayerController`, using the Vehicle trace channel with a Visibility fallback
+- Added `AVehicleActor::SetHovered()` to toggle CustomDepth/CustomStencil outline state and a destination arrow widget
+- Applied hover stencil state to all vehicle `UPrimitiveComponent` children, covering blueprint child meshes while excluding `DestinationArrowWidget` and `PathSpline`
+- Added `DestinationArrowWidget` support with configurable hover stencil value, arrow height, and rotation offset
+- Documented the accepted limitation that post-process outlines may render over world-space 3D widgets
+- Updated TDD.md and TDD_Chinese.md section 2.6 with the hover indicator design
+
 ## 2026-06-12
 
 ### Teleport Vehicle Type (v0.15)

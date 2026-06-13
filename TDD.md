@@ -863,6 +863,46 @@ When `TotalStopTime >= DeathTimeout`, `ATeleportVehicle::HandleWaitTimeout()` is
 | `TeleportVFXScale` | `float` | `1.0` | `Vehicle\|Teleport\|VFX` | Float sent to both teleport Niagara systems via User Parameter |
 | `TeleportVFXScaleParamName` | `FName` | `"Scale"` | `Vehicle\|Teleport\|VFX` | Niagara User Parameter name that receives `TeleportVFXScale` |
 
+#### Vehicle Hover Destination Indicator (v0.16 — ✅ Implemented)
+
+During the Simulation Phase, hovering the mouse over a vehicle highlights that vehicle and shows a destination-direction arrow above it.
+
+##### PlayerController Hover Detection
+
+`ACityFlowPlayerController::Tick()` calls `UpdateVehicleHover()` every frame:
+
+1. `IsSimulationPhaseActive()` checks `ACityFlowGameMode::GetCurrentPhase() == ECityFlowGamePhase::Simulating`.
+2. If not simulating, `ClearHoveredVehicle()` disables the previous hover state.
+3. In Simulation, the controller first traces under the cursor on `ECC_GameTraceChannel1` (Vehicle channel), then falls back to `ECC_Visibility`.
+4. When the hit actor changes, the previous `HoveredVehicle` receives `SetHovered(false)` and the new `AVehicleActor` receives `SetHovered(true)`.
+
+This keeps Planning placement preview logic independent from vehicle inspection and prevents hover effects outside Simulation.
+
+##### Vehicle Hover Rendering
+
+`AVehicleActor::SetHovered()` toggles two effects:
+
+- **Outline mask:** `ApplyHoverRenderState()` iterates all `UPrimitiveComponent` children on the vehicle actor and applies `SetRenderCustomDepth()` plus `SetCustomDepthStencilValue(HoverStencilValue)`. This covers blueprint-added child meshes as well as the base `VehicleMesh`.
+- **Destination arrow:** `DestinationArrowWidget` is shown/hidden with the hover state. The component is excluded from the CustomDepth iteration, so the arrow itself is not included in the vehicle outline mask.
+
+`PathSpline` is also excluded from CustomDepth writes.
+
+##### Destination Arrow Orientation
+
+`DestinationArrowWidget` is a world-space `UWidgetComponent` attached to `VehicleRoot`. `UpdateDestinationArrow()` runs while hovered:
+
+- Computes the horizontal vector from the vehicle to `Destination->GetActorLocation()`.
+- Rotates the widget to face that direction plus `DestinationArrowRotationOffset`.
+- Keeps the widget attached to the vehicle; height is controlled by `DestinationArrowHeight`, which is applied to the component's relative Z in `OnConstruction()` and `BeginPlay()` via `RefreshDestinationArrowOffset()`.
+
+##### Blueprint / Editor Requirements
+
+Vehicle Blueprints must assign a widget class to `DestinationArrowWidget` (for example, a simple arrow image widget). The project must also enable `Custom Depth-Stencil Pass` and provide a post-process outline material that reads `CustomStencil == HoverStencilValue` (default 252).
+
+##### Known Limitation
+
+Because the outline is drawn by a post-process material, it can visually appear over world-space 3D widgets in some render orders. This is currently accepted and not fixed; the chosen implementation keeps the arrow in world space and avoids additional screen-space widget plumbing.
+
 ---
 
 ### 2.7 Origin / Destination Generation & Scoring

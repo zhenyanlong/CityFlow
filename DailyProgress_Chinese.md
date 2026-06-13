@@ -9,6 +9,15 @@
 - 已通过 `CityFlowEditor Win64 Development` 编译验证
 - 更新 TDD.md 和 TDD_Chinese.md 第 2.13 节，记录新的 debug 控制项
 
+### 车辆 Hover 目的地方向指示器（v0.16）
+
+- 在 `ACityFlowPlayerController` 中新增仅模拟阶段生效的车辆 hover 检测，优先使用 Vehicle trace 通道，并以 Visibility 作为回退
+- 新增 `AVehicleActor::SetHovered()`，用于切换 CustomDepth/CustomStencil 描边状态和目的地箭头 Widget
+- 将 hover stencil 状态应用到车辆下所有 `UPrimitiveComponent` 子组件，覆盖蓝图子 Mesh，同时排除 `DestinationArrowWidget` 和 `PathSpline`
+- 新增 `DestinationArrowWidget` 支持，并提供可配置的 hover stencil 值、箭头高度和旋转偏移
+- 记录后处理描边可能盖到世界空间 3D Widget 上方这一已接受限制
+- 更新 TDD.md 和 TDD_Chinese.md 第 2.6 节，记录 hover 指示器设计
+
 ## 2026-06-12
 
 ### 瞬移车辆类型（v0.15）

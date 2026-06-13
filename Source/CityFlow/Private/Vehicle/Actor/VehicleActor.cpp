@@ -1,9 +1,12 @@
 #include "Vehicle/Actor/VehicleActor.h"
 #include "Vehicle/Subsystem/VehicleManager.h"
 #include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
+#include "Grid/Building.h"
 #include "Grid/GridManager.h"
 #include "Grid/RoadTile.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/WidgetComponent.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/OverlapResult.h"
@@ -29,6 +32,17 @@ AVehicleActor::AVehicleActor()
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
 	VehicleMesh->SetupAttachment(VehicleRoot);
 	VehicleMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	VehicleMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
+	VehicleMesh->SetRenderCustomDepth(false);
+
+	DestinationArrowWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("DestinationArrowWidget"));
+	DestinationArrowWidget->SetupAttachment(VehicleRoot);
+	DestinationArrowWidget->SetWidgetSpace(EWidgetSpace::World);
+	DestinationArrowWidget->SetDrawSize(FVector2D(80.0f, 80.0f));
+	DestinationArrowWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DestinationArrowWidget->SetRelativeLocation(FVector(0.0f, 0.0f, DestinationArrowHeight));
+	DestinationArrowWidget->SetVisibility(false);
+	DestinationArrowWidget->SetHiddenInGame(true);
 
 	PathSpline = CreateDefaultSubobject<USplineComponent>(TEXT("PathSpline"));
 	PathSpline->SetAbsolute(true, true, true);
@@ -44,9 +58,16 @@ AVehicleActor::AVehicleActor()
 	}
 }
 
+void AVehicleActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	RefreshDestinationArrowOffset();
+}
+
 void AVehicleActor::BeginPlay()
 {
 	Super::BeginPlay();
+	RefreshDestinationArrowOffset();
 }
 
 void AVehicleActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -166,6 +187,11 @@ void AVehicleActor::SetDestination(ABuilding* InDestination)
 void AVehicleActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	if (bHovered)
+	{
+		UpdateDestinationArrow();
+	}
 
 	switch (MovementState)
 	{
@@ -496,6 +522,84 @@ void AVehicleActor::SetDebugColor(FLinearColor Color)
 			DynMat->SetVectorParameterValue(TEXT("BaseColor"), Color);
 		}
 	}
+}
+
+void AVehicleActor::SetHovered(bool bInHovered)
+{
+	if (!bEnableHoverIndicator)
+	{
+		bInHovered = false;
+	}
+
+	if (bHovered == bInHovered)
+	{
+		return;
+	}
+
+	bHovered = bInHovered;
+
+	ApplyHoverRenderState(bHovered);
+
+	if (DestinationArrowWidget)
+	{
+		DestinationArrowWidget->SetVisibility(bHovered);
+		DestinationArrowWidget->SetHiddenInGame(!bHovered);
+		if (bHovered)
+		{
+			UpdateDestinationArrow();
+		}
+	}
+}
+
+void AVehicleActor::ApplyHoverRenderState(bool bInHovered)
+{
+	const int32 ClampedStencilValue = FMath::Clamp(HoverStencilValue, 0, 255);
+
+	TArray<UPrimitiveComponent*> PrimitiveComponents;
+	GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+
+	for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+	{
+		if (!PrimitiveComponent ||
+			PrimitiveComponent == DestinationArrowWidget ||
+			PrimitiveComponent == PathSpline)
+		{
+			continue;
+		}
+
+		PrimitiveComponent->SetRenderCustomDepth(bInHovered);
+		PrimitiveComponent->SetCustomDepthStencilValue(ClampedStencilValue);
+	}
+}
+
+void AVehicleActor::RefreshDestinationArrowOffset()
+{
+	if (!DestinationArrowWidget)
+	{
+		return;
+	}
+
+	FVector RelativeLocation = DestinationArrowWidget->GetRelativeLocation();
+	RelativeLocation.Z = DestinationArrowHeight;
+	DestinationArrowWidget->SetRelativeLocation(RelativeLocation);
+}
+
+void AVehicleActor::UpdateDestinationArrow()
+{
+	if (!DestinationArrowWidget || !Destination)
+	{
+		return;
+	}
+
+	FVector ToDestination = Destination->GetActorLocation() - GetActorLocation();
+	ToDestination.Z = 0.0f;
+	if (ToDestination.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FRotator DirectionRotation = ToDestination.Rotation();
+	DestinationArrowWidget->SetWorldRotation(DirectionRotation + DestinationArrowRotationOffset);
 }
 
 // ===== Death / Stop System =====

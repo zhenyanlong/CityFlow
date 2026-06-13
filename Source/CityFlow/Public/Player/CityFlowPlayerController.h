@@ -8,6 +8,7 @@
 class UInputAction;
 class UInputMappingContext;
 class AGridPlaceableActor;
+class AVehicleActor;
 
 UCLASS()
 class CITYFLOW_API ACityFlowPlayerController : public APlayerController
@@ -83,7 +84,11 @@ protected:
 private:
 	void TryPlaceAtCursor();
 	void TryRemoveAtCursor();
+	void UpdateVehicleHover();
+	void ClearHoveredVehicle();
+	bool IsSimulationPhaseActive() const;
 
 	FGridVector LastPlacedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
 	FGridVector LastRemovedGridPos = FGridVector(INDEX_NONE, INDEX_NONE);
+	TWeakObjectPtr<AVehicleActor> HoveredVehicle;
 };
