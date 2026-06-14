@@ -1,3 +1,13 @@
+## 2026-06-14
+
+### Environment Decoration and Grass Coverage Investigation
+
+- Added runtime Landscape decoration documentation for `UCityFlowLandscapeDecorationManager`, grass coverage sampling, and HISM instance cleanup.
+- Recorded the current open issue where grass sparse-density contrast remains visually unclear despite PIE logs showing distinguishable `G/R` sampling ratios.
+- Captured the latest grass sampling diagnostic baseline: `RatioObserved=(0.674, 0.981, 1.202)` with separate `BelowMin`, `Transition`, and `Full` sample counts.
+- Identified likely next investigation targets: grass mesh scale, `DensityPerCell`, per-cell random sampling washout, and possible cluster or density-map based generation.
+- Updated TDD.md and TDD_Chinese.md with the environment decoration design and open issue.
+
 ## 2026-06-13
 
 ### Debug Screen Message Toggles

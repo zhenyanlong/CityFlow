@@ -1,3 +1,13 @@
+## 2026-06-14
+
+### 环境景观装饰与草地覆盖问题排查
+
+- 为 `UCityFlowLandscapeDecorationManager`、草地覆盖采样和 HISM 实例清理补充运行时 Landscape 装饰技术文档。
+- 记录当前开放问题：即使 PIE 日志显示 `G/R` 采样比例存在区分，草地稀疏度在视觉上仍不明显。
+- 记录最新草地采样诊断基线：`RatioObserved=(0.674, 0.981, 1.202)`，并包含独立的 `BelowMin`、`Transition` 和 `Full` 采样计数。
+- 标记后续优先排查方向：草模型缩放、`DensityPerCell`、按格随机采样导致的视觉冲淡，以及基于 cluster 或密度图的生成方案。
+- 更新 TDD.md 和 TDD_Chinese.md，记录环境装饰设计与当前开放问题。
+
 ## 2026-06-13
 
 ### Debug Screen Message 开关
