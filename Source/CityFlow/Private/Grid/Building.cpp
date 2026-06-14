@@ -1,6 +1,7 @@
 #include "Grid/Building.h"
 #include "Grid/GridManager.h"
 #include "Grid/FoundationComponent.h"
+#include "Environment/Subsystem/CityFlowRiverManager.h"
 #include "Components/StaticMeshComponent.h"
 
 ABuilding::ABuilding()
@@ -160,6 +161,17 @@ bool ABuilding::ValidatePlacement(const FGridVector& BasePos) const
 	if (!GM || !GM->IsGridInitialized())
 	{
 		return false;
+	}
+
+	if (const UCityFlowRiverManager* RiverManager = GetWorld()->GetSubsystem<UCityFlowRiverManager>())
+	{
+		for (const FGridVector& Cell : CalculateOccupiedCells(BasePos))
+		{
+			if (RiverManager->IsRiverCell(Cell))
+			{
+				return false;
+			}
+		}
 	}
 
 	for (const FBuildingDoorway& Doorway : Doorways)

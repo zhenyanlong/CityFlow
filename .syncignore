@@ -1,0 +1,28 @@
+# 1. 屏蔽所有 UE 缓存、构建和资源大文件夹（解决卡死的核心）
+.codex/
+.git/
+.trae/
+.vs/
+Binaries/
+Config/
+Content/
+DerivedDataCache/
+Intermediate/
+Saved/
+Source/
+
+# 2. 屏蔽工程级配置文件
+*.sln
+*.uproject
+.gitattributes
+.gitignore
+.vsconfig
+
+# 3. 屏蔽其他不需要同步的 Markdown 文件
+DailyProgress.md
+DailyProgress_Chinese.md
+GDD.md
+GDD_Chinese.md
+TDD.md
+TDD_Chinese.md
+weeklyVideoScript.md

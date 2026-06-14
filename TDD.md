@@ -1254,6 +1254,50 @@ All commands prefixed with `CF_`, accessible via console (~):
 
 ---
 
+### 2.14 Environment Decoration and Grass Coverage
+
+`UCityFlowLandscapeDecorationManager` is a `UWorldSubsystem` responsible for runtime environment decoration during Planning setup. It owns a transient root actor named `CityFlowLandscapeDecorations` and spawns decoration meshes through `UHierarchicalInstancedStaticMeshComponent`, allowing large numbers of trees, rocks, and grass instances without one actor per item.
+
+#### Decoration Lifecycle
+
+- `ACityFlowGameMode::InitializeDefaultScene()` triggers decoration generation after grid initialization and river mask generation, and before default building placement.
+- `ClearDecorations()` destroys the transient root actor and clears all per-cell instance registries when returning to the main menu or regenerating the scene.
+- Road and building placement are observed through grid events (`OnCellChanged`, `OnGridPlaced`) so occupied cells clear registered landscape instances.
+- Instance cleanup uses logical instance records (`InstanceId`, `TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>`, `bAlive`) rather than hard actor references. Removed instances are hidden by setting their transform scale to zero, avoiding HISM index reshuffling and double-delete issues when one large instance covers multiple cells.
+
+#### Grass Coverage Sampling
+
+Grass coverage is configured through `UCityFlowLandscapeDecorationSettings::GrassCoverage`:
+
+| Property | Purpose |
+|---|---|
+| `GroundColorTexture` | CPU-side color texture expected to match the Landscape grass material texture. |
+| `MaterialTile` / `MaterialOffset` | World-space UV conversion values intended to match the Landscape material tiling parameters. |
+| `DensityPerCell` | Number of random candidate samples per eligible grid cell. |
+| `GreenRatioMin` | Hard cutoff; samples with `G/R < GreenRatioMin` never spawn grass. |
+| `GreenRatioPivot` | Full-density ratio target; samples from `GreenRatioMin` to this value use a steep probability ramp. |
+| `DryGrassRatio` | Optional minimum probability for non-cutoff dry areas; normally `0` when hard dry-ground rejection is desired. |
+
+For each eligible empty grid cell, random candidate positions are sampled inside the cell footprint. The manager converts each world position to texture UV using:
+
+```cpp
+U = WorldLocation.X * MaterialTile.X + MaterialOffset.X;
+V = WorldLocation.Y * MaterialTile.Y + MaterialOffset.Y;
+```
+
+The sampled pixel's `G/R` ratio drives spawn probability. Runtime logs include `RatioObserved=(Min, Avg, Max)`, `BelowMin`, `Transition`, and `Full` counts so material tiling and threshold tuning can be diagnosed from PIE output.
+
+#### Current Open Issue
+
+Grass sparse-density contrast is still not visually obvious even after the sampling logs show distinguishable color ratios. Example PIE diagnostics observed `RatioObserved=(0.674, 0.981, 1.202)` with clear `BelowMin` and `Full` sample counts, which suggests the CPU texture sampling path is reading varied ground colors. The remaining issue is likely in the visual density mapping stage rather than basic color sampling. Candidates to investigate next:
+
+- Grass mesh scale (`UniformScaleRange`) may be large enough that low-density areas still look filled.
+- `DensityPerCell` may still be high relative to the visible footprint of each grass mesh.
+- Per-cell random sampling may distribute enough instances across dry/transition borders that the final HISM result visually washes out the intended contrast.
+- A future fix may need per-cell density accumulation, cluster-level rejection, or direct Landscape Grass / foliage-style density maps instead of independent per-sample spawning.
+
+---
+
 ## 3. Performance Considerations
 
 | Concern | Strategy |

@@ -19,7 +19,8 @@ public class CityFlow : ModuleRules
 			"Slate",
 			"SlateCore",
 			"DeveloperSettings",
-			"Niagara"
+			"Niagara",
+			"Landscape"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

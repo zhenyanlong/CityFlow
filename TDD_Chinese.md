@@ -1241,6 +1241,50 @@ HUD 是**唯一的 Widget 生命周期所有者** — GameMode 不再创建 Widg
 
 ---
 
+### 2.14 环境景观装饰与草地覆盖
+
+`UCityFlowLandscapeDecorationManager` 是一个 `UWorldSubsystem`，负责在规划阶段初始化时生成运行时环境景观。它拥有一个临时根 Actor：`CityFlowLandscapeDecorations`，并通过 `UHierarchicalInstancedStaticMeshComponent` 生成装饰网格，使树木、岩石和草实例可以批量渲染，而不需要为每个装饰物生成独立 Actor。
+
+#### 装饰生命周期
+
+- `ACityFlowGameMode::InitializeDefaultScene()` 在网格初始化和河流 mask 生成之后、默认建筑生成之前触发景观装饰生成。
+- `ClearDecorations()` 在返回主菜单或重新生成场景时销毁临时根 Actor，并清空所有按格登记的实例记录。
+- 道路和建筑放置通过网格事件（`OnCellChanged`、`OnGridPlaced`）被景观管理器感知，使被占用格能够清理对应的景观实例。
+- 实例清理使用逻辑实例记录（`InstanceId`、`TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>`、`bAlive`），而不是硬引用 Actor。被移除的 HISM 实例通过把 transform scale 设为 0 隐藏，避免 HISM index 重排，也避免一个大型实例跨多个格子时被重复删除。
+
+#### 草地覆盖采样
+
+草地覆盖通过 `UCityFlowLandscapeDecorationSettings::GrassCoverage` 配置：
+
+| 属性 | 用途 |
+|---|---|
+| `GroundColorTexture` | CPU 侧采样用颜色贴图，预期与 Landscape 草地材质使用的颜色贴图一致。 |
+| `MaterialTile` / `MaterialOffset` | 世界坐标到 UV 的转换参数，预期与 Landscape 材质的纹理平铺参数一致。 |
+| `DensityPerCell` | 每个合格网格内的随机候选采样次数。 |
+| `GreenRatioMin` | 硬阈值；`G/R < GreenRatioMin` 的采样点绝不生成草。 |
+| `GreenRatioPivot` | 满密度目标比例；`GreenRatioMin` 到该值之间使用较陡的概率曲线。 |
+| `DryGrassRatio` | 非硬剔除干地区域的可选最低概率；需要硬剔除干地时通常保持为 `0`。 |
+
+每个合格空格内会随机采样候选位置。管理器用下列公式把世界坐标转换为贴图 UV：
+
+```cpp
+U = WorldLocation.X * MaterialTile.X + MaterialOffset.X;
+V = WorldLocation.Y * MaterialTile.Y + MaterialOffset.Y;
+```
+
+采样像素的 `G/R` 比例驱动生成概率。运行日志会输出 `RatioObserved=(Min, Avg, Max)`、`BelowMin`、`Transition` 和 `Full` 计数，用于在 PIE 输出中诊断材质平铺和阈值调参是否有效。
+
+#### 当前开放问题
+
+草地稀疏度的视觉区分目前仍不明显，即使采样日志已经显示颜色比例存在区分。已观察到的 PIE 诊断示例为 `RatioObserved=(0.674, 0.981, 1.202)`，且 `BelowMin` 与 `Full` 计数存在明显差异，这说明 CPU 侧贴图采样路径确实读取到了不同地表颜色。剩余问题更可能位于视觉密度映射阶段，而不是基础颜色采样阶段。后续候选排查方向：
+
+- 草模型缩放（`UniformScaleRange`）可能过大，导致低密度区域在视觉上仍被填满。
+- `DensityPerCell` 相对每个草模型的可见覆盖面积可能仍然偏高。
+- 按格独立随机采样可能在干地/过渡边缘分布出足够多的实例，使最终 HISM 结果冲淡了预期的密度对比。
+- 后续修复可能需要改为按格累计密度、按 cluster 级别拒绝，或改用 Landscape Grass / foliage 风格的密度图，而不是逐采样点独立生成。
+
+---
+
 ## 3. 性能考量
 
 | 关注点 | 策略 |

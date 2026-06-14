@@ -11,6 +11,10 @@
 #include "Scoring/Subsystem/ScoringManager.h"
 #include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
 #include "LSystem/Subsystem/LSystemManager.h"
+#include "Environment/CityFlowLandscapeDecorationSettings.h"
+#include "Environment/CityFlowRiverSettings.h"
+#include "Environment/Subsystem/CityFlowLandscapeDecorationManager.h"
+#include "Environment/Subsystem/CityFlowRiverManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -58,6 +62,12 @@ void ACityFlowGameMode::ReturnToMainMenu()
 	if (UScoringManager* SM = GetScoringManager())
 		SM->StopScoring();
 
+	if (UCityFlowLandscapeDecorationManager* LandscapeManager = GetWorld()->GetSubsystem<UCityFlowLandscapeDecorationManager>())
+		LandscapeManager->ClearDecorations();
+
+	if (UCityFlowRiverManager* RiverManager = GetWorld()->GetSubsystem<UCityFlowRiverManager>())
+		RiverManager->ClearRivers();
+
 	// 销毁所有已放置的 Actor
 	for (TActorIterator<AGridPlaceableActor> It(GetWorld()); It; ++It)
 		It->Destroy();
@@ -90,6 +100,28 @@ void ACityFlowGameMode::InitializeDefaultScene()
 	{
 		const FVector Origin = FVector(0.0f, 0.0f, 0.0f);
 		GM->InitGrid(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, Origin);
+	}
+
+	if (const UCityFlowRiverSettings* RiverSettings = GetDefault<UCityFlowRiverSettings>())
+	{
+		if (RiverSettings->bAutoGenerateOnNewGame)
+		{
+			if (UCityFlowRiverManager* RiverManager = GetWorld()->GetSubsystem<UCityFlowRiverManager>())
+			{
+				RiverManager->GenerateRivers(RiverSettings->RandomSeed);
+			}
+		}
+	}
+
+	if (const UCityFlowLandscapeDecorationSettings* LandscapeSettings = GetDefault<UCityFlowLandscapeDecorationSettings>())
+	{
+		if (LandscapeSettings->bAutoGenerateOnNewGame)
+		{
+			if (UCityFlowLandscapeDecorationManager* LandscapeManager = GetWorld()->GetSubsystem<UCityFlowLandscapeDecorationManager>())
+			{
+				LandscapeManager->GenerateDecorations(LandscapeSettings->RandomSeed);
+			}
+		}
 	}
 
 	TArray<FBuildingSpawnRequest> Requests;
