@@ -7,6 +7,7 @@
 #include "Scoring/Subsystem/ScoringManager.h"
 #include "Grid/GridManager.h"
 #include "LSystem/Subsystem/LSystemManager.h"
+#include "Player/CityFlowPawn.h"
 #include "Player/CityFlowPlayerController.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
@@ -30,6 +31,15 @@ void ACityFlowHUD::BeginPlay()
 
 void ACityFlowHUD::HandleSimulationEnded()
 {
+	if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
+	{
+		if (GM->IsCurrentMatchMenuPreview())
+		{
+			GM->StartAutomatedRandomMatch(true);
+			return;
+		}
+	}
+
 	ShowEvaluationWidget();
 }
 
@@ -63,8 +73,27 @@ void ACityFlowHUD::ShowStartWidget()
 	// 确保鼠标可见
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
+		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
+		{
+			CFPC->DisablePlacement();
+		}
+		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
+		{
+			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(true);
+		}
 		PC->bShowMouseCursor = true;
 		PC->SetInputMode(FInputModeUIOnly());
+	}
+
+	if (bEnableMainMenuPreviewMatch)
+	{
+		if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
+		{
+			if (!GM->IsCurrentMatchMenuPreview())
+			{
+				GM->StartAutomatedRandomMatch(true);
+			}
+		}
 	}
 }
 
@@ -83,16 +112,37 @@ void ACityFlowHUD::ShowGameWidget()
 	// GameMode 推迟初始化：首次进入 Planning 时创建场景
 	if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
 	{
+		if (GM->IsCurrentMatchMenuPreview())
+		{
+			GM->ReturnToMainMenu();
+		}
+
 		if (GM->GetCurrentPhase() == ECityFlowGamePhase::None)
+		{
 			GM->StartNewGame();
+		}
 	}
 
 	// 恢复 Game + UI 输入模式（从 StartWidget 的 UIOnly 切换回来）
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
+		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
+		{
+			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(false);
+		}
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(InputMode);
+		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
+		{
+			if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
+			{
+				if (GM->GetCurrentPhase() == ECityFlowGamePhase::Planning)
+				{
+					CFPC->EnablePlacement();
+				}
+			}
+		}
 	}
 }
 
@@ -136,7 +186,9 @@ void ACityFlowHUD::HidePauseOverlay()
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
 		PC->bShowMouseCursor = true;
-		PC->SetInputMode(FInputModeGameAndUI());
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(InputMode);
 	}
 }
 
@@ -176,6 +228,14 @@ void ACityFlowHUD::ShowEvaluationWidget()
 
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
+		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
+		{
+			CFPC->DisablePlacement();
+		}
+		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
+		{
+			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(false);
+		}
 		PC->bShowMouseCursor = true;
 		PC->SetInputMode(FInputModeUIOnly());
 	}
@@ -245,13 +305,7 @@ void ACityFlowHUD::HandleRandomModeClicked()
 
 void ACityFlowHUD::HandleRestartClicked()
 {
-	if (EvaluationWidget && EvaluationWidget->IsInViewport())
-		EvaluationWidget->RemoveFromParent();
-
-	if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
-		GM->RestartPlanningPhase();
-
-	ShowGameWidget();
+	ShowGameWidgetRandom();
 }
 
 void ACityFlowHUD::ShowGameWidgetRandom()
@@ -259,6 +313,9 @@ void ACityFlowHUD::ShowGameWidgetRandom()
 	// 隐藏 StartWidget
 	if (StartWidget && StartWidget->IsInViewport())
 		StartWidget->RemoveFromParent();
+	if (EvaluationWidget && EvaluationWidget->IsInViewport())
+		EvaluationWidget->RemoveFromParent();
+	HidePauseOverlay();
 
 	if (!GameWidget && GameWidgetClass)
 		GameWidget = CreateWidget<UCityFlowGameWidget>(GetWorld(), GameWidgetClass);
@@ -269,15 +326,14 @@ void ACityFlowHUD::ShowGameWidgetRandom()
 	ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode());
 	if (!GM) return;
 
-	// 随机模式：初始化场景并进入 Planning
-	if (GM->GetCurrentPhase() == ECityFlowGamePhase::None)
-	{
-		GM->StartNewGame();
-	}
+	GM->StartRandomPlanningGame();
 
-	// 开启 Actor 放置功能
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
+		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
+		{
+			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(false);
+		}
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(InputMode);

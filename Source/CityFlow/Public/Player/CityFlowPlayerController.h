@@ -79,7 +79,7 @@ protected:
 	UPROPERTY()
 	TObjectPtr<AGridPlaceableActor> PreviewActor;
 
-	bool bPlacementEnabled = true;
+	bool bPlacementEnabled = false;
 
 private:
 	void TryPlaceAtCursor();

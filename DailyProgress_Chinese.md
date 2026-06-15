@@ -1,3 +1,27 @@
+## 2026-06-15
+
+### 主菜单预览与随机规划流程（v0.17）
+
+- 新增标题界面自动随机预览对局，复用现有系统生成景观、建筑、L-system 道路并启动模拟。
+- 将玩家侧 Random Mode 拆分为 `StartRandomPlanningGame()`，只随机生成景观/建筑并停留在 Planning，让玩家自行设计道路。
+- 将 Evaluation 的 Restart 改为启动一局全新的随机 Planning 对局，而不是简单回到上一局 Planning 阶段。
+- 在 `ACityFlowGameMode` 上新增随机自动对局参数范围，用于配置网格尺寸、建筑数量和道路预算。
+
+### 主菜单摄像机旋转
+
+- 新增 `ACityFlowPawn::SetMainMenuCameraYawRotationEnabled()` 和 `MainMenuCameraYawSpeed`，用于标题界面缓慢旋转摄像机 yaw。
+- 接入 HUD 状态切换，使主菜单开启摄像机旋转，进入游戏和结算界面时关闭。
+- Pawn Tick 默认关闭，仅在主菜单摄像机旋转激活时启用。
+
+### 景观装饰根 Actor 修复
+
+- 修复快速重启 Random Mode 时景观装饰根 Actor 固定 UObject 名称冲突导致的 PIE 崩溃。
+- 保留编辑器中可见的 `CityFlowLandscapeDecorations` Actor Label，同时让 Unreal 自动生成唯一运行时对象名。
+
+### 文档更新
+
+- 更新 TDD.md 和 TDD_Chinese.md，记录标题预览流程、Random Mode 规划流程、主菜单摄像机旋转、放置生命周期变化和景观根 Actor 命名修复。
+
 ## 2026-06-14
 
 ### 环境景观装饰与草地覆盖问题排查

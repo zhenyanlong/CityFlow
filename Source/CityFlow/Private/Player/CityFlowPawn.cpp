@@ -9,7 +9,8 @@
 
 ACityFlowPawn::ACityFlowPawn()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	bUseControllerRotationYaw = false;
 
@@ -19,6 +20,12 @@ ACityFlowPawn::ACityFlowPawn()
 	CharMovement->MovementMode = MOVE_Flying;
 	CharMovement->BrakingDecelerationFlying = MoveSpeed * 4.0f;
 	CharMovement->MaxFlySpeed = MoveSpeed;
+}
+
+void ACityFlowPawn::SetMainMenuCameraYawRotationEnabled(bool bEnabled)
+{
+	bMainMenuCameraYawRotationEnabled = bEnabled;
+	SetActorTickEnabled(bEnabled);
 }
 
 void ACityFlowPawn::BeginPlay()
@@ -45,6 +52,24 @@ void ACityFlowPawn::BeginPlay()
 				}
 			}
 		}
+	}
+}
+
+void ACityFlowPawn::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (!bMainMenuCameraYawRotationEnabled || FMath::IsNearlyZero(MainMenuCameraYawSpeed))
+	{
+		return;
+	}
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		FRotator CameraRotation = PC->GetControlRotation();
+		CameraRotation.Yaw += MainMenuCameraYawSpeed * DeltaSeconds;
+		PC->SetControlRotation(CameraRotation);
+		CameraYaw = CameraRotation.Yaw;
 	}
 }
 

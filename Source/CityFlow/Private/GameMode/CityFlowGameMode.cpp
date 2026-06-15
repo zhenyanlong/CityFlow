@@ -19,6 +19,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
+#include "HAL/PlatformTime.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCityFlowGM, Log, All);
 
@@ -31,56 +32,81 @@ void ACityFlowGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
-	RemainingBudget = TotalRoadBudget;
-	PlayerBudget = FMath::RoundToInt(TotalRoadBudget * (1.0f - LSystemBudgetShare));
-	LSystemBudget = TotalRoadBudget - PlayerBudget;
+	ActiveTotalRoadBudget = TotalRoadBudget;
+	RemainingBudget = ActiveTotalRoadBudget;
+	PlayerBudget = FMath::RoundToInt(ActiveTotalRoadBudget * (1.0f - LSystemBudgetShare));
+	LSystemBudget = ActiveTotalRoadBudget - PlayerBudget;
 
 	if (UGridManager* GM = GetGridManager())
-		GM->SetRoadBudget(TotalRoadBudget);
+		GM->SetRoadBudget(ActiveTotalRoadBudget);
 }
 
 void ACityFlowGameMode::StartNewGame()
 {
-	if (CurrentPhase != ECityFlowGamePhase::None)
+	if (CurrentPhase != ECityFlowGamePhase::None && !bCurrentMatchIsMenuPreview)
 		return;
 
-	InitializeDefaultScene();
+	ResetRuntimeScene();
+	bCurrentMatchIsMenuPreview = false;
+	bAutoStartSimulationAfterLSystem = false;
+	InitializeScene(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, DefaultBuildingCount, TotalRoadBudget, INDEX_NONE);
+	TransitionToPhase(ECityFlowGamePhase::Planning);
+}
+
+void ACityFlowGameMode::StartAutomatedRandomMatch(bool bAsMenuPreview)
+{
+	ResetRuntimeScene();
+
+	bCurrentMatchIsMenuPreview = bAsMenuPreview;
+	bAutoStartSimulationAfterLSystem = true;
+
+	int32 MatchGridWidth = DefaultGridWidth;
+	int32 MatchGridHeight = DefaultGridHeight;
+	int32 MatchBuildingCount = DefaultBuildingCount;
+	int32 MatchRoadBudget = TotalRoadBudget;
+	int32 RandomSeed = INDEX_NONE;
+	PickRandomSceneParameters(MatchGridWidth, MatchGridHeight, MatchBuildingCount, MatchRoadBudget, RandomSeed);
+
+	InitializeScene(
+		FMath::Max(4, MatchGridWidth),
+		FMath::Max(4, MatchGridHeight),
+		DefaultCellSize,
+		FMath::Max(2, MatchBuildingCount),
+		FMath::Max(1, MatchRoadBudget),
+		RandomSeed);
+
+	TransitionToPhase(ECityFlowGamePhase::Planning);
+	StartAutoRoadGenerationOrSimulation();
+}
+
+void ACityFlowGameMode::StartRandomPlanningGame()
+{
+	ResetRuntimeScene();
+
+	bCurrentMatchIsMenuPreview = false;
+	bAutoStartSimulationAfterLSystem = false;
+
+	int32 MatchGridWidth = DefaultGridWidth;
+	int32 MatchGridHeight = DefaultGridHeight;
+	int32 MatchBuildingCount = DefaultBuildingCount;
+	int32 MatchRoadBudget = TotalRoadBudget;
+	int32 RandomSeed = INDEX_NONE;
+	PickRandomSceneParameters(MatchGridWidth, MatchGridHeight, MatchBuildingCount, MatchRoadBudget, RandomSeed);
+
+	InitializeScene(
+		FMath::Max(4, MatchGridWidth),
+		FMath::Max(4, MatchGridHeight),
+		DefaultCellSize,
+		FMath::Max(2, MatchBuildingCount),
+		FMath::Max(1, MatchRoadBudget),
+		RandomSeed);
+
 	TransitionToPhase(ECityFlowGamePhase::Planning);
 }
 
 void ACityFlowGameMode::ReturnToMainMenu()
 {
-	// 停止一切
-	GetWorldTimerManager().ClearTimer(SimulationTimerHandle);
-
-	if (UVehicleManager* VM = GetVehicleManager())
-	{
-		VM->StopSpawning();
-		VM->ClearAllVehicles();
-	}
-
-	if (UScoringManager* SM = GetScoringManager())
-		SM->StopScoring();
-
-	if (UCityFlowLandscapeDecorationManager* LandscapeManager = GetWorld()->GetSubsystem<UCityFlowLandscapeDecorationManager>())
-		LandscapeManager->ClearDecorations();
-
-	if (UCityFlowRiverManager* RiverManager = GetWorld()->GetSubsystem<UCityFlowRiverManager>())
-		RiverManager->ClearRivers();
-
-	// 销毁所有已放置的 Actor
-	for (TActorIterator<AGridPlaceableActor> It(GetWorld()); It; ++It)
-		It->Destroy();
-
-	// 重置网格
-	if (UGridManager* GM = GetGridManager())
-		GM->InitGrid(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, FVector::ZeroVector);
-
-	// 重置 L-system
-	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
-		LSM->AbortGeneration();
-
-	CurrentPhase = ECityFlowGamePhase::None;
+	ResetRuntimeScene();
 }
 
 void ACityFlowGameMode::Tick(float DeltaSeconds)
@@ -90,17 +116,25 @@ void ACityFlowGameMode::Tick(float DeltaSeconds)
 
 void ACityFlowGameMode::InitializeDefaultScene()
 {
+	InitializeScene(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, DefaultBuildingCount, TotalRoadBudget, INDEX_NONE);
+}
+
+void ACityFlowGameMode::InitializeScene(int32 GridWidth, int32 GridHeight, float CellSize, int32 BuildingCount, int32 RoadBudget, int32 RandomSeed)
+{
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
 		return;
 	}
 
-	if (!GM->IsGridInitialized())
-	{
-		const FVector Origin = FVector(0.0f, 0.0f, 0.0f);
-		GM->InitGrid(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, Origin);
-	}
+	ActiveTotalRoadBudget = FMath::Max(0, RoadBudget);
+	RemainingBudget = ActiveTotalRoadBudget;
+	PlayerBudget = FMath::RoundToInt(ActiveTotalRoadBudget * (1.0f - LSystemBudgetShare));
+	LSystemBudget = ActiveTotalRoadBudget - PlayerBudget;
+
+	const FVector Origin = FVector(0.0f, 0.0f, 0.0f);
+	GM->InitGrid(GridWidth, GridHeight, CellSize, Origin);
+	GM->SetRoadBudget(ActiveTotalRoadBudget);
 
 	if (const UCityFlowRiverSettings* RiverSettings = GetDefault<UCityFlowRiverSettings>())
 	{
@@ -108,7 +142,8 @@ void ACityFlowGameMode::InitializeDefaultScene()
 		{
 			if (UCityFlowRiverManager* RiverManager = GetWorld()->GetSubsystem<UCityFlowRiverManager>())
 			{
-				RiverManager->GenerateRivers(RiverSettings->RandomSeed);
+				const int32 RiverSeed = RandomSeed == INDEX_NONE ? RiverSettings->RandomSeed : RandomSeed;
+				RiverManager->GenerateRivers(RiverSeed);
 			}
 		}
 	}
@@ -119,7 +154,8 @@ void ACityFlowGameMode::InitializeDefaultScene()
 		{
 			if (UCityFlowLandscapeDecorationManager* LandscapeManager = GetWorld()->GetSubsystem<UCityFlowLandscapeDecorationManager>())
 			{
-				LandscapeManager->GenerateDecorations(LandscapeSettings->RandomSeed);
+				const int32 DecorationSeed = RandomSeed == INDEX_NONE ? LandscapeSettings->RandomSeed : RandomSeed + 1;
+				LandscapeManager->GenerateDecorations(DecorationSeed);
 			}
 		}
 	}
@@ -148,7 +184,7 @@ void ACityFlowGameMode::InitializeDefaultScene()
 				{
 					if (!Entries[i].BuildingClass) continue;
 
-					const float Fraction = (Entries[i].SpawnWeight / TotalWeight) * DefaultBuildingCount;
+					const float Fraction = (Entries[i].SpawnWeight / TotalWeight) * BuildingCount;
 					const int32 Count = FMath::FloorToInt(Fraction);
 					AssignedTotal += Count;
 
@@ -164,13 +200,13 @@ void ACityFlowGameMode::InitializeDefaultScene()
 				}
 
 				// 余量按小数部分从大到小分配
-				const int32 Remainder = DefaultBuildingCount - AssignedTotal;
+				const int32 Remainder = BuildingCount - AssignedTotal;
 				Fractionals.Sort([](const TPair<int32, float>& A, const TPair<int32, float>& B)
 				{
 					return A.Value > B.Value;
 				});
 
-				for (int32 i = 0; i < Remainder; ++i)
+				for (int32 i = 0; i < Remainder && Fractionals.IsValidIndex(i); ++i)
 				{
 					const int32 EntryIdx = Fractionals[i].Key;
 					bool bFound = false;
@@ -199,7 +235,7 @@ void ACityFlowGameMode::InitializeDefaultScene()
 		// 回退：使用旧的单类配置
 		if (OriginBuildingClass || DestinationBuildingClass)
 		{
-			const int32 HalfCount = DefaultBuildingCount / 2;
+			const int32 HalfCount = BuildingCount / 2;
 
 			if (OriginBuildingClass)
 			{
@@ -213,7 +249,7 @@ void ACityFlowGameMode::InitializeDefaultScene()
 			{
 				FBuildingSpawnRequest DestReq;
 				DestReq.BuildingClass = DestinationBuildingClass;
-				DestReq.Count = DefaultBuildingCount - HalfCount;
+				DestReq.Count = BuildingCount - HalfCount;
 				Requests.Add(DestReq);
 			}
 		}
@@ -224,12 +260,7 @@ void ACityFlowGameMode::InitializeDefaultScene()
 		GM->TryPlaceBuildingsRandom(Requests);
 	}
 
-	ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>();
-	if (LSM && RoadTileClass)
-	{
-		LSM->SetRoadTileClass(RoadTileClass);
-		LSM->SetBranchBudget(LSystemBudget);
-	}
+	ConfigureLSystemForActiveScene();
 }
 
 void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
@@ -242,9 +273,9 @@ void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
 	switch (NewPhase)
 	{
 	case ECityFlowGamePhase::Planning:
-		RemainingBudget = TotalRoadBudget;
-		PlayerBudget = FMath::RoundToInt(TotalRoadBudget * (1.0f - LSystemBudgetShare));
-		LSystemBudget = TotalRoadBudget - PlayerBudget;
+		RemainingBudget = GetActiveTotalRoadBudget();
+		PlayerBudget = FMath::RoundToInt(GetActiveTotalRoadBudget() * (1.0f - LSystemBudgetShare));
+		LSystemBudget = GetActiveTotalRoadBudget() - PlayerBudget;
 
 		{
 			ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>();
@@ -339,12 +370,21 @@ void ACityFlowGameMode::EndSimulationPhase()
 
 void ACityFlowGameMode::RestartPlanningPhase()
 {
+	GetWorldTimerManager().ClearTimer(SimulationTimerHandle);
+
 	UVehicleManager* VM = GetVehicleManager();
 	if (VM)
 	{
 		VM->ClearAllVehicles();
 	}
 
+	if (UScoringManager* SM = GetScoringManager())
+	{
+		SM->StopScoring();
+	}
+
+	bCurrentMatchIsMenuPreview = false;
+	bAutoStartSimulationAfterLSystem = false;
 	TransitionToPhase(ECityFlowGamePhase::Planning);
 }
 
@@ -413,6 +453,140 @@ void ACityFlowGameMode::OnVehicleArrivedHandler(AVehicleActor* Vehicle)
 	{
 		return;
 	}
+}
+
+void ACityFlowGameMode::HandleAutoLSystemFinished(bool bAllConnected)
+{
+	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
+	{
+		LSM->OnGenerationFinished.RemoveDynamic(this, &ACityFlowGameMode::HandleAutoLSystemFinished);
+	}
+
+	if (!bAutoStartSimulationAfterLSystem)
+	{
+		return;
+	}
+
+	bAutoStartSimulationAfterLSystem = false;
+
+	if (CurrentPhase == ECityFlowGamePhase::Planning)
+	{
+		StartSimulationPhase();
+	}
+}
+
+void ACityFlowGameMode::ResetRuntimeScene()
+{
+	bAutoStartSimulationAfterLSystem = false;
+
+	GetWorldTimerManager().ClearTimer(SimulationTimerHandle);
+	SimulationTimeRemaining = 0.0f;
+
+	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
+	{
+		LSM->OnGenerationFinished.RemoveDynamic(this, &ACityFlowGameMode::HandleAutoLSystemFinished);
+		LSM->AbortGeneration();
+	}
+
+	if (UVehicleManager* VM = GetVehicleManager())
+	{
+		VM->ClearAllVehicles();
+	}
+
+	if (UScoringManager* SM = GetScoringManager())
+	{
+		SM->StopScoring();
+	}
+
+	if (UCityFlowLandscapeDecorationManager* LandscapeManager = GetWorld()->GetSubsystem<UCityFlowLandscapeDecorationManager>())
+	{
+		LandscapeManager->ClearDecorations();
+	}
+
+	if (UCityFlowRiverManager* RiverManager = GetWorld()->GetSubsystem<UCityFlowRiverManager>())
+	{
+		RiverManager->ClearRivers();
+	}
+
+	for (TActorIterator<AGridPlaceableActor> It(GetWorld()); It; ++It)
+	{
+		It->Destroy();
+	}
+
+	if (UGridManager* GM = GetGridManager())
+	{
+		GM->InitGrid(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, FVector::ZeroVector);
+		GM->SetRoadBudget(TotalRoadBudget);
+	}
+
+	ActiveTotalRoadBudget = TotalRoadBudget;
+	RemainingBudget = TotalRoadBudget;
+	PlayerBudget = FMath::RoundToInt(TotalRoadBudget * (1.0f - LSystemBudgetShare));
+	LSystemBudget = TotalRoadBudget - PlayerBudget;
+	CurrentPhase = ECityFlowGamePhase::None;
+	bCurrentMatchIsMenuPreview = false;
+}
+
+void ACityFlowGameMode::PickRandomSceneParameters(int32& OutGridWidth, int32& OutGridHeight, int32& OutBuildingCount, int32& OutRoadBudget, int32& OutRandomSeed) const
+{
+	OutRandomSeed = static_cast<int32>(FPlatformTime::Cycles() & 0x7fffffff);
+	FMath::RandInit(OutRandomSeed);
+
+	auto PickIntInRange = [](const FIntPoint& Range, int32 Fallback)
+	{
+		const int32 MinValue = FMath::Min(Range.X, Range.Y);
+		const int32 MaxValue = FMath::Max(Range.X, Range.Y);
+		return MaxValue >= MinValue ? FMath::RandRange(MinValue, MaxValue) : Fallback;
+	};
+
+	OutGridWidth = bRandomizeAutoMatchParameters
+		? PickIntInRange(AutoMatchGridWidthRange, DefaultGridWidth)
+		: DefaultGridWidth;
+	OutGridHeight = bRandomizeAutoMatchParameters
+		? PickIntInRange(AutoMatchGridHeightRange, DefaultGridHeight)
+		: DefaultGridHeight;
+	OutBuildingCount = bRandomizeAutoMatchParameters
+		? PickIntInRange(AutoMatchBuildingCountRange, DefaultBuildingCount)
+		: DefaultBuildingCount;
+	OutRoadBudget = bRandomizeAutoMatchParameters
+		? PickIntInRange(AutoMatchRoadBudgetRange, TotalRoadBudget)
+		: TotalRoadBudget;
+}
+
+void ACityFlowGameMode::ConfigureLSystemForActiveScene()
+{
+	if (ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>())
+	{
+		if (RoadTileClass)
+		{
+			LSM->SetRoadTileClass(RoadTileClass);
+		}
+		LSM->SetBranchBudget(LSystemBudget);
+	}
+}
+
+void ACityFlowGameMode::StartAutoRoadGenerationOrSimulation()
+{
+	ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>();
+	if (!LSM || !RoadTileClass)
+	{
+		HandleAutoLSystemFinished(false);
+		return;
+	}
+
+	LSM->OnGenerationFinished.RemoveDynamic(this, &ACityFlowGameMode::HandleAutoLSystemFinished);
+	LSM->OnGenerationFinished.AddDynamic(this, &ACityFlowGameMode::HandleAutoLSystemFinished);
+	TriggerLSystemGrowth();
+
+	if (!LSM->IsGenerating() && bAutoStartSimulationAfterLSystem)
+	{
+		HandleAutoLSystemFinished(AreAllBuildingsConnected());
+	}
+}
+
+int32 ACityFlowGameMode::GetActiveTotalRoadBudget() const
+{
+	return ActiveTotalRoadBudget > 0 ? ActiveTotalRoadBudget : TotalRoadBudget;
 }
 
 bool ACityFlowGameMode::AreAllBuildingsConnected() const

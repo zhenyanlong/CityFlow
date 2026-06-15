@@ -22,6 +22,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void StartNewGame();
 
+	/** 使用随机参数创建一局自动对局：生成场景、生成道路，并在道路生成完成后进入模拟 */
+	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
+	void StartAutomatedRandomMatch(bool bAsMenuPreview);
+
+	/** 使用随机参数创建一局玩家可操作的规划开局：只生成景观和建筑，停留在 Planning */
+	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
+	void StartRandomPlanningGame();
+
 	/** 回到主菜单 —— 清理所有 Actor 和状态 */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void ReturnToMainMenu();
@@ -58,6 +66,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "CityFlow|Game")
 	float GetSimulationTimeRemaining() const;
+
+	UFUNCTION(BlueprintPure, Category = "CityFlow|Game")
+	bool IsCurrentMatchMenuPreview() const { return bCurrentMatchIsMenuPreview; }
 
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void InitializeDefaultScene();
@@ -108,6 +119,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Vehicle", meta = (ClampMin = "0.0", ClampMax = "0.45"))
 	float LaneOffsetFactor = 0.2f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Auto Match")
+	bool bRandomizeAutoMatchParameters = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Auto Match")
+	FIntPoint AutoMatchGridWidthRange = FIntPoint(20, 28);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Auto Match")
+	FIntPoint AutoMatchGridHeightRange = FIntPoint(20, 28);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Auto Match")
+	FIntPoint AutoMatchBuildingCountRange = FIntPoint(6, 12);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Auto Match")
+	FIntPoint AutoMatchRoadBudgetRange = FIntPoint(120, 260);
+
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|Events")
 	FOnGamePhaseChanged OnGamePhaseChanged;
 
@@ -125,6 +151,15 @@ protected:
 private:
 	void OnSimulationTimerExpired();
 	void OnVehicleArrivedHandler(class AVehicleActor* Vehicle);
+	UFUNCTION()
+	void HandleAutoLSystemFinished(bool bAllConnected);
+
+	void ResetRuntimeScene();
+	void PickRandomSceneParameters(int32& OutGridWidth, int32& OutGridHeight, int32& OutBuildingCount, int32& OutRoadBudget, int32& OutRandomSeed) const;
+	void InitializeScene(int32 GridWidth, int32 GridHeight, float CellSize, int32 BuildingCount, int32 RoadBudget, int32 RandomSeed);
+	void ConfigureLSystemForActiveScene();
+	void StartAutoRoadGenerationOrSimulation();
+	int32 GetActiveTotalRoadBudget() const;
 	bool AreAllBuildingsConnected() const;
 
 	class UGridManager* GetGridManager() const;
@@ -132,10 +167,13 @@ private:
 	class UScoringManager* GetScoringManager() const;
 
 	ECityFlowGamePhase CurrentPhase = ECityFlowGamePhase::None;
+	int32 ActiveTotalRoadBudget = 0;
 	int32 RemainingBudget = 0;
 	int32 PlayerBudget = 0;
 	int32 LSystemBudget = 0;
 	float SimulationTimeRemaining = 0.0f;
+	bool bCurrentMatchIsMenuPreview = false;
+	bool bAutoStartSimulationAfterLSystem = false;
 
 	FTimerHandle SimulationTimerHandle;
 };

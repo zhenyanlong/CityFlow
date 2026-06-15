@@ -966,8 +966,9 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Movement direction | Derived from `CameraYaw` (set by Blueprint from camera orientation) — WASD moves relative to the player's facing direction, not the live camera rotation |
 | Camera orientation | `CameraYaw` (BlueprintReadWrite, float) — Blueprint updates this each tick from the live camera yaw; `Move()` builds `FRotator(0, CameraYaw, 0)` for forward/right vectors |
 | Alt + Mouse look | `IA_Alt` + `IA_Look` — holding Alt sets `bAltHeld = true`, switches to `FInputModeGameOnly()` (captures mouse), drives `AddControllerYawInput()` from mouse delta (yaw only in C++; pitch handled in Blueprint), and **disables placement** (`DisablePlacement()`) so the cursor and preview actor do not interfere with camera rotation. Releasing Alt restores `FInputModeGameAndUI` + mouse cursor, and **re-enables placement only if the current phase is `Planning`** (avoids accidentally enabling placement during Simulation). |
+| Main-menu camera yaw | `SetMainMenuCameraYawRotationEnabled(bool)` toggles a lightweight Tick that slowly increments controller yaw while the title menu is visible. HUD enables it on `ShowStartWidget()` and disables it when entering gameplay or evaluation. Tick is disabled by default and only runs while this title-screen rotation is active. |
 | Scroll wheel zoom | `IA_Zoom` adjusts `TargetSpringArmLength` (clamped [Min, Max]). Blueprint reads this variable each tick to drive spring arm length interpolation |
-| Configurable (Blueprint) | `MoveSpeed`, `LookSensitivity`, `ZoomSpeed`, `MinSpringArmLength`, `MaxSpringArmLength`, `DefaultCameraPitch`, `MinCameraPitch`, `MaxCameraPitch` |
+| Configurable (Blueprint) | `MoveSpeed`, `LookSensitivity`, `MainMenuCameraYawSpeed`, `ZoomSpeed`, `MinSpringArmLength`, `MaxSpringArmLength`, `DefaultCameraPitch`, `MinCameraPitch`, `MaxCameraPitch` |
 | Camera setup | Handled in Blueprint: `USpringArmComponent` + `UCameraComponent` as child components; spring arm uses `bUsePawnControlRotation = true`; character auto-possesses |
 
 **Key variables maintained by C++ for Blueprint consumption:**
@@ -975,6 +976,7 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Variable | Default | Description |
 |---|---|---|
 | `CameraYaw` | 0 | Current facing yaw — Blueprint updates from camera; `Move()` computes movement from this |
+| `MainMenuCameraYawSpeed` | 4 | Degrees per second for title-screen yaw rotation |
 | `TargetSpringArmLength` | 10000 | Desired spring arm length — Blueprint reads and interpolates toward this |
 | `DefaultCameraPitch` | -60 | Initial camera pitch set on BeginPlay via `SetControlRotation` |
 | `MinCameraPitch` | -80 | Minimum camera pitch (most top-down) |
@@ -985,7 +987,7 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Feature | Implementation |
 |---|---|
 | Cursor | `bShowMouseCursor = true` (managed by Pawn: hidden during Alt, restored on release) |
-| Preview system | Spawns a preview actor on `BeginPlay`; follows cursor via `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()`; each tick calls `SetPreviewPlacementValid()` for validity, then `UpdatePreviewAppearance()` to let `ARoadTile` show the predicted mesh in preview |
+| Preview system | Placement starts disabled by default so the main menu and evaluation screens do not show a preview actor. `EnablePlacement()` spawns the preview actor; while enabled it follows cursor via `Tick()` → `GetHitResultUnderCursor()` → `SnapToGrid()`; each tick calls `SetPreviewPlacementValid()` for validity, then `UpdatePreviewAppearance()` to let `ARoadTile` show the predicted mesh in preview |
 | Placement | `IA_PlaceItem` (left mouse button) → `Started`/`Triggered`/`Completed` events → `TryPlaceAtCursor()` helper with `LastPlacedGridPos` deduplication for drag-to-place |
 | Removal | `IA_RemoveItem` (right mouse button) → `Started`/`Triggered`/`Completed` events → `TryRemoveAtCursor()` helper with `LastRemovedGridPos` deduplication for drag-to-remove. Looks up the actor from `Cell.RoadActor` in the grid instead of relying on collision hit. |
 | Configurable (Blueprint) | `PlaceableActorClass` (any `AGridPlaceableActor` subclass); `IA_PlaceItem`, `IA_RemoveItem`, `IA_Pause` |
@@ -1002,6 +1004,8 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | `IsPlacementEnabled()` | Queries current placement toggle state |
 
 When placement is disabled, `Tick()` skips `UpdatePreviewPosition()` and both `TryPlaceAtCursor()` / `TryRemoveAtCursor()` are no-ops. Placement is automatically disabled when simulation starts and re-enabled on restart.
+
+Placement is now also coordinated by the title flow: `ShowStartWidget()` and `ShowEvaluationWidget()` disable placement, while normal Start Game and Random Mode enable it only after the player enters a Planning game.
 
 ---
 
@@ -1062,13 +1066,13 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 ### 2.11 GameMode State Machine
 
-#### Implementation Status: ✅ Implemented — v0.7 deferred init
+#### Implementation Status: ✅ Implemented — v0.17 title preview and random planning flow
 
 `ACityFlowGameMode` owns the game lifecycle via `ECityFlowGamePhase`:
 
 | Phase | Transition | Actions |
 |---|---|---|
-| **None** → **Planning** | `StartNewGame()` (called by HUD on "Start Game") | Init grid, spawn default buildings, set budget |
+| **None** → **Planning** | `StartNewGame()` (normal start) or `StartRandomPlanningGame()` (Random Mode / Evaluation restart) | Init grid, spawn buildings, set budget; random planning games also randomize seed, grid size, building count, and road budget |
 | **Planning** → **Simulating** | `StartSimulationPhase()` (UI/Cheat) | Lock road placement, start VehicleManager spawning + ScoringManager, start simulation timer |
 | **Simulating** → **Evaluation** | Timer expiry or `EndSimulationPhase()` (UI/Cheat) | Stop spawning, finalize scoring, broadcast events |
 | **Evaluation** → **Planning** | `RestartPlanningPhase()` (UI/Cheat) | Clear vehicles, reset budget, re-enable placement |
@@ -1076,11 +1080,21 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 `BeginPlay()` now only sets budget — scene creation is **deferred** to `StartNewGame()`, triggered by HUD when the player clicks "Start Game" on the main menu.
 
+#### Automated Title Preview Match
+
+`StartAutomatedRandomMatch(bool bAsMenuPreview)` creates an automated background match for the title screen. It calls the same scene setup path as gameplay, randomizes scene parameters, generates rivers/landscape/buildings, triggers L-system road generation, and automatically starts the Simulation Phase when L-system generation finishes. If the match is marked as a menu preview, HUD suppresses the evaluation screen at simulation end and immediately starts another automated preview match.
+
+#### Random Planning Game
+
+`StartRandomPlanningGame()` is the player-facing Random Mode flow. It uses the same randomized scene parameter helper as the automated preview, but it only generates scenery and buildings, transitions to Planning, and leaves road placement, L-system triggering, and simulation start under player control.
+
 **New APIs:**
 
 | Method | Description |
 |---|---|
 | `StartNewGame()` | Initialises default scene and transitions to Planning. Guards: only from `None` phase. |
+| `StartAutomatedRandomMatch(bool bAsMenuPreview)` | Creates a randomized automated match for title-screen background simulation; auto-generates roads and starts simulation after L-system completion. |
+| `StartRandomPlanningGame()` | Creates a randomized player Planning game; generates scenery/buildings only and does not auto-generate roads or start simulation. |
 | `ReturnToMainMenu()` | Full cleanup: stops spawning/vehicles/scoring/timer, destroys all `AGridPlaceableActor` via `TActorIterator`, re-initialises grid, calls `LSystemManager::AbortGeneration()`, returns phase to `None`. |
 
 **Removed from GameMode:** `GameWidgetClass` and `GameWidgetInstance` — HUD is now the sole widget lifecycle owner.
@@ -1094,6 +1108,7 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 - `SimulationDuration`, `DefaultBuildingCount`, `DefaultGridWidth/Height/CellSize`
 - `DrivingSide` — `ECityFlowDrivingSide` (RightHand / LeftHand)
 - `LaneOffsetFactor` — float (0.0~0.45, default 0.2)
+- `bRandomizeAutoMatchParameters`, `AutoMatchGridWidthRange`, `AutoMatchGridHeightRange`, `AutoMatchBuildingCountRange`, `AutoMatchRoadBudgetRange` — random scene parameter ranges shared by title preview matches and Random Mode planning starts
 
 **Events:** `OnGamePhaseChanged`, `OnPlanningPhaseEnd`, `OnSimulationPhaseEnd`
 
@@ -1109,8 +1124,9 @@ CityFlow's UI is managed by **ACityFlowHUD** as the sole widget lifecycle owner.
 
 ```
 StartWidget (主菜单)
+  ├─ ShowStartWidget → GameMode::StartAutomatedRandomMatch(true) for animated title background
   ├─ Btn_StartGame → HUD::ShowGameWidget() → GameMode::StartNewGame()
-  ├─ Btn_RandomMode → HUD::ShowGameWidgetRandom() → StartNewGame + EnablePlacement
+  ├─ Btn_RandomMode → HUD::ShowGameWidgetRandom() → GameMode::StartRandomPlanningGame() + EnablePlacement
   ├─ Btn_QuitGame → Quit
   ↓
 GameWidget (规划/模拟 HUD 覆盖层)
@@ -1125,11 +1141,15 @@ PauseWidget (Overlay, ZOrder=100)
   ↓
 EvaluationWidget (结算)
   ├─ Btn_BackToMain → HUD::HandleEvaluationReturn() → StartWidget
-  └─ Btn_Restart → HUD::HandleRestartClicked() → RestartPlanning → GameWidget
+  └─ Btn_Restart → HUD::HandleRestartClicked() → ShowGameWidgetRandom() → randomized Planning game
 ```
 
 **ACityFlowHUD** — central widget manager:
 - `BeginPlay()` shows `StartWidget` (main menu); listens to `GameMode::OnSimulationPhaseEnd` to auto-show `EvaluationWidget`.
+- `ShowStartWidget()` disables placement, enables main-menu camera yaw rotation, and can start an automated randomized preview match when `bEnableMainMenuPreviewMatch` is true.
+- If a menu preview simulation ends, `HandleSimulationEnded()` starts another preview match instead of showing the Evaluation widget.
+- `ShowGameWidget()` exits any menu preview match, starts a normal default Planning game, disables title camera rotation, and enables placement.
+- `ShowGameWidgetRandom()` starts a randomized Planning game through `StartRandomPlanningGame()`, disables title camera rotation, and enables placement.
 - `TogglePause()` / `ShowPauseOverlay()` / `HidePauseOverlay()` — pause with `FInputModeUIOnly`, resume with `FInputModeGameAndUI`.
 - `ReturnToMainMenu()` — Blueprint-callable; cleans up and returns to `StartWidget`.
 - `HandleReturnToMainClicked()` — pause → `GameMode::ReturnToMainMenu()` → `ShowStartWidget()`.
@@ -1143,6 +1163,7 @@ EvaluationWidget (结算)
 | `GameWidgetClass` | `TSubclassOf<UCityFlowGameWidget>` | Planning/Simulation HUD overlay |
 | `PauseWidgetClass` | `TSubclassOf<UCityFlowPauseWidget>` | Pause menu overlay |
 | `EvaluationWidgetClass` | `TSubclassOf<UCityFlowEvaluationWidget>` | Results screen |
+| `bEnableMainMenuPreviewMatch` | `bool` | Enables automated randomized background simulation on the title screen |
 
 #### CityFlowEvaluationWidget
 
@@ -1162,7 +1183,7 @@ EvaluationWidget (结算)
 - `Txt_TotalScore` — total score display
 - `Txt_Arrivals`, `Txt_Penalty`, `Txt_HighScore`, `Txt_SimulationTime` — BindWidgetOptional detail rows
 - `Btn_BackToMain` → broadcasts `OnBackToMainClicked` (HUD → `HandleEvaluationReturn` → main menu)
-- `Btn_Restart` → broadcasts `OnRestartClicked` (HUD → `HandleRestartClicked` → `GameMode::RestartPlanningPhase()` → GameWidget)
+- `Btn_Restart` → broadcasts `OnRestartClicked` (HUD → `HandleRestartClicked` → `ShowGameWidgetRandom()` → randomized Planning game)
 
 **Public API:**
 | Method | Description |
@@ -1175,7 +1196,7 @@ EvaluationWidget (结算)
 
 Main menu widget with `BindWidget` controls:
 - `Btn_StartGame` → broadcasts `OnStartGameClicked` (HUD listens → `HandleStartGameClicked` → `ShowGameWidget()`)
-- `Btn_RandomMode` → broadcasts `OnRandomModeClicked` (HUD listens → `HandleRandomModeClicked` → `ShowGameWidgetRandom()` — starts game with placement enabled)
+- `Btn_RandomMode` → broadcasts `OnRandomModeClicked` (HUD listens → `HandleRandomModeClicked` → `ShowGameWidgetRandom()` — generates a random Planning game with scenery/buildings only, then enables placement)
 - `Btn_QuitGame` → broadcasts `OnQuitGameClicked`
 - `Txt_Title`, `Txt_Version` (BindWidgetOptional) — display text
 
@@ -1256,7 +1277,7 @@ All commands prefixed with `CF_`, accessible via console (~):
 
 ### 2.14 Environment Decoration and Grass Coverage
 
-`UCityFlowLandscapeDecorationManager` is a `UWorldSubsystem` responsible for runtime environment decoration during Planning setup. It owns a transient root actor named `CityFlowLandscapeDecorations` and spawns decoration meshes through `UHierarchicalInstancedStaticMeshComponent`, allowing large numbers of trees, rocks, and grass instances without one actor per item.
+`UCityFlowLandscapeDecorationManager` is a `UWorldSubsystem` responsible for runtime environment decoration during Planning setup. It owns a transient root actor labelled `CityFlowLandscapeDecorations` in the editor and spawns decoration meshes through `UHierarchicalInstancedStaticMeshComponent`, allowing large numbers of trees, rocks, and grass instances without one actor per item. The actual UObject name is left to Unreal's automatic unique-name generation so rapid scene regeneration during Random Mode or title preview loops cannot crash from a pending-destroy actor still owning the fixed name.
 
 #### Decoration Lifecycle
 

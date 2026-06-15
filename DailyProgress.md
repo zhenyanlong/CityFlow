@@ -1,3 +1,27 @@
+## 2026-06-15
+
+### Main Menu Preview and Random Planning Flow (v0.17)
+
+- Added an automated randomized title-screen preview match that generates scenery, buildings, L-system roads, and simulation using existing systems.
+- Split player-facing Random Mode into `StartRandomPlanningGame()`, which only randomizes scenery/buildings and stops in Planning for player road design.
+- Updated Evaluation restart to start a fresh randomized Planning game instead of simply returning to the previous Planning phase.
+- Added randomized auto-match parameter ranges for grid size, building count, and road budget on `ACityFlowGameMode`.
+
+### Main Menu Camera Rotation
+
+- Added `ACityFlowPawn::SetMainMenuCameraYawRotationEnabled()` and `MainMenuCameraYawSpeed` for slow title-screen camera yaw rotation.
+- Wired HUD state transitions so the main menu enables camera rotation while gameplay and evaluation screens disable it.
+- Kept pawn Tick disabled by default and enabled it only while the main-menu camera rotation is active.
+
+### Landscape Decoration Root Actor Fix
+
+- Fixed a PIE crash when rapidly restarting Random Mode by removing the fixed UObject spawn name for the landscape decoration root actor.
+- Preserved the editor-facing `CityFlowLandscapeDecorations` actor label while allowing Unreal to generate unique runtime object names.
+
+### Documentation Updates
+
+- Updated TDD.md and TDD_Chinese.md with the title preview flow, Random Mode planning flow, main-menu camera rotation, placement lifecycle changes, and landscape root actor naming fix.
+
 ## 2026-06-14
 
 ### Environment Decoration and Grass Coverage Investigation

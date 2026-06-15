@@ -36,7 +36,10 @@ void ACityFlowPlayerController::BeginPlay()
 		}
 	}
 
-	SpawnPreview();
+	if (bPlacementEnabled)
+	{
+		SpawnPreview();
+	}
 }
 
 void ACityFlowPlayerController::SetupInputComponent()

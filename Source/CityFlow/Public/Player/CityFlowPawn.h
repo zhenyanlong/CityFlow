@@ -15,8 +15,12 @@ class CITYFLOW_API ACityFlowPawn : public ACharacter
 public:
 	ACityFlowPawn();
 
+	UFUNCTION(BlueprintCallable, Category = "Camera")
+	void SetMainMenuCameraYawRotationEnabled(bool bEnabled);
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	void Move(const struct FInputActionValue& Value);
@@ -54,6 +58,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	float LookSensitivity = 1.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Main Menu")
+	float MainMenuCameraYawSpeed = 4.0f;
+
 	/** Scroll wheel zoom speed multiplier. Blueprint can tweak this at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	float ZoomSpeed = 50.0f;
@@ -78,4 +85,5 @@ protected:
 
 private:
 	bool bAltHeld = false;
+	bool bMainMenuCameraYawRotationEnabled = false;
 };

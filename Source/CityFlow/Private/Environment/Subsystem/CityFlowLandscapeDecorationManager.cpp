@@ -237,13 +237,16 @@ bool UCityFlowLandscapeDecorationManager::EnsureRootActor()
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	SpawnParams.Name = TEXT("CityFlowLandscapeDecorations");
 
 	AActor* NewRootActor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, SpawnParams);
 	if (!NewRootActor)
 	{
 		return false;
 	}
+
+#if WITH_EDITOR
+	NewRootActor->SetActorLabel(TEXT("CityFlowLandscapeDecorations"));
+#endif
 
 	USceneComponent* SceneRoot = NewObject<USceneComponent>(NewRootActor, TEXT("SceneRoot"));
 	NewRootActor->AddInstanceComponent(SceneRoot);

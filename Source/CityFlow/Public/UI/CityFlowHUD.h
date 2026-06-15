@@ -59,6 +59,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
 	TSubclassOf<UCityFlowEvaluationWidget> EvaluationWidgetClass;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
+	bool bEnableMainMenuPreviewMatch = true;
+
 protected:
 	UFUNCTION()
 	void HandleSimulationEnded();
