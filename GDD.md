@@ -14,21 +14,203 @@ The core appeal of the game lies in the strategic depth of "planning arterial ro
 
 ## 2. Win / Lose Conditions
 
-The game uses a scoring system. There is no traditional "victory" or "defeat"; instead, the final total score measures the player's planning ability:
+The game uses a scoring system. There is no traditional "victory" or "defeat"; instead, the final total score measures the player's planning ability. The score is designed as a **planning evaluation report** rather than a simple real-time arcade counter. During simulation, the HUD only needs to surface immediate feedback for vehicle arrivals and deaths; the full score breakdown appears at evaluation time.
 
-**Score sources:**
-- Each vehicle that successfully reaches its destination awards base points
-- Connecting all buildings awards a bonus
-- Remaining road budget is proportionally converted to points
+### 2.1 Final Score Overview
 
-**Score penalties:**
-- During the Simulation Phase, any road tile carrying too many vehicles simultaneously is flagged as congested, continuously deducting points per second
+The final score uses a 1000-point base scale:
 
-**Game end conditions:**
-- The Simulation Phase has a fixed duration (e.g., 3 minutes); the evaluation panel appears when the timer expires
-- If all vehicles have arrived and no new vehicles are spawning, the simulation also ends early
+```text
+FinalScore = round(RawScore * MapDifficultyMultiplier)
 
-Players may replay repeatedly, optimizing arterial design and branch generation strategies to chase higher scores.
+RawScore =
+  ConnectivityScore
++ TrafficOutcomeScore
++ TravelEfficiencyScore
++ BudgetEfficiencyScore
++ RuntimeScore
+```
+
+Recommended category weights:
+
+| Category | Weight | Purpose |
+|---|---:|---|
+| Connectivity | 300 | Rewards connecting buildings into a usable city network. |
+| Traffic Outcome | 250 | Rewards vehicles arriving and penalizes vehicle deaths. |
+| Travel Efficiency | 200 | Rewards smooth per-cell travel time. |
+| Budget Efficiency | 150 | Rewards efficient road spending, but only when the network works. |
+| Runtime | 100 | Rewards early completion when traffic demand is actually handled. |
+
+### 2.2 Connectivity Score
+
+Connectivity is the primary planning metric:
+
+```text
+ConnectedRatio = ConnectedBuildingCount / TotalBuildingCount
+LargestComponentRatio = LargestConnectedBuildingComponent / TotalBuildingCount
+AllConnected = ConnectedBuildingCount == TotalBuildingCount
+
+ConnectivityScore =
+  180 * ConnectedRatio^2
++  80 * LargestComponentRatio
++  40 * AllConnected
+```
+
+This rewards both broad building coverage and whether connected buildings belong to the same usable road network. The full-connectivity reward is intentionally limited so that a fully connected but inefficient network can still be outscored by a cleaner plan.
+
+### 2.3 Traffic Outcome Score
+
+Traffic outcome evaluates what actually happened during the Simulation Phase:
+
+```text
+SpawnedVehicles = ArrivedVehicles + DeadVehicles + ActiveVehiclesAtEnd
+
+ArrivalRate = ArrivedVehicles / max(SpawnedVehicles, 1)
+DeathRate = DeadVehicles / max(SpawnedVehicles, 1)
+
+TrafficOutcomeScore =
+  180 * ArrivalRate
++  70 * (1 - DeathRate)^2
+```
+
+Vehicles still active at the end of simulation count in the denominator, preventing unfinished traffic from inflating the arrival rate.
+
+### 2.4 Travel Efficiency Score
+
+Travel efficiency uses the average time required for successful vehicles to pass through one grid cell:
+
+```text
+AverageCellTravelTime = TotalTravelTimeOfArrivedVehicles / TotalCellsTraversedByArrivedVehicles
+
+IdealCellTime = CellSize / AverageVehicleMoveSpeed
+AcceptableCellTime = IdealCellTime * 2.5
+
+EfficiencyRatio =
+  clamp(
+    (AcceptableCellTime - AverageCellTravelTime)
+    / (AcceptableCellTime - IdealCellTime),
+    0,
+    1
+  )
+
+TravelEfficiencyScore = 200 * EfficiencyRatio
+```
+
+If no vehicle arrives, this category scores 0. Future versions may compute the ideal time per vehicle type if vehicle speeds differ significantly.
+
+### 2.5 Budget Efficiency Score
+
+Budget efficiency compares actual road spending against a map-normalized estimated minimum road need:
+
+```text
+EstimatedMinRoadNeed = MSTLengthBetweenBuildings
+UsedBudget = TotalRoadBudget - RemainingBudget
+
+BudgetWasteRatio =
+  clamp(
+    (UsedBudget - EstimatedMinRoadNeed)
+    / max(TotalRoadBudget - EstimatedMinRoadNeed, 1),
+    0,
+    1
+  )
+
+BudgetEfficiencyRatio = 1 - BudgetWasteRatio
+
+BudgetEfficiencyScore =
+  150
+* BudgetEfficiencyRatio
+* ConnectedRatio
+* sqrt(ArrivalRate)
+```
+
+`EstimatedMinRoadNeed` can be approximated with a Manhattan-distance minimum spanning tree between building centers or doorway connection points. Budget score is multiplied by connectivity and arrival performance so that simply using fewer roads does not produce a high score when the city is not functional.
+
+### 2.6 Runtime Score
+
+Runtime rewards fast completion only when the simulation processed enough traffic demand:
+
+```text
+ExpectedSpawnedVehicles = SimulationDuration / VehicleSpawnInterval
+CompletionRatio = ArrivalRate * (1 - DeathRate)
+
+If SpawnedVehicles < ExpectedSpawnedVehicles * 0.5:
+    RuntimeScore = 0
+Else:
+    TimeRatio = clamp(1 - ElapsedSimulationTime / SimulationDuration, 0, 1)
+    RuntimeScore = 100 * TimeRatio * CompletionRatio
+```
+
+This avoids rewarding a short simulation that ended early only because too few vehicles were spawned or the network failed to sustain demand.
+
+### 2.7 Random Mode Comparability
+
+Random Mode maps should remain comparable across different building counts, building density, road budget, and map spread. The score therefore uses a small map difficulty multiplier:
+
+```text
+MapDifficultyMultiplier = clamp(
+  1.0
++ BuildingCountDifficulty
++ SpreadDifficulty
++ BudgetPressureDifficulty,
+  0.85,
+  1.20
+)
+
+BuildingCountDifficulty =
+  clamp((TotalBuildingCount - 8) / 8, -0.25, 0.35) * 0.10
+
+SpreadRatio = EstimatedMinRoadNeed / max(TotalBuildingCount, 1)
+
+SpreadDifficulty =
+  clamp((SpreadRatio - ReferenceSpreadRatio) / ReferenceSpreadRatio, -0.5, 0.8) * 0.15
+
+BudgetPressure = EstimatedMinRoadNeed / max(TotalRoadBudget, 1)
+
+BudgetPressureDifficulty =
+  clamp((BudgetPressure - 0.45) / 0.45, -0.4, 0.8) * 0.15
+```
+
+Recommended presets:
+
+| Parameter | Value |
+|---|---:|
+| ReferenceBuildingCount | 8 |
+| ReferenceSpreadRatio | 6.0 |
+| TargetBudgetPressure | 0.45 |
+| MapDifficultyMultiplier clamp | 0.85 - 1.20 |
+| AcceptableCellTimeMultiplier | 2.5 |
+
+The multiplier range is deliberately narrow so that player planning quality remains more important than random map difficulty.
+
+### 2.8 Evaluation Report
+
+The evaluation panel should present the final score as a readable report:
+
+```text
+Final Score
+
+Planning
+- Connected Buildings
+- Largest Connected Network
+- Budget Used
+- Estimated Minimum Road Need
+
+Traffic
+- Arrivals
+- Deaths
+- Arrival Rate
+- Average Cell Travel Time
+
+Breakdown
+- Connectivity
+- Traffic Outcome
+- Travel Efficiency
+- Budget Efficiency
+- Runtime
+- Map Difficulty Multiplier
+```
+
+Players may replay repeatedly, optimizing arterial design and branch generation strategies to chase higher scores and cleaner planning reports.
 
 ## 3. Narrative (Optional)
 
