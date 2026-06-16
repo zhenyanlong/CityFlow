@@ -340,6 +340,8 @@ ABuilding
 
 `ABuilding::OnDoorwayCellChanged` listens to `GridManager::OnCellChanged`. When a doorway's connection point changes to/from `Road` type, `DetermineEdgeConnections()` re-evaluates all 4 edges and `RefreshFoundation()` rebuilds the mesh.
 
+`RefreshFoundation()` passes the building's intended target scale into `BuildFoundation()`. Both `FoundationMesh` and `SidewalkMesh` use this explicit scale to cancel the parent actor scale, instead of reading `Owner->GetActorScale3D()` during rebuild. This keeps sidewalk size tied to the building footprint even if a refresh happens during spawn-scale animation or while the actor has a transient scale.
+
 ---
 
 ### 2.5 L-System Branch Generation
@@ -1264,7 +1266,7 @@ Pause overlay widget with `BindWidget` controls:
 #### CityFlowGameWidget (Planning / Simulation overlay)
 
 `UUserWidget` C++ base using `BindWidget` for UMG controls:
-- **Bound controls:** `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`, `Txt_Countdown` (BindWidgetOptional), `PopupLayer` (BindWidgetOptional `CanvasPanel`)
+- **Bound controls:** `Btn_TriggerLSystem`, `Btn_StartSimulation`, `Btn_RestartPlanning`, `Txt_Phase`, `Txt_Budget`, `Txt_Score`, `Txt_Countdown` (BindWidgetOptional), `PopupLayer` (BindWidgetOptional `CanvasPanel`), `BuildingMarkerLayer` (BindWidgetOptional `CanvasPanel`)
 - **Button auto-binding:** `NativeConstruct()` binds `OnClicked` via `AddDynamic` (callbacks are `UFUNCTION()` — required by `BindUFunction`); `NativeDestruct()` cleans up.
 - **Button visibility:** `UpdateButtonStates(Phase)`:
   - Planning: `Btn_TriggerLSystem` + `Btn_StartSimulation` visible
@@ -1275,6 +1277,18 @@ Pause overlay widget with `BindWidget` controls:
 - **Countdown timer:** When phase transitions to `Simulating`, `StartCountdown()` reads `SimulationDuration` and starts a 1-second recurring `TickCountdown()` (marked `UFUNCTION()`). Each tick decrements `CountdownSeconds` and updates `Txt_Countdown` to `MM:SS` format. The timer stops when seconds reach zero or the phase changes away from Simulating.
 - **BlueprintImplementableEvents:** `OnPhaseChanged_BP`, `OnScoreChanged_BP`, `OnBudgetChanged_BP`, `OnSimulationTick_BP`, `OnEvaluation_BP`, `OnLSystemStep_BP`, `OnLSystemFinished_BP`.
 - **Delegates bound in `NativeConstruct()`:** `GameMode::OnGamePhaseChanged`, `ScoringManager::OnScoreChanged`, `ScoringManager::OnScorePopupRequested`, `LSystemManager::OnGenerationStep`, `LSystemManager::OnGenerationFinished`, `GridManager::OnCellChanged`.
+
+#### Building Marker Feedback
+
+Building location markers are implemented as **screen-space UMG** owned by `UCityFlowGameWidget`.
+
+- `UCityFlowGameWidget` collects placed `ABuilding` instances from `GridManager::GetCellsOfType(ECellType::Building)`, deduplicating multi-cell buildings by `BuildingID`.
+- Marker creation uses `BuildingMarkerWidgetClass`; if no Blueprint class is assigned, native `UBuildingMarkerWidget` renders a simple text fallback.
+- Markers are added to optional `BuildingMarkerLayer` when present, otherwise they fall back to `AddToViewport(15)`.
+- `OnCellChanged` and phase transitions only mark the marker list dirty; `NativeTick()` performs the actual refresh once, avoiding repeated rebuilds while randomized scenes place many building cells.
+- Each tick projects `Building->GetActorLocation() + BuildingMarkerWorldOffset` through `ProjectWorldLocationToWidgetPosition()`. On-screen buildings show the normal marker at their projected position.
+- Off-screen or behind-camera buildings clamp their marker to the nearest screen edge inside `BuildingMarkerEdgePadding`; the marker switches to its off-screen state and rotates toward the building direction.
+- Visibility is controlled by `bShowBuildingMarkers`, `bShowBuildingMarkersInPlanning`, and `bShowBuildingMarkersInSimulation`.
 
 #### Score Popup Feedback
 

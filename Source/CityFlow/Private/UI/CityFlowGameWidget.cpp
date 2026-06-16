@@ -1,12 +1,17 @@
 #include "UI/CityFlowGameWidget.h"
 #include "GameMode/CityFlowGameMode.h"
+#include "Grid/Building.h"
 #include "Grid/GridManager.h"
 #include "Scoring/Subsystem/ScoringManager.h"
+#include "UI/BuildingMarkerWidget.h"
 #include "UI/ScorePopupWidget.h"
 #include "LSystem/Subsystem/LSystemManager.h"
 #include "Player/CityFlowPlayerController.h"
 #include "Vehicle/Subsystem/VehicleManager.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -55,10 +60,13 @@ void UCityFlowGameWidget::NativeConstruct()
 
 	// 监听网格变化，随时刷新预算显示
 	if (UGridManager* GridMgr = GetWorld()->GetSubsystem<UGridManager>())
+	{
 		GridMgr->OnCellChanged.AddDynamic(this, &UCityFlowGameWidget::HandleCellChanged);
+	}
 
 	// 初始 UI 状态
 	UpdateButtonStates(GetCityFlowGameMode() ? GetCityFlowGameMode()->GetCurrentPhase() : ECityFlowGamePhase::None);
+	RequestBuildingMarkerRefresh();
 }
 
 void UCityFlowGameWidget::NativeDestruct()
@@ -92,6 +100,8 @@ void UCityFlowGameWidget::NativeDestruct()
 	if (UGridManager* GridMgr = GetWorld()->GetSubsystem<UGridManager>())
 		GridMgr->OnCellChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleCellChanged);
 
+	ClearBuildingMarkers();
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(VehicleAbilityAlertTimerHandle);
@@ -104,6 +114,13 @@ void UCityFlowGameWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	UpdateVehicleAbilityAlertFallback(InDeltaTime);
+
+	if (bBuildingMarkersDirty)
+	{
+		RefreshBuildingMarkers();
+	}
+
+	UpdateBuildingMarkers();
 }
 
 // ============================================================================
@@ -143,6 +160,7 @@ void UCityFlowGameWidget::HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, EC
 	UpdatePhaseText(NewPhase);
 	UpdateBudgetText();
 	UpdateButtonStates(NewPhase);
+	RequestBuildingMarkerRefresh();
 
 	if (NewPhase == ECityFlowGamePhase::Simulating)
 		StartCountdown();
@@ -340,11 +358,286 @@ void UCityFlowGameWidget::UpdateVehicleAbilityAlertFallback(float DeltaTime)
 void UCityFlowGameWidget::HandleCellChanged(FGridVector CellPos, const FGridCell& NewCell)
 {
 	UpdateBudgetText();
+	RequestBuildingMarkerRefresh();
 }
 
 // ============================================================================
 //  辅助
 // ============================================================================
+
+void UCityFlowGameWidget::RequestBuildingMarkerRefresh()
+{
+	bBuildingMarkersDirty = true;
+}
+
+void UCityFlowGameWidget::RefreshBuildingMarkers()
+{
+	bBuildingMarkersDirty = false;
+
+	if (!ShouldShowBuildingMarkersForCurrentPhase())
+	{
+		ClearBuildingMarkers();
+		return;
+	}
+
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
+	{
+		return;
+	}
+
+	const TArray<ABuilding*> Buildings = GetAllPlacedBuildings();
+	TSet<TObjectPtr<ABuilding>> ActiveBuildings;
+	for (ABuilding* Building : Buildings)
+	{
+		if (IsValid(Building))
+		{
+			ActiveBuildings.Add(Building);
+		}
+	}
+
+	TArray<TObjectPtr<ABuilding>> StaleBuildings;
+	for (const TPair<TObjectPtr<ABuilding>, TObjectPtr<UBuildingMarkerWidget>>& Pair : BuildingMarkers)
+	{
+		ABuilding* Building = Pair.Key.Get();
+		if (!IsValid(Building) || !ActiveBuildings.Contains(Pair.Key))
+		{
+			StaleBuildings.Add(Pair.Key);
+		}
+	}
+
+	for (const TObjectPtr<ABuilding>& Building : StaleBuildings)
+	{
+		if (TObjectPtr<UBuildingMarkerWidget>* MarkerPtr = BuildingMarkers.Find(Building))
+		{
+			if (UBuildingMarkerWidget* Marker = MarkerPtr->Get())
+			{
+				Marker->RemoveFromParent();
+			}
+		}
+		BuildingMarkers.Remove(Building);
+	}
+
+	TSubclassOf<UBuildingMarkerWidget> MarkerClass = BuildingMarkerWidgetClass;
+	if (!MarkerClass)
+	{
+		MarkerClass = UBuildingMarkerWidget::StaticClass();
+	}
+
+	for (ABuilding* Building : Buildings)
+	{
+		if (!IsValid(Building) || BuildingMarkers.Contains(Building))
+		{
+			continue;
+		}
+
+		UBuildingMarkerWidget* Marker = CreateWidget<UBuildingMarkerWidget>(PC, MarkerClass);
+		if (!Marker)
+		{
+			continue;
+		}
+
+		if (BuildingMarkerLayer)
+		{
+			if (UCanvasPanelSlot* CanvasSlot = BuildingMarkerLayer->AddChildToCanvas(Marker))
+			{
+				CanvasSlot->SetAutoSize(true);
+				CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			}
+		}
+		else
+		{
+			Marker->AddToViewport(15);
+			Marker->SetAlignmentInViewport(FVector2D(0.5f, 0.5f));
+		}
+
+		Marker->InitializeMarker(Building);
+		BuildingMarkers.Add(Building, Marker);
+	}
+}
+
+void UCityFlowGameWidget::ClearBuildingMarkers()
+{
+	for (TPair<TObjectPtr<ABuilding>, TObjectPtr<UBuildingMarkerWidget>>& Pair : BuildingMarkers)
+	{
+		if (UBuildingMarkerWidget* Marker = Pair.Value.Get())
+		{
+			Marker->RemoveFromParent();
+		}
+	}
+	BuildingMarkers.Empty();
+}
+
+void UCityFlowGameWidget::UpdateBuildingMarkers()
+{
+	if (BuildingMarkers.IsEmpty())
+	{
+		return;
+	}
+
+	if (!ShouldShowBuildingMarkersForCurrentPhase())
+	{
+		ClearBuildingMarkers();
+		return;
+	}
+
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC || !PC->PlayerCameraManager)
+	{
+		return;
+	}
+
+	const float ViewportScale = FMath::Max(UWidgetLayoutLibrary::GetViewportScale(this), KINDA_SMALL_NUMBER);
+	const FVector2D ViewportSize = UWidgetLayoutLibrary::GetViewportSize(this) / ViewportScale;
+	if (ViewportSize.X <= 1.0f || ViewportSize.Y <= 1.0f)
+	{
+		return;
+	}
+
+	const FVector2D ViewportCenter = ViewportSize * 0.5f;
+	const FVector CameraLocation = PC->PlayerCameraManager->GetCameraLocation();
+	const FRotator CameraRotation = PC->PlayerCameraManager->GetCameraRotation();
+	const FVector CameraForward = CameraRotation.Vector();
+
+	bool bFoundInvalidBuilding = false;
+	for (const TPair<TObjectPtr<ABuilding>, TObjectPtr<UBuildingMarkerWidget>>& Pair : BuildingMarkers)
+	{
+		ABuilding* Building = Pair.Key.Get();
+		UBuildingMarkerWidget* Marker = Pair.Value.Get();
+		if (!IsValid(Building) || !Marker)
+		{
+			bFoundInvalidBuilding = true;
+			continue;
+		}
+
+		const FVector MarkerWorldLocation = Building->GetActorLocation() + BuildingMarkerWorldOffset;
+		FVector2D ProjectedPosition = FVector2D::ZeroVector;
+		const bool bProjected = UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
+			PC,
+			MarkerWorldLocation,
+			ProjectedPosition,
+			true);
+
+		const FVector ToTarget = MarkerWorldLocation - CameraLocation;
+		const bool bBehindCamera = FVector::DotProduct(CameraForward, ToTarget) <= 0.0f;
+		const bool bInsideViewport =
+			bProjected &&
+			!bBehindCamera &&
+			ProjectedPosition.X >= 0.0f &&
+			ProjectedPosition.X <= ViewportSize.X &&
+			ProjectedPosition.Y >= 0.0f &&
+			ProjectedPosition.Y <= ViewportSize.Y;
+
+		if (bInsideViewport)
+		{
+			Marker->SetMarkerScreenState(true, 0.0f);
+			SetBuildingMarkerPosition(Marker, ProjectedPosition);
+			continue;
+		}
+
+		FVector2D Direction = FVector2D::ZeroVector;
+		if (bProjected && !bBehindCamera)
+		{
+			Direction = ProjectedPosition - ViewportCenter;
+		}
+		else
+		{
+			const FVector CameraLocalTarget = CameraRotation.UnrotateVector(ToTarget);
+			Direction = FVector2D(CameraLocalTarget.Y, -CameraLocalTarget.Z);
+		}
+
+		if (!Direction.Normalize())
+		{
+			Direction = FVector2D(0.0f, 1.0f);
+		}
+
+		const FVector2D HalfBounds(
+			FMath::Max(ViewportCenter.X - BuildingMarkerEdgePadding, 1.0f),
+			FMath::Max(ViewportCenter.Y - BuildingMarkerEdgePadding, 1.0f));
+
+		const float TimeToX = !FMath::IsNearlyZero(Direction.X)
+			? HalfBounds.X / FMath::Abs(Direction.X)
+			: TNumericLimits<float>::Max();
+		const float TimeToY = !FMath::IsNearlyZero(Direction.Y)
+			? HalfBounds.Y / FMath::Abs(Direction.Y)
+			: TNumericLimits<float>::Max();
+		const float EdgeTime = FMath::Min(TimeToX, TimeToY);
+		const FVector2D EdgePosition = ViewportCenter + Direction * EdgeTime;
+		const float DirectionAngleDegrees = FMath::RadiansToDegrees(FMath::Atan2(Direction.Y, Direction.X));
+
+		Marker->SetMarkerScreenState(false, DirectionAngleDegrees);
+		SetBuildingMarkerPosition(Marker, EdgePosition);
+	}
+
+	if (bFoundInvalidBuilding)
+	{
+		RequestBuildingMarkerRefresh();
+	}
+}
+
+TArray<ABuilding*> UCityFlowGameWidget::GetAllPlacedBuildings() const
+{
+	TArray<ABuilding*> Result;
+	UGridManager* GridMgr = GetWorld() ? GetWorld()->GetSubsystem<UGridManager>() : nullptr;
+	if (!GridMgr || !GridMgr->IsGridInitialized())
+	{
+		return Result;
+	}
+
+	const TArray<FGridVector> BuildingCells = GridMgr->GetCellsOfType(ECellType::Building);
+	TSet<int32> SeenBuildingIds;
+	for (const FGridVector& CellPos : BuildingCells)
+	{
+		const FGridCell& Cell = GridMgr->GetCell(CellPos);
+		if (Cell.BuildingID == INDEX_NONE || SeenBuildingIds.Contains(Cell.BuildingID))
+		{
+			continue;
+		}
+
+		SeenBuildingIds.Add(Cell.BuildingID);
+		if (ABuilding* Building = Cast<ABuilding>(Cell.RoadActor))
+		{
+			Result.Add(Building);
+		}
+	}
+
+	return Result;
+}
+
+bool UCityFlowGameWidget::ShouldShowBuildingMarkersForCurrentPhase() const
+{
+	if (!bShowBuildingMarkers)
+	{
+		return false;
+	}
+
+	const ACityFlowGameMode* GM = GetCityFlowGameMode();
+	if (!GM)
+	{
+		return false;
+	}
+
+	const ECityFlowGamePhase Phase = GM->GetCurrentPhase();
+	return (Phase == ECityFlowGamePhase::Planning && bShowBuildingMarkersInPlanning) ||
+		(Phase == ECityFlowGamePhase::Simulating && bShowBuildingMarkersInSimulation);
+}
+
+void UCityFlowGameWidget::SetBuildingMarkerPosition(UBuildingMarkerWidget* MarkerWidget, const FVector2D& Position) const
+{
+	if (!MarkerWidget)
+	{
+		return;
+	}
+
+	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(MarkerWidget->Slot))
+	{
+		CanvasSlot->SetPosition(Position);
+	}
+	else
+	{
+		MarkerWidget->SetPositionInViewport(Position, false);
+	}
+}
 
 ACityFlowGameMode* UCityFlowGameWidget::GetCityFlowGameMode() const
 {

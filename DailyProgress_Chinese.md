@@ -30,6 +30,22 @@
 - 保留 Evaluation 阶段的 GDD 风格最终评分报告，同时将实时 HUD 分数作为模拟阶段即时反馈。
 - 更新 TDD.md 和 TDD_Chinese.md，记录实时 HUD 分数与最终结算分的区别。
 
+### 建筑位置 Marker UI
+
+- 新增 `UBuildingMarkerWidget`，提供原生文本 fallback，并暴露屏幕内/屏幕外 marker 状态的蓝图扩展入口。
+- 将建筑 marker 生命周期接入 `UCityFlowGameWidget`，从 `GridManager` 收集已放置的 `ABuilding`，并用 `BuildingID` 对多格建筑去重。
+- 实现每帧世界坐标到 UI 坐标投影：屏幕内建筑在自身屏幕位置显示 marker，屏幕外或摄像机背后的建筑钉到屏幕边缘并旋转指向建筑方向。
+- 为游戏 HUD 添加可选 `BuildingMarkerLayer`、marker widget class、边缘 padding、世界偏移和按阶段显示开关。
+- 已通过 `CityFlowEditor Win64 Development` 编译验证建筑 marker C++ 实现。
+- 更新 TDD.md 和 TDD_Chinese.md，记录屏幕空间建筑 marker 的设计和配置流程。
+
+### Foundation 人行道缩放修复
+
+- 修复 `UFoundationComponent::BuildSidewalk()`，改为使用 `RefreshFoundation()` 传入的显式目标 owner scale，而不是在重建时读取 `Owner->GetActorScale3D()`。
+- 让 `FoundationMesh` 和 `SidewalkMesh` 使用同一套父级缩放抵消路径，确保放置缩放动画或临时 Actor 缩放期间，人行道尺寸仍绑定到建筑 footprint。
+- 更新 TDD.md 和 TDD_Chinese.md，记录人行道缩放安全行为。
+- 该修复后的完整编译验证被 Unreal Live Coding active 状态阻止。
+
 ## 2026-06-15
 
 ### 主菜单预览与随机规划流程（v0.17）

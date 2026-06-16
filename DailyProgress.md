@@ -30,6 +30,22 @@
 - Preserved the GDD-style final score report for Evaluation while keeping the live HUD score as immediate simulation feedback.
 - Updated TDD.md and TDD_Chinese.md to document the difference between live HUD score and final evaluation score.
 
+### Building Marker UI
+
+- Added `UBuildingMarkerWidget` with native text fallback and Blueprint extension hooks for on-screen and off-screen marker states.
+- Integrated building marker lifecycle into `UCityFlowGameWidget`, collecting placed `ABuilding` instances from `GridManager` and deduplicating multi-cell buildings by `BuildingID`.
+- Implemented per-frame world-to-widget projection so visible buildings show markers at their screen position while off-screen or behind-camera buildings clamp to the screen edge and rotate toward their direction.
+- Added optional `BuildingMarkerLayer`, marker widget class, edge padding, world offset, and phase-specific visibility toggles to the game HUD.
+- Verified the building marker C++ implementation with a successful `CityFlowEditor Win64 Development` build.
+- Updated TDD.md and TDD_Chinese.md with the screen-space building marker design and configuration flow.
+
+### Foundation Sidewalk Scale Fix
+
+- Fixed `UFoundationComponent::BuildSidewalk()` to use the explicit target owner scale passed from `RefreshFoundation()` instead of reading `Owner->GetActorScale3D()` during rebuild.
+- Kept `FoundationMesh` and `SidewalkMesh` on the same parent-scale cancellation path so sidewalk size remains tied to the building footprint during spawn-scale animation or transient actor scaling.
+- Updated TDD.md and TDD_Chinese.md with the sidewalk scale-safety behavior.
+- Full build verification after this fix was blocked because Unreal Live Coding was active.
+
 ## 2026-06-15
 
 ### Main Menu Preview and Random Planning Flow (v0.17)

@@ -199,10 +199,10 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
 	}
 	FoundationMesh->RegisterComponent();
 
-    BuildSidewalk(Owner, HW, HH);
+    BuildSidewalk(Owner, HW, HH, InOwnerScale);
 }
 
-void UFoundationComponent::BuildSidewalk(AActor* Owner, float HW, float HH)
+void UFoundationComponent::BuildSidewalk(AActor* Owner, float HW, float HH, const FVector& InOwnerScale)
 {
     if (SidewalkWidth <= 0.0f)
     {
@@ -301,10 +301,9 @@ void UFoundationComponent::BuildSidewalk(AActor* Owner, float HW, float HH)
     SidewalkMesh->SetupAttachment(Owner->GetRootComponent());
     SidewalkMesh->SetRelativeLocation(FVector::ZeroVector);
     {
-        const FVector S = Owner->GetActorScale3D();
         SidewalkMesh->SetRelativeScale3D(FVector(
-            S.X > KINDA_SMALL_NUMBER ? 1.0f / S.X : 1.0f,
-            S.Y > KINDA_SMALL_NUMBER ? 1.0f / S.Y : 1.0f,
+            InOwnerScale.X > KINDA_SMALL_NUMBER ? 1.0f / InOwnerScale.X : 1.0f,
+            InOwnerScale.Y > KINDA_SMALL_NUMBER ? 1.0f / InOwnerScale.Y : 1.0f,
             1.0f));
     }
     SidewalkMesh->CreateMeshSection_LinearColor(0, V, T, N, UVs,

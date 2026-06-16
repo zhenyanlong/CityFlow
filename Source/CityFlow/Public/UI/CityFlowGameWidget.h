@@ -11,6 +11,8 @@
 #include "CityFlowGameWidget.generated.h"
 
 class UWidgetAnimation;
+class UBuildingMarkerWidget;
+class ABuilding;
 
 UCLASS()
 class CITYFLOW_API UCityFlowGameWidget : public UUserWidget
@@ -50,6 +52,9 @@ protected:
 	TObjectPtr<UCanvasPanel> PopupLayer;
 
 	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UCanvasPanel> BuildingMarkerLayer;
+
+	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_VehicleAbilityAlert;
 
 	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
@@ -63,6 +68,24 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Score Popup")
 	FLinearColor NegativePopupColor = FLinearColor(1.0f, 0.12f, 0.08f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
+	TSubclassOf<UBuildingMarkerWidget> BuildingMarkerWidgetClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
+	bool bShowBuildingMarkers = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
+	bool bShowBuildingMarkersInPlanning = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
+	bool bShowBuildingMarkersInSimulation = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
+	FVector BuildingMarkerWorldOffset = FVector(0.0f, 0.0f, 180.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker", meta = (ClampMin = "0.0"))
+	float BuildingMarkerEdgePadding = 48.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
 	float VehicleAbilityAlertDuration = 2.75f;
@@ -148,6 +171,13 @@ private:
 	void ShowVehicleAbilityAlert(EVehicleAbilityAlertType AlertType);
 	void HideVehicleAbilityAlert();
 	void UpdateVehicleAbilityAlertFallback(float DeltaTime);
+	void RequestBuildingMarkerRefresh();
+	void RefreshBuildingMarkers();
+	void ClearBuildingMarkers();
+	void UpdateBuildingMarkers();
+	TArray<ABuilding*> GetAllPlacedBuildings() const;
+	bool ShouldShowBuildingMarkersForCurrentPhase() const;
+	void SetBuildingMarkerPosition(UBuildingMarkerWidget* MarkerWidget, const FVector2D& Position) const;
 	void StartCountdown();
 	UFUNCTION()
 	void TickCountdown();
@@ -160,8 +190,11 @@ private:
 
 	FTimerHandle CountdownTimerHandle;
 	FTimerHandle VehicleAbilityAlertTimerHandle;
+	UPROPERTY(Transient)
+	TMap<TObjectPtr<ABuilding>, TObjectPtr<UBuildingMarkerWidget>> BuildingMarkers;
 	int32 CountdownSeconds = 0;
 	float VehicleAbilityAlertAge = 0.0f;
 	bool bVehicleAbilityAlertActive = false;
 	bool bVehicleAbilityAlertUsesNativeAnimation = false;
+	bool bBuildingMarkersDirty = true;
 };

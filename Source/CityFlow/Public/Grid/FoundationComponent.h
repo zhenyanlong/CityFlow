@@ -71,7 +71,7 @@ private:
 	void GenerateOutline(const FEdgeConnection& Conn, float HW, float HH,
 		TArray<FVector2D>& OutOutline) const;
 
-	void BuildSidewalk(AActor* Owner, float HW, float HH);
+	void BuildSidewalk(AActor* Owner, float HW, float HH, const FVector& InOwnerScale);
 
 	void AddCornerArc(TArray<FVector2D>& OutVerts, FVector2D ArcCenter, float R,
 		float StartAngle, float EndAngle, int32 Segments) const;
