@@ -1,3 +1,21 @@
+## 2026-06-16
+
+### GDD-aligned Final Score Refactor
+
+- Added `FCityFlowScoreBreakdown` as the shared final evaluation report data structure.
+- Refactored `UScoringManager` to compute GDD-style final score categories at Evaluation: connectivity, traffic outcome, travel efficiency, budget efficiency, runtime, and map difficulty multiplier.
+- Added vehicle travel-time and path-cell tracking so arrived vehicles contribute to average cell travel time.
+- Updated `CF_ShowScoreStats` to print final score, raw score, category breakdown, planning stats, traffic stats, and map difficulty multiplier.
+
+### Evaluation Report UI
+
+- Updated `UCityFlowEvaluationWidget` to consume `PopulateFromBreakdown()` and render the full score report.
+- Added optional `ScoreReportPanel` dynamic row generation with left-aligned descriptions, right-aligned values, and outlined text.
+- Added sequential number-roll animation so each report line counts up before the next line appears.
+- Added image-based three-star rating support with configurable filled/empty star textures and automatic `StarRatingPanel` generation.
+- Made `Txt_TotalScore` optional and confirmed missing bindings are skipped safely.
+- Updated TDD.md and TDD_Chinese.md with the final scoring and evaluation UI implementation details.
+
 ## 2026-06-15
 
 ### Main Menu Preview and Random Planning Flow (v0.17)

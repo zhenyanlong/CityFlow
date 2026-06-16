@@ -54,6 +54,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	float GetMoveSpeed() const { return MoveSpeed; }
 
+	UFUNCTION(BlueprintCallable, Category = "Vehicle")
+	void SetPathCellCount(int32 InPathCellCount);
+
+	UFUNCTION(BlueprintPure, Category = "Vehicle")
+	int32 GetPathCellCount() const { return PathCellCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Vehicle")
+	float GetTravelTime() const { return TravelTime; }
+
 	UFUNCTION(BlueprintPure, Category = "Vehicle")
 	float GetCurrentSpeed() const { return CurrentSpeed; }
 
@@ -265,6 +274,8 @@ protected:
 	FVector VelocityDirection = FVector::ZeroVector;
 	float CurrentSplineDistance = 0.0f;
 	float CurrentSpeed = 0.0f;
+	float TravelTime = 0.0f;
+	int32 PathCellCount = 0;
 
 	FGridVector PreviousGridPosition;
 

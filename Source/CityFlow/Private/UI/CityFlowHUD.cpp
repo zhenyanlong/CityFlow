@@ -215,12 +215,7 @@ void ACityFlowHUD::ShowEvaluationWidget()
 
 	if (SM && GM && EvaluationWidget)
 	{
-		const float Elapsed = GM->SimulationDuration - GM->GetSimulationTimeRemaining();
-		EvaluationWidget->Populate(
-			SM->GetTotalScore(),
-			SM->GetArrivalCount(),
-			SM->GetCongestionPenalty(),
-			Elapsed);
+		EvaluationWidget->PopulateFromBreakdown(SM->GetScoreBreakdown());
 	}
 
 	if (GameWidget && GameWidget->IsInViewport())

@@ -939,6 +939,19 @@ AVehicleActor
 
 `OnScorePopupRequested(FVector WorldLocation, int32 DeltaScore)` 在到达和死亡分数变化时广播。计分层不生成 UI Actor，只向 HUD 层报告世界锚点和带符号的分数变化。
 
+**v0.18 最终分更新：** 上方旧的“到达分 - 罚分”实时累计模型现在仅用于模拟阶段的即时 popup 反馈。最终结算改为 GDD 中定义的报告式评分模型，并统一存储在 `FCityFlowScoreBreakdown`（`Public/Scoring/Types/ScoringTypes.h`）中。
+
+| 分项 | 实现 |
+|---|---|
+| **连通性** | 统计总建筑数、已连通建筑数，计算道路连通分量和最大已连通建筑分量，并应用 `180 * ConnectedRatio^2 + 80 * LargestComponentRatio + 40 * AllConnected`。 |
+| **交通结果** | 统计生成、到达、死亡和结算时仍在场车辆；未完成车辆仍计入分母，避免虚高到达率。 |
+| **通行效率** | `AVehicleActor` 记录 `TravelTime` 和 `PathCellCount`；到达车辆汇总为 `TotalTravelTimeOfArrivedVehicles / TotalCellsTraversedByArrivedVehicles`。 |
+| **预算效率** | 使用道路格数量作为 `UsedBudget`，用建筑网格位置之间的曼哈顿 MST 估算最低道路需求，再乘以连通性和 `sqrt(ArrivalRate)`。 |
+| **运行时长** | 记录模拟阶段已运行时间，同时按 GDD 将 runtime score 作为提前完成奖励计算；Evaluation UI 单独显示已运行时间。 |
+| **地图难度** | 从 `UCityFlowDeveloperSettings` 读取 `ReferenceBuildingCount`、`ReferenceSpreadRatio`、`TargetBudgetPressure`、`AcceptableCellTimeMultiplier` 和地图难度倍率 clamp 参数。 |
+
+`StopScoring()` 现在调用 `ComputeFinalScore()`，填充 `FCityFlowScoreBreakdown`，更新 `TotalScore` 并广播 `OnScoreChanged`。`CF_ShowScoreStats` 会打印最终分、原始分、各分项、规划统计、交通统计和地图难度倍率。
+
 ---
 
 ### 2.8 玩家与摄像机系统
@@ -1178,6 +1191,26 @@ EvaluationWidget (结算)
 | `Populate(TotalScore, Arrivals, Penalty, ElapsedTime)` | 设置全部数据并刷新 UI；自动更新 `GlobalHighScore` |
 
 HUD 的 `ShowEvaluationWidget()` 从 `ScoringManager` 和 `GameMode` 读取数据后调用 `Populate()`。
+
+**v0.18 结算报告 UI 更新：** HUD 现在调用 `PopulateFromBreakdown(ScoringManager::GetScoreBreakdown())`，使结算界面直接读取完整的 `FCityFlowScoreBreakdown`。
+
+**新增可选控件与自动生成行：**
+- `Txt_TotalScore` 改为 `BindWidgetOptional`；如果蓝图未绑定该控件，最终分行会被跳过，不会报错。
+- `ScoreReportPanel` 是可选 `VerticalBox`。存在时，C++ 会自动生成左右两列的报告行：左侧 description `TextBlock` 左对齐，右侧 value `TextBlock` 右对齐。
+- 自动生成的文本会加黑色 outline，提高可读性。
+- 仍支持手动绑定细分行：`Txt_RawScore`、`Txt_ConnectedBuildings`、`Txt_LargestConnectedNetwork`、`Txt_BudgetUsed`、`Txt_EstimatedMinimumRoadNeed`、`Txt_Deaths`、`Txt_ArrivalRate`、`Txt_AverageCellTravelTime`、`Txt_ConnectivityScore`、`Txt_TrafficOutcomeScore`、`Txt_TravelEfficiencyScore`、`Txt_BudgetEfficiencyScore`、`Txt_RuntimeScore`、`Txt_MapDifficultyMultiplier`。
+- `Txt_RuntimeScore` 显示模拟阶段已运行时间（`MM:SS`），不是 GDD 的 runtime score 分项。
+
+**逐项数字动画：**
+- `BuildAnimatedScoreLines()` 构建报告行队列。
+- `NativeTick()` 每次只推进当前行；当前数字到达目标值后，下一行才显示并开始滚动。
+- `NumberRollDuration`、`LineRevealDelay` 和 `bAnimateScoreReport` 可在 Widget 上配置。
+
+**基于图片的星级评级：**
+- `FilledStarTexture` 使用玩家提供的点亮星星图片。
+- `EmptyStarTexture` 可选；未设置时，空星使用同一张图片并套用 `EmptyStarOpacity`。
+- `StarRatingPanel` 是可选 `HorizontalBox`。如果未绑定但存在 `ScoreReportPanel`，C++ 会自动生成 `Rating:` 行和 3 个 `UImage`。
+- `CalculateStarRating()` 当前按最终分阈值计算：350 / 600 / 800 分分别对应一星 / 二星 / 三星。
 
 #### CityFlowStartWidget
 

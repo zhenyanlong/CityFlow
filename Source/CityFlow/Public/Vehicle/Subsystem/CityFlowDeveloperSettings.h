@@ -56,6 +56,24 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Scoring", meta = (ClampMin = "2"))
 	int32 CongestionThreshold = 3;
 
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Final", meta = (ClampMin = "1.0"))
+	float ReferenceBuildingCount = 8.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Final", meta = (ClampMin = "0.1"))
+	float ReferenceSpreadRatio = 6.0f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Final", meta = (ClampMin = "0.01"))
+	float TargetBudgetPressure = 0.45f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Final", meta = (ClampMin = "1.0"))
+	float AcceptableCellTimeMultiplier = 2.5f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Final", meta = (ClampMin = "0.1"))
+	float MinMapDifficultyMultiplier = 0.85f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Final", meta = (ClampMin = "0.1"))
+	float MaxMapDifficultyMultiplier = 1.20f;
+
 	UPROPERTY(Config, EditAnywhere, Category = "Scoring|Popup")
 	bool bEnableScorePopups = true;
 

@@ -4,6 +4,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "UObject/ObjectKey.h"
 #include "Grid/CityFlowGridTypes.h"
+#include "Scoring/Types/ScoringTypes.h"
 #include "ScoringManager.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnScoreChanged, int32, NewTotalScore);
@@ -55,6 +56,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Scoring")
 	float GetElapsedSimulationTime() const { return ElapsedSimulationTime; }
 
+	UFUNCTION(BlueprintPure, Category = "Scoring")
+	FCityFlowScoreBreakdown GetScoreBreakdown() const { return ScoreBreakdown; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Scoring|Events")
 	FOnScoreChanged OnScoreChanged;
 
@@ -83,7 +87,17 @@ private:
 
 	void UpdateCongestionPenalty();
 
-	void ComputeFinalScore(bool bAllConnected);
+	void ResetScoreState();
+	void ComputeFinalScore();
+	void ComputeConnectivityStats(FCityFlowScoreBreakdown& OutBreakdown) const;
+	void ComputeTrafficStats(FCityFlowScoreBreakdown& OutBreakdown) const;
+	void ComputeBudgetStats(FCityFlowScoreBreakdown& OutBreakdown) const;
+	void ComputeDifficultyMultiplier(FCityFlowScoreBreakdown& OutBreakdown) const;
+
+	TArray<class ABuilding*> GetAllBuildings() const;
+	bool IsBuildingConnected(class ABuilding* Building) const;
+	void BuildRoadComponentMap(TMap<FGridVector, int32>& OutComponentByCell) const;
+	int32 EstimateMinimumRoadNeed(const TArray<class ABuilding*>& Buildings) const;
 
 	class UVehicleManager* GetVehicleManager() const;
 	class UGridManager* GetGridManager() const;
@@ -93,14 +107,19 @@ private:
 	int32 CongestionPenaltyTotal = 0;
 	int32 DeathPenaltyTotal = 0;
 	int32 DeathCount = 0;
+	int32 SpawnedVehicleCount = 0;
 	int32 TotalArrivalCount = 0;
 	float ElapsedSimulationTime = 0.0f;
 	int32 FinalCongestionCellCount = 0;
+	float TotalTravelTimeOfArrivedVehicles = 0.0f;
+	int32 TotalCellsTraversedByArrivedVehicles = 0;
+	float SpawnedVehicleMoveSpeedTotal = 0.0f;
 
 	bool bIsScoring = false;
 	float CongestionUpdateTimer = 0.0f;
 	TSet<FGridVector> CurrentCongestedCells;
 	TSet<TObjectKey<class AVehicleActor>> ScoredDeathVehicles;
+	FCityFlowScoreBreakdown ScoreBreakdown;
 
 	FTimerHandle PenaltyTimerHandle;
 	static constexpr float PENALTY_CHECK_INTERVAL = 1.0f;

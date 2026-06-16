@@ -184,6 +184,11 @@ void AVehicleActor::SetDestination(ABuilding* InDestination)
 	Destination = InDestination;
 }
 
+void AVehicleActor::SetPathCellCount(int32 InPathCellCount)
+{
+	PathCellCount = FMath::Max(0, InPathCellCount);
+}
+
 void AVehicleActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -211,6 +216,8 @@ void AVehicleActor::TickMovementSpline(float DeltaTime)
 	{
 		return;
 	}
+
+	TravelTime += DeltaTime;
 
 	const float SplineLength = PathSpline->GetSplineLength();
 	if (CurrentSplineDistance >= SplineLength)

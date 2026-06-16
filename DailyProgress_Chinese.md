@@ -1,3 +1,21 @@
+## 2026-06-16
+
+### 对齐 GDD 的最终分重构
+
+- 新增 `FCityFlowScoreBreakdown`，作为结算评价报告的共享数据结构。
+- 重构 `UScoringManager`，在 Evaluation 阶段按 GDD 计算连通性、交通结果、通行效率、预算效率、运行时长和地图难度倍率等最终分项。
+- 为车辆新增行驶时间和路径格数统计，使到达车辆能够参与平均单格通行时间计算。
+- 更新 `CF_ShowScoreStats`，打印最终分、原始分、各分项、规划统计、交通统计和地图难度倍率。
+
+### 结算报告 UI
+
+- 更新 `UCityFlowEvaluationWidget`，通过 `PopulateFromBreakdown()` 读取并展示完整分数报告。
+- 新增可选 `ScoreReportPanel` 动态行生成，支持左侧描述、右侧数值和文本描边。
+- 新增逐项数字滚动动画，每一行数字到达目标值后才显示下一行。
+- 新增基于图片的三星评级支持，可配置点亮/未点亮星星贴图，并可自动生成 `StarRatingPanel`。
+- 将 `Txt_TotalScore` 改为可选绑定，并确认缺失绑定时会安全跳过。
+- 更新 TDD.md 和 TDD_Chinese.md，记录最终计分与结算 UI 的实现细节。
+
 ## 2026-06-15
 
 ### 主菜单预览与随机规划流程（v0.17）

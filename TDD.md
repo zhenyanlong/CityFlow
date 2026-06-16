@@ -951,6 +951,19 @@ Scoring starts on `StartScoring()` (called by GameMode on Simulation begin) and 
 
 `OnScorePopupRequested(FVector WorldLocation, int32 DeltaScore)` is broadcast for arrival and death score deltas. Scoring does not spawn UI actors; it only reports the world anchor and signed score delta to the HUD layer.
 
+**v0.18 final-score update:** The legacy arrival-minus-penalty running total above is now used only for immediate popup feedback. Final evaluation uses the GDD report model and is stored in `FCityFlowScoreBreakdown` (`Public/Scoring/Types/ScoringTypes.h`).
+
+| Category | Implementation |
+|---|---|
+| **Connectivity** | Counts total connected buildings, computes road connected components, tracks the largest connected building component, and applies `180 * ConnectedRatio^2 + 80 * LargestComponentRatio + 40 * AllConnected`. |
+| **Traffic Outcome** | Tracks spawned, arrived, dead, and active-at-end vehicles. Active vehicles remain in the denominator so unfinished traffic cannot inflate arrival rate. |
+| **Travel Efficiency** | `AVehicleActor` records `TravelTime` and `PathCellCount`; arrivals contribute to `TotalTravelTimeOfArrivedVehicles / TotalCellsTraversedByArrivedVehicles`. |
+| **Budget Efficiency** | Uses road cell count as `UsedBudget`, estimates minimum road need with a Manhattan MST between building grid positions, then multiplies by connectivity and `sqrt(ArrivalRate)`. |
+| **Runtime** | Records elapsed simulation time and computes the GDD runtime score as an early-completion bonus. The Evaluation UI displays elapsed runtime separately from this score component. |
+| **Map Difficulty** | Applies configurable `ReferenceBuildingCount`, `ReferenceSpreadRatio`, `TargetBudgetPressure`, `AcceptableCellTimeMultiplier`, and map-difficulty multiplier clamps from `UCityFlowDeveloperSettings`. |
+
+`StopScoring()` now calls `ComputeFinalScore()`, fills `FCityFlowScoreBreakdown`, updates `TotalScore`, and broadcasts `OnScoreChanged`. `CF_ShowScoreStats` prints the final score, raw score, category breakdown, planning stats, traffic stats, and map difficulty multiplier.
+
 ---
 
 ### 2.8 Player & Camera System
@@ -1191,6 +1204,26 @@ EvaluationWidget (结算)
 | `Populate(TotalScore, Arrivals, Penalty, ElapsedTime)` | Sets all data and refreshes UI; auto-updates `GlobalHighScore` |
 
 `ShowEvaluationWidget()` in HUD reads from `ScoringManager` and `GameMode`, then calls `Populate()`.
+
+**v0.18 score-report UI update:** HUD now calls `PopulateFromBreakdown(ScoringManager::GetScoreBreakdown())` so the evaluation screen reads the full final score report from `FCityFlowScoreBreakdown`.
+
+**Additional optional controls and generated rows:**
+- `Txt_TotalScore` is now `BindWidgetOptional`; if missing, the final-score line is simply skipped.
+- `ScoreReportPanel` (optional `VerticalBox`) can be provided by the Blueprint. When present, C++ auto-generates two-column report rows using a left-aligned description `TextBlock` and a right-aligned value `TextBlock`.
+- Generated report text receives a black font outline for readability.
+- Optional manually bound rows remain supported: `Txt_RawScore`, `Txt_ConnectedBuildings`, `Txt_LargestConnectedNetwork`, `Txt_BudgetUsed`, `Txt_EstimatedMinimumRoadNeed`, `Txt_Deaths`, `Txt_ArrivalRate`, `Txt_AverageCellTravelTime`, `Txt_ConnectivityScore`, `Txt_TrafficOutcomeScore`, `Txt_TravelEfficiencyScore`, `Txt_BudgetEfficiencyScore`, `Txt_RuntimeScore`, and `Txt_MapDifficultyMultiplier`.
+- `Txt_RuntimeScore` displays elapsed simulation runtime in `MM:SS`, not the GDD runtime score component.
+
+**Sequential number animation:**
+- `BuildAnimatedScoreLines()` builds a queue of report lines.
+- `NativeTick()` advances one line at a time; the next line is revealed only after the previous line reaches its target value.
+- `NumberRollDuration`, `LineRevealDelay`, and `bAnimateScoreReport` are configurable on the widget.
+
+**Image-based star rating:**
+- `FilledStarTexture` is the player-provided filled-star image.
+- `EmptyStarTexture` is optional; if absent, empty stars use the filled texture with `EmptyStarOpacity`.
+- `StarRatingPanel` (optional `HorizontalBox`) can be bound manually. If absent and `ScoreReportPanel` exists, C++ auto-generates a `Rating:` row with three `UImage` widgets.
+- `CalculateStarRating()` currently uses final-score thresholds: 350/600/800 for one/two/three stars.
 
 #### CityFlowStartWidget
 

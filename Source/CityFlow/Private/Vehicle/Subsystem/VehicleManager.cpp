@@ -340,6 +340,7 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 
 	Vehicle->Origin = Origin;
 	Vehicle->SetDestination(Destination);
+	Vehicle->SetPathCellCount(FMath::Max(1, Path.Num() - 1));
 
 	const float TangentLen = GM->GetCellSize();
 	Vehicle->SetSplinePath(SplinePoints, SplineTangentDirs, SplineArriveLengths, SplineLeaveLengths, TangentLen);

@@ -232,9 +232,19 @@ void UCityFlowCheatExtension::CF_ShowScoreStats()
 		return;
 	}
 
+	const FCityFlowScoreBreakdown Breakdown = SM->GetScoreBreakdown();
 	UE_LOG(LogCityFlowCheat, Log, TEXT("=== Score Stats ==="));
-	UE_LOG(LogCityFlowCheat, Log, TEXT("  Total: %d | Arrival: %d | Penalty: -%d | Arrivals: %d | Time: %.1fs"),
-		SM->GetTotalScore(), SM->GetArrivalScore(), SM->GetCongestionPenalty(), SM->GetArrivalCount(), SM->GetElapsedSimulationTime());
+	UE_LOG(LogCityFlowCheat, Log, TEXT("  Final: %d | Raw: %.1f | Multiplier: %.2f | Time: %.1fs"),
+		Breakdown.FinalScore, Breakdown.RawScore, Breakdown.MapDifficultyMultiplier, Breakdown.ElapsedSimulationTime);
+	UE_LOG(LogCityFlowCheat, Log, TEXT("  Breakdown C/T/E/B/R: %.1f / %.1f / %.1f / %.1f / %.1f"),
+		Breakdown.ConnectivityScore, Breakdown.TrafficOutcomeScore, Breakdown.TravelEfficiencyScore,
+		Breakdown.BudgetEfficiencyScore, Breakdown.RuntimeScore);
+	UE_LOG(LogCityFlowCheat, Log, TEXT("  Planning: Buildings %d/%d | LargestComponent %d | Budget %d/%d | EstMin %d"),
+		Breakdown.ConnectedBuildingCount, Breakdown.TotalBuildingCount, Breakdown.LargestConnectedBuildingComponent,
+		Breakdown.UsedBudget, Breakdown.TotalRoadBudget, Breakdown.EstimatedMinRoadNeed);
+	UE_LOG(LogCityFlowCheat, Log, TEXT("  Traffic: Spawned %d | Arrived %d | Dead %d | ActiveEnd %d | ArrivalRate %.2f | AvgCell %.2fs"),
+		Breakdown.SpawnedVehicles, Breakdown.ArrivedVehicles, Breakdown.DeadVehicles, Breakdown.ActiveVehiclesAtEnd,
+		Breakdown.ArrivalRate, Breakdown.AverageCellTravelTime);
 }
 
 void UCityFlowCheatExtension::CF_AddScore(int32 Amount)
