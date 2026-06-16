@@ -935,11 +935,17 @@ AVehicleActor
 | **全连通奖励** | 结算时所有建筑连通，+FullConnectivityBonus（默认 500） |
 | **效率奖励** | 剩余道路预算（未来：按比例奖励） |
 
-模拟开始时 `StartScoring()`，结算时 `StopScoring()`。
+模拟开始时 `StartScoring()`，结算时 `StopScoring()`。模拟阶段中，`TotalScore` 是 HUD 上显示的实时分数：
+
+```text
+LiveScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
+```
+
+`StartScoring()` 会广播 `OnScoreChanged(0)`；每次车辆到达、车辆死亡、拥堵罚分都会重新计算实时分数并广播 `OnScoreChanged`，使 `UCityFlowGameWidget::Txt_Score` 实时刷新。最终报告分则在 `ComputeFinalScore()` 中单独计算。
 
 `OnScorePopupRequested(FVector WorldLocation, int32 DeltaScore)` 在到达和死亡分数变化时广播。计分层不生成 UI Actor，只向 HUD 层报告世界锚点和带符号的分数变化。
 
-**v0.18 最终分更新：** 上方旧的“到达分 - 罚分”实时累计模型现在仅用于模拟阶段的即时 popup 反馈。最终结算改为 GDD 中定义的报告式评分模型，并统一存储在 `FCityFlowScoreBreakdown`（`Public/Scoring/Types/ScoringTypes.h`）中。
+**v0.18 最终分更新：** 上方“到达分 - 罚分”实时累计模型继续作为模拟阶段 HUD 分数和即时 popup 反馈模型。最终结算改为 GDD 中定义的报告式评分模型，并统一存储在 `FCityFlowScoreBreakdown`（`Public/Scoring/Types/ScoringTypes.h`）中。
 
 | 分项 | 实现 |
 |---|---|
@@ -966,8 +972,10 @@ AVehicleActor
 | 输入 | `Enhanced Input` → `IA_Move`（Axis2D）、`IA_Look`（Axis2D）、`IA_Zoom`（Axis1D）、`IA_Alt`（Digital） |
 | 移动方向 | 从 `CameraYaw` 推导（由蓝图从摄像机朝向更新）—— WASD 相对于玩家朝向移动，而非实时摄像机视角 |
 | 摄像机朝向 | `CameraYaw`（BlueprintReadWrite, float）—— 蓝图每帧从摄像机 yaw 更新此变量；`Move()` 构建 `FRotator(0, CameraYaw, 0)` 计算前/右向量 |
+| 视角复位 | `ResetToInitialViewState(bool bResetLocation)` 恢复 BeginPlay 时记录的 Controller pitch/yaw，可选将 Pawn 传送回初始 Transform，同时更新 `CameraYaw` 并清除当前移动速度。HUD 在返回主菜单时以 `bResetLocation=true` 调用，在标题界面进入游戏时以 `bResetLocation=false` 调用，避免标题界面旋转 yaw 泄漏到游戏镜头。 |
+| 移动停止 | `StopCameraMovement()` 清除 Alt 视角状态，并对角色移动组件调用 `StopMovementImmediately()`。HUD 在进入 Pause、Evaluation 等 UI-only 状态时调用。 |
 | Alt + 鼠标视角 | `IA_Alt` + `IA_Look` —— 按住 Alt 时设 `bAltHeld = true`，切换输入模式为 `FInputModeGameOnly()`（捕获鼠标），通过鼠标 delta 驱动 `AddControllerYawInput()`（C++ 仅控制 yaw；pitch 在蓝图中处理），并**关闭放置功能**（`DisablePlacement()`），避免光标和预览 Actor 干扰摄像机旋转。松开 Alt 恢复 `FInputModeGameAndUI` + 鼠标光标，且**仅在当前阶段为 `Planning` 时恢复放置**（避免在 Simulation 阶段误开启放置）。 |
-| 主菜单摄像机 yaw | `SetMainMenuCameraYawRotationEnabled(bool)` 控制一个轻量 Tick，在标题菜单可见时缓慢增加 Controller yaw。HUD 在 `ShowStartWidget()` 时开启，进入游戏或结算时关闭。Tick 默认关闭，仅在标题界面旋转激活时运行。 |
+| 主菜单摄像机 yaw | `SetMainMenuCameraYawRotationEnabled(bool)` 控制 `Tick()` 内的标题界面 yaw 旋转分支，在标题菜单可见时缓慢增加 Controller yaw。HUD 在 `ShowStartWidget()` 时开启，进入游戏或结算时关闭。Pawn Tick 保持开启，使蓝图中的摄像机 pitch/zoom 插值在离开主菜单后仍能继续运行。 |
 | 滚轮缩放 | `IA_Zoom` 调整 `TargetSpringArmLength`（Clamp 到 [Min, Max]）。蓝图每帧读取此变量以驱动 spring arm 长度插值 |
 | 蓝图可配置 | `MoveSpeed`、`LookSensitivity`、`MainMenuCameraYawSpeed`、`ZoomSpeed`、`MinSpringArmLength`、`MaxSpringArmLength`、`DefaultCameraPitch`、`MinCameraPitch`、`MaxCameraPitch` |
 | 摄像机设置 | 在蓝图中处理：`USpringArmComponent` + `UCameraComponent` 作为子组件；spring arm 使用 `bUsePawnControlRotation = true`；角色自动接管 |
@@ -993,6 +1001,18 @@ AVehicleActor
 | 删除 | `IA_RemoveItem`（鼠标右键）→ `Started`/`Triggered`/`Completed` 事件 → `TryRemoveAtCursor()` 辅助函数，通过 `LastRemovedGridPos` 去重实现拖拽连续删除。从网格 `Cell.RoadActor` 查找 Actor，不依赖碰撞命中。 |
 | 蓝图可配置 | `PlaceableActorClass`（任意 `AGridPlaceableActor` 子类）；`IA_PlaceItem`、`IA_RemoveItem`、`IA_Pause` |
 | 暂停 | `IA_Pause` → `OnPausePressed` → `HUD::TogglePause()` — 切换暂停覆盖层和 `SetGamePaused` |
+
+#### 摄像机 / 输入状态安全
+
+HUD 状态切换会显式清理从玩法状态遗留到 UI 状态的输入：
+
+| 切换 | 安全处理 |
+|---|---|
+| 返回主菜单 | 关闭放置，复位 Pawn 位置和初始视角，刷新已按下按键，忽略移动输入，切到 `FInputModeUIOnly`，再开启标题界面 yaw 旋转 |
+| 主菜单 → 游戏 | 关闭标题 yaw 旋转，只复位视角 yaw/pitch 而不移动 Pawn，刷新已按下按键，重置移动输入忽略状态，切到 `FInputModeGameAndUI`，若当前为 Planning 则开启放置 |
+| 游戏 → Evaluation / Pause | 按需关闭放置，立即停止 Pawn 移动，刷新已按下按键，忽略移动输入，并切到 `FInputModeUIOnly` |
+
+这避免了两个标题/结算流程回归：主菜单旋转 yaw 带入游戏镜头，以及按住 WASD 进入 Evaluation 后 Pawn 继续向某个方向漂移。
 
 #### 放置开关
 

@@ -16,6 +16,20 @@
 - Made `Txt_TotalScore` optional and confirmed missing bindings are skipped safely.
 - Updated TDD.md and TDD_Chinese.md with the final scoring and evaluation UI implementation details.
 
+### Camera and UI State Regression Fixes
+
+- Kept `ACityFlowPawn` Tick enabled so Blueprint camera pitch and zoom interpolation continues outside the main menu.
+- Added `ResetToInitialViewState()` and `StopCameraMovement()` to reset title/game camera state and clear movement velocity during UI transitions.
+- Updated HUD transitions so returning to Main Menu resets the pawn location, entering gameplay resets title-screen yaw, and Evaluation/Pause flush held movement input.
+- Updated TDD.md and TDD_Chinese.md with the camera/input state safety flow.
+
+### Simulation Live Score Fix
+
+- Restored simulation-phase live score updates in `UScoringManager` using `ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal`.
+- Broadcast `OnScoreChanged(0)` when scoring starts and rebroadcast after arrivals, deaths, and congestion penalties so `Txt_Score` updates in real time.
+- Preserved the GDD-style final score report for Evaluation while keeping the live HUD score as immediate simulation feedback.
+- Updated TDD.md and TDD_Chinese.md to document the difference between live HUD score and final evaluation score.
+
 ## 2026-06-15
 
 ### Main Menu Preview and Random Planning Flow (v0.17)

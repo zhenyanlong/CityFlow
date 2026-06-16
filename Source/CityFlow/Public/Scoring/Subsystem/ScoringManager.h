@@ -87,6 +87,7 @@ private:
 
 	void UpdateCongestionPenalty();
 
+	void UpdateLiveScore();
 	void ResetScoreState();
 	void ComputeFinalScore();
 	void ComputeConnectivityStats(FCityFlowScoreBreakdown& OutBreakdown) const;

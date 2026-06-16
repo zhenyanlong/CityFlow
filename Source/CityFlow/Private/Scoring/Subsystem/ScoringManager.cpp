@@ -25,6 +25,7 @@ void UScoringManager::StartScoring()
 	StopScoring();
 
 	ResetScoreState();
+	OnScoreChanged.Broadcast(TotalScore);
 
 	UVehicleManager* VM = GetVehicleManager();
 	if (VM)
@@ -121,6 +122,7 @@ void UScoringManager::RecordVehicleArrival(AVehicleActor* Vehicle)
 	TotalCellsTraversedByArrivedVehicles += FMath::Max(1, Vehicle->GetPathCellCount());
 
 	RequestScorePopup(Vehicle, ArrivalPoints);
+	UpdateLiveScore();
 }
 
 void UScoringManager::RecordCongestion(const TSet<FGridVector>& CongestedCells)
@@ -154,6 +156,7 @@ void UScoringManager::OnVehicleDeathHandler(AVehicleActor* Vehicle)
 	DeathPenaltyTotal += Penalty;
 
 	RequestScorePopup(Vehicle, -Penalty);
+	UpdateLiveScore();
 
 	UnbindVehicleDeathEvent(Vehicle);
 }
@@ -236,8 +239,15 @@ void UScoringManager::UpdateCongestionPenalty()
 		const int32 Penalty = CongestedCount * Settings->CongestionPenaltyPerSecond;
 		CongestionPenaltyTotal += Penalty;
 		FinalCongestionCellCount = FMath::Max(FinalCongestionCellCount, CongestedCount);
+		UpdateLiveScore();
 	}
 
+}
+
+void UScoringManager::UpdateLiveScore()
+{
+	TotalScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal;
+	OnScoreChanged.Broadcast(TotalScore);
 }
 
 void UScoringManager::ResetScoreState()

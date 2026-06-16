@@ -16,6 +16,20 @@
 - 将 `Txt_TotalScore` 改为可选绑定，并确认缺失绑定时会安全跳过。
 - 更新 TDD.md 和 TDD_Chinese.md，记录最终计分与结算 UI 的实现细节。
 
+### 摄像机与 UI 状态回归修复
+
+- 保持 `ACityFlowPawn` Tick 开启，使蓝图中的摄像机 pitch 和 zoom 插值在离开主菜单后仍能继续运行。
+- 新增 `ResetToInitialViewState()` 和 `StopCameraMovement()`，用于在 UI 状态切换时复位标题/游戏镜头状态并清除移动速度。
+- 更新 HUD 状态切换：返回主菜单时复位 Pawn 位置，进入游戏时复位标题界面 yaw，进入 Evaluation/Pause 时刷新仍被按住的移动输入。
+- 更新 TDD.md 和 TDD_Chinese.md，记录摄像机/输入状态安全流程。
+
+### 模拟阶段实时分数修复
+
+- 恢复 `UScoringManager` 的模拟阶段实时分数更新，使用 `ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal`。
+- 在计分开始时广播 `OnScoreChanged(0)`，并在车辆到达、车辆死亡和拥堵罚分后重新广播，使 `Txt_Score` 实时刷新。
+- 保留 Evaluation 阶段的 GDD 风格最终评分报告，同时将实时 HUD 分数作为模拟阶段即时反馈。
+- 更新 TDD.md 和 TDD_Chinese.md，记录实时 HUD 分数与最终结算分的区别。
+
 ## 2026-06-15
 
 ### 主菜单预览与随机规划流程（v0.17）

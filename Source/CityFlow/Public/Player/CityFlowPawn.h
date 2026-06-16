@@ -18,6 +18,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Camera")
 	void SetMainMenuCameraYawRotationEnabled(bool bEnabled);
 
+	UFUNCTION(BlueprintCallable, Category = "Camera")
+	void ResetToInitialViewState(bool bResetLocation);
+
+	UFUNCTION(BlueprintCallable, Category = "Camera")
+	void StopCameraMovement();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -84,6 +90,8 @@ protected:
 	float MaxCameraPitch = -30.0f;
 
 private:
+	FTransform InitialPawnTransform;
+	FRotator InitialControlRotation = FRotator::ZeroRotator;
 	bool bAltHeld = false;
 	bool bMainMenuCameraYawRotationEnabled = false;
 };

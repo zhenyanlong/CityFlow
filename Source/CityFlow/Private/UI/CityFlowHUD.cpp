@@ -79,8 +79,12 @@ void ACityFlowHUD::ShowStartWidget()
 		}
 		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
 		{
+			CityFlowPawn->ResetToInitialViewState(true);
 			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(true);
 		}
+		PC->FlushPressedKeys();
+		PC->ResetIgnoreMoveInput();
+		PC->SetIgnoreMoveInput(true);
 		PC->bShowMouseCursor = true;
 		PC->SetInputMode(FInputModeUIOnly());
 	}
@@ -129,7 +133,10 @@ void ACityFlowHUD::ShowGameWidget()
 		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
 		{
 			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(false);
+			CityFlowPawn->ResetToInitialViewState(false);
 		}
+		PC->FlushPressedKeys();
+		PC->ResetIgnoreMoveInput();
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(InputMode);
@@ -168,6 +175,13 @@ void ACityFlowHUD::ShowPauseOverlay()
 
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
+		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
+		{
+			CityFlowPawn->StopCameraMovement();
+		}
+		PC->FlushPressedKeys();
+		PC->ResetIgnoreMoveInput();
+		PC->SetIgnoreMoveInput(true);
 		PC->bShowMouseCursor = true;
 		PC->SetInputMode(FInputModeUIOnly());
 	}
@@ -185,6 +199,8 @@ void ACityFlowHUD::HidePauseOverlay()
 
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
+		PC->FlushPressedKeys();
+		PC->ResetIgnoreMoveInput();
 		PC->bShowMouseCursor = true;
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
@@ -229,8 +245,12 @@ void ACityFlowHUD::ShowEvaluationWidget()
 		}
 		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
 		{
+			CityFlowPawn->StopCameraMovement();
 			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(false);
 		}
+		PC->FlushPressedKeys();
+		PC->ResetIgnoreMoveInput();
+		PC->SetIgnoreMoveInput(true);
 		PC->bShowMouseCursor = true;
 		PC->SetInputMode(FInputModeUIOnly());
 	}
@@ -328,7 +348,10 @@ void ACityFlowHUD::ShowGameWidgetRandom()
 		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
 		{
 			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(false);
+			CityFlowPawn->ResetToInitialViewState(false);
 		}
+		PC->FlushPressedKeys();
+		PC->ResetIgnoreMoveInput();
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(InputMode);

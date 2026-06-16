@@ -947,11 +947,17 @@ A new helper `GetDoorwayConnectionPointForPosition(Doorway, BasePos)` computes a
 | **Full-Connectivity Bonus** | If all buildings connected at evaluation, **+FullConnectivityBonus** (default 500) |
 | **Efficiency Bonus** | Remaining road budget at end (future: proportional bonus) |
 
-Scoring starts on `StartScoring()` (called by GameMode on Simulation begin) and stops on `StopScoring()` (on Evaluation). Final score computed in `ComputeFinalScore()`.
+Scoring starts on `StartScoring()` (called by GameMode on Simulation begin) and stops on `StopScoring()` (on Evaluation). During simulation, `TotalScore` is the live HUD score:
+
+```text
+LiveScore = ArrivalScoreTotal - CongestionPenaltyTotal - DeathPenaltyTotal
+```
+
+`StartScoring()` broadcasts `OnScoreChanged(0)`, and every arrival, death, and congestion penalty recomputes the live score and broadcasts `OnScoreChanged` so `UCityFlowGameWidget::Txt_Score` updates in real time. Final report score is computed separately in `ComputeFinalScore()`.
 
 `OnScorePopupRequested(FVector WorldLocation, int32 DeltaScore)` is broadcast for arrival and death score deltas. Scoring does not spawn UI actors; it only reports the world anchor and signed score delta to the HUD layer.
 
-**v0.18 final-score update:** The legacy arrival-minus-penalty running total above is now used only for immediate popup feedback. Final evaluation uses the GDD report model and is stored in `FCityFlowScoreBreakdown` (`Public/Scoring/Types/ScoringTypes.h`).
+**v0.18 final-score update:** The arrival-minus-penalty running total remains the simulation-phase HUD score and popup feedback model. Final evaluation uses the GDD report model and is stored in `FCityFlowScoreBreakdown` (`Public/Scoring/Types/ScoringTypes.h`).
 
 | Category | Implementation |
 |---|---|
@@ -978,8 +984,10 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Input | `Enhanced Input` → `IA_Move` (Axis2D), `IA_Look` (Axis2D), `IA_Zoom` (Axis1D), `IA_Alt` (Digital) |
 | Movement direction | Derived from `CameraYaw` (set by Blueprint from camera orientation) — WASD moves relative to the player's facing direction, not the live camera rotation |
 | Camera orientation | `CameraYaw` (BlueprintReadWrite, float) — Blueprint updates this each tick from the live camera yaw; `Move()` builds `FRotator(0, CameraYaw, 0)` for forward/right vectors |
+| View reset | `ResetToInitialViewState(bool bResetLocation)` restores the captured BeginPlay controller pitch/yaw, optionally teleports the pawn back to its initial transform, updates `CameraYaw`, and clears movement velocity. HUD calls it when returning to the main menu (`bResetLocation=true`) and when starting gameplay from the rotating title screen (`bResetLocation=false`) so the title yaw does not leak into gameplay. |
+| Movement stop | `StopCameraMovement()` clears Alt-look state and calls `StopMovementImmediately()` on the character movement component. HUD uses it when entering UI-only states such as Pause and Evaluation. |
 | Alt + Mouse look | `IA_Alt` + `IA_Look` — holding Alt sets `bAltHeld = true`, switches to `FInputModeGameOnly()` (captures mouse), drives `AddControllerYawInput()` from mouse delta (yaw only in C++; pitch handled in Blueprint), and **disables placement** (`DisablePlacement()`) so the cursor and preview actor do not interfere with camera rotation. Releasing Alt restores `FInputModeGameAndUI` + mouse cursor, and **re-enables placement only if the current phase is `Planning`** (avoids accidentally enabling placement during Simulation). |
-| Main-menu camera yaw | `SetMainMenuCameraYawRotationEnabled(bool)` toggles a lightweight Tick that slowly increments controller yaw while the title menu is visible. HUD enables it on `ShowStartWidget()` and disables it when entering gameplay or evaluation. Tick is disabled by default and only runs while this title-screen rotation is active. |
+| Main-menu camera yaw | `SetMainMenuCameraYawRotationEnabled(bool)` toggles the title-screen yaw rotation branch inside `Tick()`, slowly incrementing controller yaw while the title menu is visible. HUD enables it on `ShowStartWidget()` and disables it when entering gameplay or evaluation. Pawn Tick stays enabled so Blueprint camera pitch/zoom interpolation can continue outside the main menu. |
 | Scroll wheel zoom | `IA_Zoom` adjusts `TargetSpringArmLength` (clamped [Min, Max]). Blueprint reads this variable each tick to drive spring arm length interpolation |
 | Configurable (Blueprint) | `MoveSpeed`, `LookSensitivity`, `MainMenuCameraYawSpeed`, `ZoomSpeed`, `MinSpringArmLength`, `MaxSpringArmLength`, `DefaultCameraPitch`, `MinCameraPitch`, `MaxCameraPitch` |
 | Camera setup | Handled in Blueprint: `USpringArmComponent` + `UCameraComponent` as child components; spring arm uses `bUsePawnControlRotation = true`; character auto-possesses |
@@ -1005,6 +1013,18 @@ A `ACharacter` subclass configured for top-down free-flight control with orienta
 | Removal | `IA_RemoveItem` (right mouse button) → `Started`/`Triggered`/`Completed` events → `TryRemoveAtCursor()` helper with `LastRemovedGridPos` deduplication for drag-to-remove. Looks up the actor from `Cell.RoadActor` in the grid instead of relying on collision hit. |
 | Configurable (Blueprint) | `PlaceableActorClass` (any `AGridPlaceableActor` subclass); `IA_PlaceItem`, `IA_RemoveItem`, `IA_Pause` |
 | Pause | `IA_Pause` → `OnPausePressed` → `HUD::TogglePause()` — toggles pause overlay and `SetGamePaused` |
+
+#### Camera / Input State Safety
+
+HUD state transitions explicitly clear stale input when switching between gameplay and UI-only screens:
+
+| Transition | Safety handling |
+|---|---|
+| Return to main menu | Disable placement, reset pawn location and initial view, flush pressed keys, ignore movement input, switch to `FInputModeUIOnly`, then enable title yaw rotation |
+| Main menu → gameplay | Disable title yaw rotation, reset view yaw/pitch without moving the pawn, flush pressed keys, reset movement ignore state, switch to `FInputModeGameAndUI`, then enable placement if the phase is Planning |
+| Gameplay → Evaluation / Pause | Disable placement where applicable, stop pawn movement immediately, flush pressed keys, ignore movement input, and switch to `FInputModeUIOnly` |
+
+This prevents two regressions from the title/evaluation flow: the rotating main-menu yaw carrying into gameplay, and held WASD input continuing to move the pawn after Evaluation appears.
 
 #### Placement Toggle
 

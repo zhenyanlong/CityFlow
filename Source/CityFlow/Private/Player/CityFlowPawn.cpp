@@ -10,7 +10,7 @@
 ACityFlowPawn::ACityFlowPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.bStartWithTickEnabled = false;
+	PrimaryActorTick.bStartWithTickEnabled = true;
 
 	bUseControllerRotationYaw = false;
 
@@ -25,12 +25,39 @@ ACityFlowPawn::ACityFlowPawn()
 void ACityFlowPawn::SetMainMenuCameraYawRotationEnabled(bool bEnabled)
 {
 	bMainMenuCameraYawRotationEnabled = bEnabled;
-	SetActorTickEnabled(bEnabled);
+}
+
+void ACityFlowPawn::ResetToInitialViewState(bool bResetLocation)
+{
+	StopCameraMovement();
+
+	if (bResetLocation)
+	{
+		SetActorTransform(InitialPawnTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->SetControlRotation(InitialControlRotation);
+		CameraYaw = InitialControlRotation.Yaw;
+	}
+}
+
+void ACityFlowPawn::StopCameraMovement()
+{
+	bAltHeld = false;
+
+	if (UCharacterMovementComponent* CharMovement = GetCharacterMovement())
+	{
+		CharMovement->StopMovementImmediately();
+	}
 }
 
 void ACityFlowPawn::BeginPlay()
 {
 	Super::BeginPlay();
+
+	InitialPawnTransform = GetActorTransform();
 
 	UCharacterMovementComponent* CharMovement = GetCharacterMovement();
 	CharMovement->MaxFlySpeed = MoveSpeed;
@@ -41,6 +68,8 @@ void ACityFlowPawn::BeginPlay()
 		FRotator InitialRot = PC->GetControlRotation();
 		InitialRot.Pitch = DefaultCameraPitch;
 		PC->SetControlRotation(InitialRot);
+		InitialControlRotation = InitialRot;
+		CameraYaw = InitialRot.Yaw;
 
 		if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
 		{
