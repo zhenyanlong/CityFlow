@@ -142,11 +142,11 @@ private:
 		TWeakObjectPtr<UTextBlock> LabelTextBlock;
 		TWeakObjectPtr<UTextBlock> TextBlock;
 		TWeakObjectPtr<UHorizontalBox> StarPanel;
-		FString Label;
+		FText Label;
 		double TargetValue = 0.0;
 		int32 DecimalPlaces = 0;
-		FString Prefix;
-		FString Suffix;
+		FText Prefix;
+		FText Suffix;
 		bool bFormatAsTime = false;
 		bool bFormatAsStars = false;
 		bool bUseStarImages = false;
@@ -172,18 +172,18 @@ private:
 	void CreateStarRatingImageRow();
 	void ApplyScoreTextStyle(UTextBlock* TextBlock, ETextJustify::Type Justification) const;
 	int32 CalculateStarRating() const;
-	FString MakeStarRatingText(int32 StarCount) const;
+	FText MakeStarRatingText(int32 StarCount) const;
 	void UpdateStarRatingVisual(int32 StarCount) const;
 	void BuildAnimatedScoreLines();
-	void AddAnimatedLine(UTextBlock* TextBlock, const FString& Label, double TargetValue, int32 DecimalPlaces = 0, const FString& Prefix = FString(), const FString& Suffix = FString());
-	void AddAnimatedStarLine(const FString& Label, int32 TargetStarCount);
-	void AddAnimatedTimeLine(UTextBlock* TextBlock, const FString& Label, float TargetSeconds);
+	void AddAnimatedLine(UTextBlock* TextBlock, const FText& Label, double TargetValue, int32 DecimalPlaces = 0, const FText& Prefix = FText::GetEmpty(), const FText& Suffix = FText::GetEmpty());
+	void AddAnimatedStarLine(const FText& Label, int32 TargetStarCount);
+	void AddAnimatedTimeLine(UTextBlock* TextBlock, const FText& Label, float TargetSeconds);
 	void StartScoreAnimation();
 	void StopScoreAnimation(bool bComplete);
 	void AdvanceScoreAnimation(float DeltaTime);
 	void ShowCurrentAnimatedLine();
 	void SetAnimatedLineValue(const FAnimatedScoreLine& Line, double Value) const;
-	FString FormatAnimatedValue(const FAnimatedScoreLine& Line, double Value) const;
+	FText FormatAnimatedValue(const FAnimatedScoreLine& Line, double Value) const;
 	void SetScoreLineVisibility(ESlateVisibility InVisibility);
 
 	int32 CachedTotalScore = 0;

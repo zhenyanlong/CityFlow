@@ -8,12 +8,17 @@ class UCityFlowStartWidget;
 class UCityFlowGameWidget;
 class UCityFlowPauseWidget;
 class UCityFlowEvaluationWidget;
+class UCityFlowTutorialWidget;
+class UCityFlowSettingsWidget;
+class UAudioComponent;
+class USoundBase;
+class USoundClass;
 
 /**
  * HUD —— 管理完整 Widget 生命周期：
- *   StartWidget → GameWidget ↔ PauseWidget → EvaluationWidget → (轮回)
+ *   StartWidget → Tutorial/Settings or Random Game → Pause/Evaluation → (loop)
  *
- *   BeginPlay 显示 StartWidget；点击 "开始游戏" 进入 Planning；
+ *   BeginPlay 显示 StartWidget；点击 Random Mode 进入 Planning；
  *   Esc 切换暂停菜单；结算后可返回主菜单。
  */
 UCLASS()
@@ -60,7 +65,24 @@ public:
 	TSubclassOf<UCityFlowEvaluationWidget> EvaluationWidgetClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
+	TSubclassOf<UCityFlowTutorialWidget> TutorialWidgetClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
+	TSubclassOf<UCityFlowSettingsWidget> SettingsWidgetClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
 	bool bEnableMainMenuPreviewMatch = true;
+
+	/** Background music started with the HUD. Use a looping SoundCue/MetaSound for continuous playback. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Audio")
+	TObjectPtr<USoundBase> BackgroundMusic;
+
+	/** Assign the master SoundClass here so the Sound slider always controls the music. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Audio")
+	TObjectPtr<USoundClass> BackgroundMusicSoundClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Audio", meta = (ClampMin = "0.0"))
+	float BackgroundMusicVolumeMultiplier = 1.0f;
 
 protected:
 	UFUNCTION()
@@ -77,10 +99,19 @@ protected:
 	void HandleReturnToMainClicked();
 
 	UFUNCTION()
-	void HandleStartGameClicked();
+	void HandleRandomModeClicked();
 
 	UFUNCTION()
-	void HandleRandomModeClicked();
+	void HandleTutorialClicked();
+
+	UFUNCTION()
+	void HandleSettingsClicked();
+
+	UFUNCTION()
+	void HandleQuitGameClicked();
+
+	UFUNCTION()
+	void HandleMenuPanelBackClicked();
 
 	UFUNCTION()
 	void HandleRestartClicked();
@@ -89,13 +120,13 @@ private:
 	// ---- Widget 创建 / 切换 ----
 	void ShowStartWidget();
 
-	UFUNCTION()
-	void ShowGameWidget();
-
 	void ShowGameWidgetRandom();
+	void ShowTutorialWidget();
+	void ShowSettingsWidget();
 	void ShowPauseOverlay();
 	void HidePauseOverlay();
 	void ShowEvaluationWidget();
+	void StartBackgroundMusic();
 
 	// ---- Widget 实例 ----
 	UPROPERTY()
@@ -109,6 +140,15 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UCityFlowEvaluationWidget> EvaluationWidget;
+
+	UPROPERTY()
+	TObjectPtr<UCityFlowTutorialWidget> TutorialWidget;
+
+	UPROPERTY()
+	TObjectPtr<UCityFlowSettingsWidget> SettingsWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> BackgroundMusicComponent;
 
 	bool bPaused = false;
 };

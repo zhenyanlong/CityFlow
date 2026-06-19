@@ -12,6 +12,30 @@ Once the Simulation Phase begins, the road network is locked, and vehicles begin
 
 The core appeal of the game lies in the strategic depth of "planning arterial roads to guide procedural generation" — the player cannot directly control the specific shape of branch roads, but can greatly influence the L-system's growth results through the position, direction, and reserved connection points of arterial roads, striving for maximum efficiency under a limited budget.
 
+### 1.1 Assisted Capillary-Road Generation
+
+The L-system is an **assistant**, not a replacement for player planning. Player-built arterial roads determine the primary road component, available branch anchors, and how expensive it is to reach each building. When triggered, the generator first reserves enough of its assigned budget for a connection plan, then uses only surplus budget for organic side growth.
+
+Generation follows these player-facing rules:
+
+- A building counts as connected only when one of its doorways belongs to the same continuous road component as every other connected building; isolated doorway stubs do not count as a successful city network.
+- Existing roads are reused whenever possible, so a coherent arterial layout leaves more budget for capillary streets.
+- Dead-ends extend away from the arterial network, while suitably spaced straight segments can create perpendicular branches.
+- Branches are biased toward the nearest useful building doorway while retaining controlled randomness.
+- Rotated buildings use their actual rotated doorway directions.
+- Generation ends when all buildings share one road component, the assigned budget is exhausted, or no legal connection remains.
+
+In player-controlled Random Mode, the generator respects the configured L-system share of the common road budget. Automated title-screen preview matches have no player planning pass and may use the entire remaining budget so the background simulation starts with a usable network.
+
+### 1.2 Main Menu, Tutorial, Settings, and Accessibility
+
+The title screen presents **Random Mode**, **Tutorial**, **Settings**, and **Quit**. A continuously regenerated automated city match runs behind the menu as a living preview of the game's planning and traffic systems.
+
+- **Tutorial** presents a configurable list of topics. Selecting a topic shows localizable explanatory text and an optional image.
+- **Settings** provides master sound volume, SFX volume, and English/Simplified Chinese language selection.
+- Master-menu background music plays through the project's sound-class hierarchy; SFX volume affects sounds routed to the SFX class or its children.
+- Runtime language switching uses Unreal Engine's native culture/localization system. All player-facing C++ text uses localizable `FText` resources, and tutorial text remains asset-driven for localization gathering.
+
 ## 2. Win / Lose Conditions
 
 The game uses a scoring system. There is no traditional "victory" or "defeat"; instead, the final total score measures the player's planning ability. The score is designed as a **planning evaluation report** rather than a simple real-time arcade counter. During simulation, the HUD only needs to surface immediate feedback for vehicle arrivals and deaths; the full score breakdown appears at evaluation time.

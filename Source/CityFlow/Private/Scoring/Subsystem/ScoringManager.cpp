@@ -9,6 +9,8 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogScoring, Log, All);
 
+#define LOCTEXT_NAMESPACE "CityFlowScoringManager"
+
 void UScoringManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -16,6 +18,10 @@ void UScoringManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UScoringManager::Deinitialize()
 {
+	// WorldSubsystem teardown order is not guaranteed. The grid may already be
+	// gone, so only unbind/clear timers here; normal phase transitions call
+	// StopScoring while the world is still valid and compute the final report.
+	bIsScoring = false;
 	StopScoring();
 	Super::Deinitialize();
 }
@@ -95,15 +101,24 @@ void UScoringManager::StopScoring()
 
 FString UScoringManager::GetPhaseSummary() const
 {
-	return FString::Printf(TEXT("Score: %d | Raw: %.1f | Connectivity: %.1f | Traffic: %.1f | Efficiency: %.1f | Budget: %.1f | Runtime: %.1f | Multiplier: %.2f"),
-		TotalScore,
-		ScoreBreakdown.RawScore,
-		ScoreBreakdown.ConnectivityScore,
-		ScoreBreakdown.TrafficOutcomeScore,
-		ScoreBreakdown.TravelEfficiencyScore,
-		ScoreBreakdown.BudgetEfficiencyScore,
-		ScoreBreakdown.RuntimeScore,
-		ScoreBreakdown.MapDifficultyMultiplier);
+	FNumberFormattingOptions OneDecimal;
+	OneDecimal.MinimumFractionalDigits = 1;
+	OneDecimal.MaximumFractionalDigits = 1;
+	FNumberFormattingOptions TwoDecimals;
+	TwoDecimals.MinimumFractionalDigits = 2;
+	TwoDecimals.MaximumFractionalDigits = 2;
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Score"), FText::AsNumber(TotalScore));
+	Args.Add(TEXT("Raw"), FText::AsNumber(ScoreBreakdown.RawScore, &OneDecimal));
+	Args.Add(TEXT("Connectivity"), FText::AsNumber(ScoreBreakdown.ConnectivityScore, &OneDecimal));
+	Args.Add(TEXT("Traffic"), FText::AsNumber(ScoreBreakdown.TrafficOutcomeScore, &OneDecimal));
+	Args.Add(TEXT("Efficiency"), FText::AsNumber(ScoreBreakdown.TravelEfficiencyScore, &OneDecimal));
+	Args.Add(TEXT("Budget"), FText::AsNumber(ScoreBreakdown.BudgetEfficiencyScore, &OneDecimal));
+	Args.Add(TEXT("Runtime"), FText::AsNumber(ScoreBreakdown.RuntimeScore, &OneDecimal));
+	Args.Add(TEXT("Multiplier"), FText::AsNumber(ScoreBreakdown.MapDifficultyMultiplier, &TwoDecimals));
+	return FText::Format(
+		LOCTEXT("PhaseSummaryFormat", "Score: {Score} | Raw: {Raw} | Connectivity: {Connectivity} | Traffic: {Traffic} | Efficiency: {Efficiency} | Budget: {Budget} | Runtime: {Runtime} | Multiplier: {Multiplier}"),
+		Args).ToString();
 }
 
 void UScoringManager::RecordVehicleArrival(AVehicleActor* Vehicle)
@@ -666,3 +681,5 @@ UGridManager* UScoringManager::GetGridManager() const
 	}
 	return World->GetSubsystem<UGridManager>();
 }
+
+#undef LOCTEXT_NAMESPACE

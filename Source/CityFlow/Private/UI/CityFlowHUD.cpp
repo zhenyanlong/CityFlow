@@ -3,6 +3,8 @@
 #include "UI/CityFlowGameWidget.h"
 #include "UI/CityFlowPauseWidget.h"
 #include "UI/CityFlowEvaluationWidget.h"
+#include "UI/Widget/CityFlowTutorialWidget.h"
+#include "UI/Widget/CityFlowSettingsWidget.h"
 #include "GameMode/CityFlowGameMode.h"
 #include "Scoring/Subsystem/ScoringManager.h"
 #include "Grid/GridManager.h"
@@ -10,7 +12,11 @@
 #include "Player/CityFlowPawn.h"
 #include "Player/CityFlowPlayerController.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundClass.h"
 
 // ============================================================================
 //  生命周期
@@ -25,6 +31,18 @@ void ACityFlowHUD::BeginPlay()
 	{
 		GM->OnSimulationPhaseEnd.AddDynamic(this, &ACityFlowHUD::HandleSimulationEnded);
 	}
+
+	// Apply persisted audio/language settings before the menu is shown.
+	if (SettingsWidgetClass)
+	{
+		SettingsWidget = CreateWidget<UCityFlowSettingsWidget>(GetWorld(), SettingsWidgetClass);
+		if (SettingsWidget)
+		{
+			SettingsWidget->LoadAndApplySettings();
+		}
+	}
+
+	StartBackgroundMusic();
 
 	ShowStartWidget();
 }
@@ -54,6 +72,10 @@ void ACityFlowHUD::ShowStartWidget()
 		GameWidget->RemoveFromParent();
 	if (EvaluationWidget && EvaluationWidget->IsInViewport())
 		EvaluationWidget->RemoveFromParent();
+	if (TutorialWidget && TutorialWidget->IsInViewport())
+		TutorialWidget->RemoveFromParent();
+	if (SettingsWidget && SettingsWidget->IsInViewport())
+		SettingsWidget->RemoveFromParent();
 	HidePauseOverlay();
 
 	if (!StartWidget && StartWidgetClass)
@@ -63,11 +85,17 @@ void ACityFlowHUD::ShowStartWidget()
 	{
 		StartWidget->AddToViewport();
 
-		StartWidget->OnStartGameClicked.RemoveAll(this);
-		StartWidget->OnStartGameClicked.AddDynamic(this, &ACityFlowHUD::HandleStartGameClicked);
-
 		StartWidget->OnRandomModeClicked.RemoveAll(this);
 		StartWidget->OnRandomModeClicked.AddDynamic(this, &ACityFlowHUD::HandleRandomModeClicked);
+
+		StartWidget->OnTutorialClicked.RemoveAll(this);
+		StartWidget->OnTutorialClicked.AddDynamic(this, &ACityFlowHUD::HandleTutorialClicked);
+
+		StartWidget->OnSettingsClicked.RemoveAll(this);
+		StartWidget->OnSettingsClicked.AddDynamic(this, &ACityFlowHUD::HandleSettingsClicked);
+
+		StartWidget->OnQuitGameClicked.RemoveAll(this);
+		StartWidget->OnQuitGameClicked.AddDynamic(this, &ACityFlowHUD::HandleQuitGameClicked);
 	}
 
 	// 确保鼠标可见
@@ -96,58 +124,6 @@ void ACityFlowHUD::ShowStartWidget()
 			if (!GM->IsCurrentMatchMenuPreview())
 			{
 				GM->StartAutomatedRandomMatch(true);
-			}
-		}
-	}
-}
-
-void ACityFlowHUD::ShowGameWidget()
-{
-	// 隐藏 StartWidget
-	if (StartWidget && StartWidget->IsInViewport())
-		StartWidget->RemoveFromParent();
-
-	if (!GameWidget && GameWidgetClass)
-		GameWidget = CreateWidget<UCityFlowGameWidget>(GetWorld(), GameWidgetClass);
-
-	if (GameWidget && !GameWidget->IsInViewport())
-		GameWidget->AddToViewport();
-
-	// GameMode 推迟初始化：首次进入 Planning 时创建场景
-	if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
-	{
-		if (GM->IsCurrentMatchMenuPreview())
-		{
-			GM->ReturnToMainMenu();
-		}
-
-		if (GM->GetCurrentPhase() == ECityFlowGamePhase::None)
-		{
-			GM->StartNewGame();
-		}
-	}
-
-	// 恢复 Game + UI 输入模式（从 StartWidget 的 UIOnly 切换回来）
-	if (APlayerController* PC = GetOwningPlayerController())
-	{
-		if (ACityFlowPawn* CityFlowPawn = Cast<ACityFlowPawn>(PC->GetPawn()))
-		{
-			CityFlowPawn->SetMainMenuCameraYawRotationEnabled(false);
-			CityFlowPawn->ResetToInitialViewState(false);
-		}
-		PC->FlushPressedKeys();
-		PC->ResetIgnoreMoveInput();
-		FInputModeGameAndUI InputMode;
-		InputMode.SetHideCursorDuringCapture(false);
-		PC->SetInputMode(InputMode);
-		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
-		{
-			if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
-			{
-				if (GM->GetCurrentPhase() == ECityFlowGamePhase::Planning)
-				{
-					CFPC->EnablePlacement();
-				}
 			}
 		}
 	}
@@ -308,14 +284,33 @@ void ACityFlowHUD::HandleEvaluationReturn()
 //  StartWidget 按钮处理
 // ============================================================================
 
-void ACityFlowHUD::HandleStartGameClicked()
-{
-	ShowGameWidget();
-}
-
 void ACityFlowHUD::HandleRandomModeClicked()
 {
 	ShowGameWidgetRandom();
+}
+
+void ACityFlowHUD::HandleTutorialClicked()
+{
+	ShowTutorialWidget();
+}
+
+void ACityFlowHUD::HandleSettingsClicked()
+{
+	ShowSettingsWidget();
+}
+
+void ACityFlowHUD::HandleQuitGameClicked()
+{
+	UKismetSystemLibrary::QuitGame(
+		this,
+		GetOwningPlayerController(),
+		EQuitPreference::Quit,
+		false);
+}
+
+void ACityFlowHUD::HandleMenuPanelBackClicked()
+{
+	ShowStartWidget();
 }
 
 void ACityFlowHUD::HandleRestartClicked()
@@ -358,4 +353,59 @@ void ACityFlowHUD::ShowGameWidgetRandom()
 		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
 			CFPC->EnablePlacement();
 	}
+}
+
+void ACityFlowHUD::ShowTutorialWidget()
+{
+	if (StartWidget && StartWidget->IsInViewport())
+		StartWidget->RemoveFromParent();
+
+	if (!TutorialWidget && TutorialWidgetClass)
+		TutorialWidget = CreateWidget<UCityFlowTutorialWidget>(GetWorld(), TutorialWidgetClass);
+
+	if (TutorialWidget && !TutorialWidget->IsInViewport())
+	{
+		TutorialWidget->OnBackClicked.RemoveAll(this);
+		TutorialWidget->OnBackClicked.AddDynamic(this, &ACityFlowHUD::HandleMenuPanelBackClicked);
+		TutorialWidget->AddToViewport();
+	}
+}
+
+void ACityFlowHUD::ShowSettingsWidget()
+{
+	if (StartWidget && StartWidget->IsInViewport())
+		StartWidget->RemoveFromParent();
+
+	if (!SettingsWidget && SettingsWidgetClass)
+		SettingsWidget = CreateWidget<UCityFlowSettingsWidget>(GetWorld(), SettingsWidgetClass);
+
+	if (SettingsWidget && !SettingsWidget->IsInViewport())
+	{
+		SettingsWidget->OnBackClicked.RemoveAll(this);
+		SettingsWidget->OnBackClicked.AddDynamic(this, &ACityFlowHUD::HandleMenuPanelBackClicked);
+		SettingsWidget->AddToViewport();
+	}
+}
+
+void ACityFlowHUD::StartBackgroundMusic()
+{
+	if (!BackgroundMusic || (BackgroundMusicComponent && BackgroundMusicComponent->IsPlaying()))
+	{
+		return;
+	}
+
+	BackgroundMusicComponent = UGameplayStatics::CreateSound2D(
+		GetWorld(), BackgroundMusic, BackgroundMusicVolumeMultiplier, 1.0f,
+		0.0f, nullptr, false, false);
+	if (!BackgroundMusicComponent)
+	{
+		return;
+	}
+
+	// Explicit routing avoids depending on the class configured inside the music asset.
+	if (BackgroundMusicSoundClass)
+	{
+		BackgroundMusicComponent->SoundClassOverride = BackgroundMusicSoundClass;
+	}
+	BackgroundMusicComponent->Play();
 }

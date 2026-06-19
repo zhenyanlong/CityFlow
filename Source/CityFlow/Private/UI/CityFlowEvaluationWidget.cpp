@@ -4,6 +4,8 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/Texture2D.h"
 
+#define LOCTEXT_NAMESPACE "CityFlowEvaluationWidget"
+
 int32 UCityFlowEvaluationWidget::GlobalHighScore = 0;
 
 void UCityFlowEvaluationWidget::NativeConstruct()
@@ -82,38 +84,45 @@ void UCityFlowEvaluationWidget::BuildAnimatedScoreLines()
 	EnsureScoreReportTextBlocks();
 	AnimatedScoreLines.Empty();
 
-	AddAnimatedLine(Txt_TotalScore, TEXT("Final Score: "), CachedTotalScore);
+	AddAnimatedLine(Txt_TotalScore, LOCTEXT("FinalScoreLabel", "Final Score: "), CachedTotalScore);
 
 	if (bHasScoreBreakdown)
 	{
-		AddAnimatedStarLine(TEXT("Rating: "), CalculateStarRating());
-		AddAnimatedLine(Txt_RawScore, TEXT("Raw Score: "), CachedBreakdown.RawScore, 0);
+		const auto MakeOutOfSuffix = [](int32 Total)
+		{
+			FFormatNamedArguments Args;
+			Args.Add(TEXT("Total"), FText::AsNumber(Total));
+			return FText::Format(LOCTEXT("OutOfSuffixFormat", " / {Total}"), Args);
+		};
 
-		AddAnimatedLine(Txt_ConnectedBuildings, TEXT("Connected Buildings: "), CachedBreakdown.ConnectedBuildingCount, 0, FString(), FString::Printf(TEXT(" / %d"), CachedBreakdown.TotalBuildingCount));
-		AddAnimatedLine(Txt_LargestConnectedNetwork, TEXT("Largest Connected Network: "), CachedBreakdown.LargestConnectedBuildingComponent, 0, FString(), FString::Printf(TEXT(" / %d"), CachedBreakdown.TotalBuildingCount));
-		AddAnimatedLine(Txt_BudgetUsed, TEXT("Budget Used: "), CachedBreakdown.UsedBudget, 0, FString(), FString::Printf(TEXT(" / %d"), CachedBreakdown.TotalRoadBudget));
-		AddAnimatedLine(Txt_EstimatedMinimumRoadNeed, TEXT("Estimated Minimum Road Need: "), CachedBreakdown.EstimatedMinRoadNeed);
+		AddAnimatedStarLine(LOCTEXT("RatingLabel", "Rating: "), CalculateStarRating());
+		AddAnimatedLine(Txt_RawScore, LOCTEXT("RawScoreLabel", "Raw Score: "), CachedBreakdown.RawScore, 0);
 
-		AddAnimatedLine(Txt_Arrivals, TEXT("Arrivals: "), CachedBreakdown.ArrivedVehicles, 0, FString(), FString::Printf(TEXT(" / %d"), CachedBreakdown.SpawnedVehicles));
-		AddAnimatedLine(Txt_Deaths ? Txt_Deaths.Get() : Txt_Penalty.Get(), TEXT("Deaths: "), CachedBreakdown.DeadVehicles);
-		AddAnimatedLine(Txt_ArrivalRate, TEXT("Arrival Rate: "), CachedBreakdown.ArrivalRate * 100.0, 0, FString(), TEXT("%"));
-		AddAnimatedLine(Txt_AverageCellTravelTime, TEXT("Average Cell Travel Time: "), CachedBreakdown.AverageCellTravelTime, 2, FString(), TEXT("s"));
+		AddAnimatedLine(Txt_ConnectedBuildings, LOCTEXT("ConnectedBuildingsLabel", "Connected Buildings: "), CachedBreakdown.ConnectedBuildingCount, 0, FText::GetEmpty(), MakeOutOfSuffix(CachedBreakdown.TotalBuildingCount));
+		AddAnimatedLine(Txt_LargestConnectedNetwork, LOCTEXT("LargestNetworkLabel", "Largest Connected Network: "), CachedBreakdown.LargestConnectedBuildingComponent, 0, FText::GetEmpty(), MakeOutOfSuffix(CachedBreakdown.TotalBuildingCount));
+		AddAnimatedLine(Txt_BudgetUsed, LOCTEXT("BudgetUsedLabel", "Budget Used: "), CachedBreakdown.UsedBudget, 0, FText::GetEmpty(), MakeOutOfSuffix(CachedBreakdown.TotalRoadBudget));
+		AddAnimatedLine(Txt_EstimatedMinimumRoadNeed, LOCTEXT("EstimatedRoadNeedLabel", "Estimated Minimum Road Need: "), CachedBreakdown.EstimatedMinRoadNeed);
 
-		AddAnimatedLine(Txt_ConnectivityScore, TEXT("Connectivity: "), CachedBreakdown.ConnectivityScore, 0);
-		AddAnimatedLine(Txt_TrafficOutcomeScore, TEXT("Traffic Outcome: "), CachedBreakdown.TrafficOutcomeScore, 0);
-		AddAnimatedLine(Txt_TravelEfficiencyScore, TEXT("Travel Efficiency: "), CachedBreakdown.TravelEfficiencyScore, 0);
-		AddAnimatedLine(Txt_BudgetEfficiencyScore, TEXT("Budget Efficiency: "), CachedBreakdown.BudgetEfficiencyScore, 0);
-		AddAnimatedTimeLine(Txt_RuntimeScore, TEXT("Runtime: "), CachedBreakdown.ElapsedSimulationTime);
-		AddAnimatedLine(Txt_MapDifficultyMultiplier, TEXT("Map Difficulty Multiplier: "), CachedBreakdown.MapDifficultyMultiplier, 2, TEXT("x"));
+		AddAnimatedLine(Txt_Arrivals, LOCTEXT("ArrivalsLabel", "Arrivals: "), CachedBreakdown.ArrivedVehicles, 0, FText::GetEmpty(), MakeOutOfSuffix(CachedBreakdown.SpawnedVehicles));
+		AddAnimatedLine(Txt_Deaths ? Txt_Deaths.Get() : Txt_Penalty.Get(), LOCTEXT("DeathsLabel", "Deaths: "), CachedBreakdown.DeadVehicles);
+		AddAnimatedLine(Txt_ArrivalRate, LOCTEXT("ArrivalRateLabel", "Arrival Rate: "), CachedBreakdown.ArrivalRate * 100.0, 0, FText::GetEmpty(), LOCTEXT("PercentSuffix", "%"));
+		AddAnimatedLine(Txt_AverageCellTravelTime, LOCTEXT("AverageCellTimeLabel", "Average Cell Travel Time: "), CachedBreakdown.AverageCellTravelTime, 2, FText::GetEmpty(), LOCTEXT("SecondsSuffix", "s"));
+
+		AddAnimatedLine(Txt_ConnectivityScore, LOCTEXT("ConnectivityLabel", "Connectivity: "), CachedBreakdown.ConnectivityScore, 0);
+		AddAnimatedLine(Txt_TrafficOutcomeScore, LOCTEXT("TrafficOutcomeLabel", "Traffic Outcome: "), CachedBreakdown.TrafficOutcomeScore, 0);
+		AddAnimatedLine(Txt_TravelEfficiencyScore, LOCTEXT("TravelEfficiencyLabel", "Travel Efficiency: "), CachedBreakdown.TravelEfficiencyScore, 0);
+		AddAnimatedLine(Txt_BudgetEfficiencyScore, LOCTEXT("BudgetEfficiencyLabel", "Budget Efficiency: "), CachedBreakdown.BudgetEfficiencyScore, 0);
+		AddAnimatedTimeLine(Txt_RuntimeScore, LOCTEXT("RuntimeLabel", "Runtime: "), CachedBreakdown.ElapsedSimulationTime);
+		AddAnimatedLine(Txt_MapDifficultyMultiplier, LOCTEXT("DifficultyMultiplierLabel", "Map Difficulty Multiplier: "), CachedBreakdown.MapDifficultyMultiplier, 2, LOCTEXT("MultiplierPrefix", "x"));
 	}
 	else
 	{
-		AddAnimatedLine(Txt_Arrivals, TEXT("Arrivals: "), CachedArrivals);
-		AddAnimatedLine(Txt_Penalty, TEXT("Penalty: -"), CachedPenalty);
+		AddAnimatedLine(Txt_Arrivals, LOCTEXT("LegacyArrivalsLabel", "Arrivals: "), CachedArrivals);
+		AddAnimatedLine(Txt_Penalty, LOCTEXT("PenaltyLabel", "Penalty: -"), CachedPenalty);
 	}
 
-	AddAnimatedLine(Txt_HighScore, TEXT("High Score: "), GlobalHighScore);
-	AddAnimatedTimeLine(Txt_SimulationTime, TEXT("Time: "), CachedElapsedTime);
+	AddAnimatedLine(Txt_HighScore, LOCTEXT("HighScoreLabel", "High Score: "), GlobalHighScore);
+	AddAnimatedTimeLine(Txt_SimulationTime, LOCTEXT("SimulationTimeLabel", "Time: "), CachedElapsedTime);
 }
 
 void UCityFlowEvaluationWidget::EnsureScoreReportTextBlocks()
@@ -346,19 +355,15 @@ int32 UCityFlowEvaluationWidget::CalculateStarRating() const
 	return 0;
 }
 
-FString UCityFlowEvaluationWidget::MakeStarRatingText(int32 StarCount) const
+FText UCityFlowEvaluationWidget::MakeStarRatingText(int32 StarCount) const
 {
-	const int32 ClampedStars = FMath::Clamp(StarCount, 0, 3);
-	FString Result;
-	for (int32 i = 0; i < 3; ++i)
+	switch (FMath::Clamp(StarCount, 0, 3))
 	{
-		Result += i < ClampedStars ? TEXT("\u2605") : TEXT("\u2606");
-		if (i < 2)
-		{
-			Result += TEXT(" ");
-		}
+	case 1: return LOCTEXT("OneStarRating", "★ ☆ ☆");
+	case 2: return LOCTEXT("TwoStarRating", "★ ★ ☆");
+	case 3: return LOCTEXT("ThreeStarRating", "★ ★ ★");
+	default: return LOCTEXT("ZeroStarRating", "☆ ☆ ☆");
 	}
-	return Result;
 }
 
 void UCityFlowEvaluationWidget::UpdateStarRatingVisual(int32 StarCount) const
@@ -391,7 +396,7 @@ void UCityFlowEvaluationWidget::UpdateStarRatingVisual(int32 StarCount) const
 	}
 }
 
-void UCityFlowEvaluationWidget::AddAnimatedLine(UTextBlock* TextBlock, const FString& Label, double TargetValue, int32 DecimalPlaces, const FString& Prefix, const FString& Suffix)
+void UCityFlowEvaluationWidget::AddAnimatedLine(UTextBlock* TextBlock, const FText& Label, double TargetValue, int32 DecimalPlaces, const FText& Prefix, const FText& Suffix)
 {
 	if (!TextBlock)
 	{
@@ -420,7 +425,7 @@ void UCityFlowEvaluationWidget::AddAnimatedLine(UTextBlock* TextBlock, const FSt
 	AnimatedScoreLines.Add(Line);
 }
 
-void UCityFlowEvaluationWidget::AddAnimatedStarLine(const FString& Label, int32 TargetStarCount)
+void UCityFlowEvaluationWidget::AddAnimatedStarLine(const FText& Label, int32 TargetStarCount)
 {
 	EnsureStarRatingImages();
 
@@ -447,7 +452,7 @@ void UCityFlowEvaluationWidget::AddAnimatedStarLine(const FString& Label, int32 
 	AnimatedScoreLines.Add(Line);
 }
 
-void UCityFlowEvaluationWidget::AddAnimatedTimeLine(UTextBlock* TextBlock, const FString& Label, float TargetSeconds)
+void UCityFlowEvaluationWidget::AddAnimatedTimeLine(UTextBlock* TextBlock, const FText& Label, float TargetSeconds)
 {
 	if (!TextBlock)
 	{
@@ -585,7 +590,7 @@ void UCityFlowEvaluationWidget::ShowCurrentAnimatedLine()
 	if (UTextBlock* LabelTextBlock = Line.LabelTextBlock.Get())
 	{
 		LabelTextBlock->SetVisibility(ESlateVisibility::Visible);
-		LabelTextBlock->SetText(FText::FromString(Line.Label));
+		LabelTextBlock->SetText(Line.Label);
 	}
 	if (UHorizontalBox* StarPanel = Line.StarPanel.Get())
 	{
@@ -602,7 +607,7 @@ void UCityFlowEvaluationWidget::SetAnimatedLineValue(const FAnimatedScoreLine& L
 {
 	if (UTextBlock* LabelTextBlock = Line.LabelTextBlock.Get())
 	{
-		LabelTextBlock->SetText(FText::FromString(Line.Label));
+		LabelTextBlock->SetText(Line.Label);
 	}
 
 	if (Line.bUseStarImages)
@@ -613,43 +618,54 @@ void UCityFlowEvaluationWidget::SetAnimatedLineValue(const FAnimatedScoreLine& L
 
 	if (UTextBlock* TextBlock = Line.TextBlock.Get())
 	{
-		TextBlock->SetText(FText::FromString(FormatAnimatedValue(Line, Value)));
+		TextBlock->SetText(FormatAnimatedValue(Line, Value));
 	}
 }
 
-FString UCityFlowEvaluationWidget::FormatAnimatedValue(const FAnimatedScoreLine& Line, double Value) const
+FText UCityFlowEvaluationWidget::FormatAnimatedValue(const FAnimatedScoreLine& Line, double Value) const
 {
+	const auto CombineLabelAndValue = [&Line](const FText& ValueText)
+	{
+		if (Line.LabelTextBlock.IsValid())
+		{
+			return ValueText;
+		}
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("Label"), Line.Label);
+		Args.Add(TEXT("Value"), ValueText);
+		return FText::Format(LOCTEXT("LabelValueFormat", "{Label}{Value}"), Args);
+	};
+
 	if (Line.bFormatAsTime)
 	{
 		const int32 TotalSeconds = FMath::Max(0, FMath::RoundToInt(Value));
 		const int32 Mins = TotalSeconds / 60;
 		const int32 Secs = TotalSeconds % 60;
-		const FString TimeText = FString::Printf(TEXT("%02d:%02d"), Mins, Secs);
-		return Line.LabelTextBlock.IsValid() ? TimeText : FString::Printf(TEXT("%s%s"), *Line.Label, *TimeText);
+		FNumberFormattingOptions TwoDigitOptions;
+		TwoDigitOptions.MinimumIntegralDigits = 2;
+		TwoDigitOptions.MaximumIntegralDigits = 2;
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("Minutes"), FText::AsNumber(Mins, &TwoDigitOptions));
+		Args.Add(TEXT("Seconds"), FText::AsNumber(Secs, &TwoDigitOptions));
+		return CombineLabelAndValue(FText::Format(LOCTEXT("TimeValueFormat", "{Minutes}:{Seconds}"), Args));
 	}
 
 	if (Line.bFormatAsStars)
 	{
-		const FString StarText = MakeStarRatingText(FMath::RoundToInt(Value));
-		return Line.LabelTextBlock.IsValid() ? StarText : FString::Printf(TEXT("%s%s"), *Line.Label, *StarText);
+		return CombineLabelAndValue(MakeStarRatingText(FMath::RoundToInt(Value)));
 	}
 
-	FString NumberText;
-	if (Line.DecimalPlaces <= 0)
-	{
-		NumberText = FString::Printf(TEXT("%d"), FMath::RoundToInt(Value));
-	}
-	else if (Line.DecimalPlaces == 1)
-	{
-		NumberText = FString::Printf(TEXT("%.1f"), Value);
-	}
-	else
-	{
-		NumberText = FString::Printf(TEXT("%.2f"), Value);
-	}
-
-	const FString ValueText = FString::Printf(TEXT("%s%s%s"), *Line.Prefix, *NumberText, *Line.Suffix);
-	return Line.LabelTextBlock.IsValid() ? ValueText : FString::Printf(TEXT("%s%s"), *Line.Label, *ValueText);
+	FNumberFormattingOptions NumberOptions;
+	NumberOptions.MinimumFractionalDigits = FMath::Max(0, Line.DecimalPlaces);
+	NumberOptions.MaximumFractionalDigits = FMath::Max(0, Line.DecimalPlaces);
+	const FText NumberText = Line.DecimalPlaces <= 0
+		? FText::AsNumber(FMath::RoundToInt(Value))
+		: FText::AsNumber(Value, &NumberOptions);
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Prefix"), Line.Prefix);
+	Args.Add(TEXT("Number"), NumberText);
+	Args.Add(TEXT("Suffix"), Line.Suffix);
+	return CombineLabelAndValue(FText::Format(LOCTEXT("DecoratedNumberFormat", "{Prefix}{Number}{Suffix}"), Args));
 }
 
 void UCityFlowEvaluationWidget::SetScoreLineVisibility(ESlateVisibility InVisibility)
@@ -684,3 +700,5 @@ void UCityFlowEvaluationWidget::HandleRestartClicked()
 {
 	OnRestartClicked.Broadcast();
 }
+
+#undef LOCTEXT_NAMESPACE

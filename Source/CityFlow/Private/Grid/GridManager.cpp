@@ -10,7 +10,11 @@ void UGridManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UGridManager::Deinitialize()
 {
+	bGridInitialized = false;
 	Grid.Empty();
+	GridWidth = 0;
+	GridHeight = 0;
+	RoadBudget = 0;
 	Super::Deinitialize();
 }
 
@@ -58,7 +62,9 @@ FVector UGridManager::SnapToGrid(const FVector& WorldLocation) const
 
 bool UGridManager::IsValidGridPos(const FGridVector& GridPos) const
 {
-	return GridPos.X >= 0 && GridPos.X < GridWidth && GridPos.Y >= 0 && GridPos.Y < GridHeight;
+	return bGridInitialized
+		&& GridPos.Y >= 0 && Grid.IsValidIndex(GridPos.Y)
+		&& GridPos.X >= 0 && Grid[GridPos.Y].IsValidIndex(GridPos.X);
 }
 
 const FGridCell& UGridManager::GetCell(const FGridVector& GridPos) const
@@ -195,9 +201,16 @@ void UGridManager::AddRoadBudget(int32 Amount)
 TArray<FGridVector> UGridManager::GetCellsOfType(ECellType Type) const
 {
 	TArray<FGridVector> Result;
-	for (int32 Y = 0; Y < GridHeight; ++Y)
+	if (!bGridInitialized)
 	{
-		for (int32 X = 0; X < GridWidth; ++X)
+		return Result;
+	}
+
+	// Iterate the actual storage rather than cached dimensions. This keeps
+	// queries safe during WorldSubsystem teardown and partial reinitialisation.
+	for (int32 Y = 0; Y < Grid.Num(); ++Y)
+	{
+		for (int32 X = 0; X < Grid[Y].Num(); ++X)
 		{
 			if (Grid[Y][X].Type == Type)
 			{

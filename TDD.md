@@ -13,7 +13,7 @@ Core management classes are gathered in the `GameMode` or delegated Manager comp
 | Manager | Type | Responsibility |
 |---|---|---|
 | **GridManager** | `UWorldSubsystem` | Maintains a 2D logical grid. Provides grid snapping, placement validation, neighbour queries, connected-mask calculation, and building interface registration. **Manages the shared road budget** — both player and L-system placement consume from a single pool tracked by `RoadBudget`. |
-| **LSystemManager** | `UWorldSubsystem` | **Optional** auxiliary capillary road generator. Extracts branch starting points from dead-ends and straight segments, then executes breadth-first, attraction-biased growth. Consumes from the **shared road budget** alongside the player. Triggered manually by player (UI button or console command). |
+| **LSystemManager** | `UWorldSubsystem` | **Optional** hybrid capillary-road generator. It reserves doorway-to-primary-road-component connection paths first, then spends only non-reserved branch budget on deduplicated, attraction-priority organic growth. Connectivity is validated against one shared road component, and existing Blueprint-facing controls remain available. |
 | **VehicleManager** | `UWorldSubsystem` + `FTickableGameObject` | Spawns and manages all vehicle Actors. Provides **A\* pathfinding** on the road graph, converts grid paths to world-space spline-based movement plans, handles **congestion detection** (per-cell vehicle count). Ticks every frame for vehicle state updates and periodic intersection lock sanitization. |
 | **ScoringManager** | `UWorldSubsystem` | Tracks arrival count, arrival score, death penalties, and congestion penalties during the Simulation Phase. Emits score-delta popup requests with world anchors for the HUD, uses a periodic timer for congestion penalty deduction, and computes final score including full-connectivity bonus on evaluation. |
 | **CityFlowGameMode** | `AGameModeBase` | Owns the **state machine** (`ECityFlowGamePhase`: Planning → Simulating → Evaluation). Initializes the grid, spawns default buildings, manages the shared road budget split (Player vs L-System), and triggers phase transitions. Provides Blueprint-callable API for UI control. |
@@ -71,6 +71,13 @@ All world coordinates are mapped to grid indices through `WorldToGrid(Location)`
    - **Completed:** reset `LastRemovedGridPos`.
    - Removal logic (`TryRemoveAtCursor`): raycast → `WorldToGrid()` → look up `Cell.RoadActor` from the grid (not collision). If the cell contains an `AGridPlaceableActor` with `IsPlacedOnGrid() == true`, call `RemoveFromGrid()` + `Destroy()`.
 5. **Neighbour refresh:** Iterate over the four neighbours; if any is a road, recalculate its mask.
+
+#### World Teardown Safety
+
+- `UGridManager::Deinitialize()` marks the grid uninitialised before clearing storage, then resets dimensions and road budget so late shutdown queries cannot observe stale metadata.
+- `IsValidGridPos()` validates the actual nested array bounds, and `GetCellsOfType()` iterates the arrays that still exist; both therefore fail safely after teardown.
+- `UScoringManager::Deinitialize()` clears its active-scoring flag before `StopScoring()`. Shutdown still unbinds delegates and clears timers, but skips final-score computation after the grid subsystem has been destroyed.
+- A normal gameplay transition to Evaluation still calls `StopScoring()` while scoring is active and computes the full final report.
 
 ### 2.2 Grid Placeable Actor Hierarchy
 
@@ -346,37 +353,57 @@ ABuilding
 
 ### 2.5 L-System Branch Generation
 
-`ULSystemManager` is a `UWorldSubsystem` that triggers at the end of the Planning Phase. It uses a **breadth-first iterative queue** to automatically grow a capillary road network, connecting any buildings not yet linked to the road network.
+`ULSystemManager` is a `UWorldSubsystem` that runs during Planning. It now uses a **connectivity-guaranteed hybrid generator**: a reserved shortest-path plan guarantees that buildings can join one shared road component when the assigned budget is sufficient, while attraction-biased organic growth spends only non-reserved surplus budget.
 
 #### Architecture
 
-`ULSystemManager` is accessed via `GetWorld()->GetSubsystem<ULSystemManager>()`. All configuration is done through Blueprint-callable setter functions (no `UPROPERTY(EditAnywhere)` exposed).
+`ULSystemManager` is accessed via `GetWorld()->GetSubsystem<ULSystemManager>()`. Existing Blueprint-callable setters and delegates remain compatible. Internally it maintains a deduplicated organic frontier, a connection-cell plan, a per-generation budget ledger, and a seeded `FRandomStream`.
+
+#### Shared-Component Connectivity Rule
+
+Connectivity no longer means merely finding one Road cell beside each building. `AreAllBuildingsConnected()` floods road components and succeeds only when every building has a doorway in the **same** component. `CityFlowGameMode::AreAllBuildingsConnected()` delegates to this authoritative check, so automated flow and scoring-related decisions use the same definition.
+
+`GetPrimaryRoadComponent()` chooses the component serving the most buildings, with component size as the tie-breaker. This component is the target network for unconnected buildings and organic attraction.
+
+#### Reserved Connection Plan
+
+`BuildConnectionPlan()` runs before animated growth:
+
+1. Collect all existing road cells and select the primary component.
+2. If no road exists, seed the network at one valid building doorway.
+3. For every building outside the primary component, run a multi-source grid search from all valid doorway cells to the current network.
+4. Select the path requiring the fewest new road cells, append it in network-to-building order, merge the new path into the simulated component, and repeat.
+5. Reserve the exact number of empty cells in this plan before organic growth may spend budget.
+
+The planner treats Building cells as blocked and may reuse existing Road cells at zero placement cost. `ProcessConnectionPlanStep()` places the reserved path one cell at a time, preserving the visible growth animation. If organic growth places a planned cell first, the live reserved cost automatically shrinks.
 
 #### Starting Point Extraction
 
 Starting points are collected from two sources:
 
 **A. Dead-end road cells:**
-- Iterate over all road cells; for each dead-end (`ConnectedMask` has exactly 1 bit set), record growth points in the unconnected directions.
+- Iterate over all road cells; each dead-end continues only away from its connected neighbour. Side branches are produced later by the probability rule instead of creating three immediate arms.
 
 **B. Straight road segments (spaced sampling):**
 - Identify straight road segments (`ConnectedMask` with 2 opposite bits: Up+Down or Left+Right).
-- Walk the segment in both axis directions to collect the full contiguous segment.
+- Walk only through cells that remain straight on the same axis; corners, dead-ends, T-junctions, and crosses are not swallowed into the segment or its visited set.
 - If segment length < 3 cells, skip (too short to branch from).
 - Sample perpendicular branch points every `MinBranchSpacing + 1` cells along the segment.
 - Corner, T-junction, and Cross tiles are **skipped** (already well-connected).
 
 **C. Unconnected building doorways:**
-- Iterate all unconnected buildings; for each doorway whose connection point is `Empty`, add a growth point from the building's grid edge cell in the doorway's facing direction.
+- Add only the valid doorway nearest to the primary road component, preventing every doorway from producing a wasteful arm.
+- Derive growth direction from the rotated doorway connection point minus the rotated building edge cell, so `Rot90/Rot180/Rot270` buildings grow outward correctly.
 
-#### Breadth-First Iterative Growth
+#### Priority Frontier Growth
 
-Instead of a recursive backtracking algorithm, an **iterative queue** drives growth:
+Instead of recursive rewriting, an iterative frontier drives growth:
 
 1. A `FLSystemGrowthPoint` struct holds a grid position and a growth direction.
 2. `ProcessGrowthStep()` is called on an `FTimerHandle` at `GrowthInterval` (default 0.1s).
-3. Each step pops the **front** of the queue, calls `TryGrowAt()`.
-4. New growth points are inserted at the **back** of the queue, producing breadth-first alternation between all active branches.
+3. Frontier entries are deduplicated by `(Position, Direction)` and globally sorted by attraction before execution.
+4. A blocked candidate is discarded without terminating generation while other candidates or reserved connection cells remain.
+5. Organic placement is allowed only while `GenerationBudgetRemaining > PendingConnectionCost`; reserved connectivity budget cannot be consumed by decoration branches.
 
 #### Multi-cell Straight Extension
 
@@ -401,22 +428,22 @@ For each newly placed cell's valid neighbours (excluding the back-direction):
 
 #### Attraction-biased Sorting
 
-New growth points are sorted by an attraction score before insertion:
+All pending growth points are globally prioritised by an attraction score:
 
 ```
 Score = Lerp(DistScore, AlignScore, AttractionStrength)
-  DistScore  = 1 / (1 + euclidean distance to nearest unconnected building)
-  AlignScore = dot(normalised direction to building, growth direction), clamped ≥ 0
+  DistScore  = 1 / (1 + euclidean distance to nearest unconnected doorway)
+  AlignScore = dot(normalised direction to doorway, growth direction), clamped ≥ 0
 ```
 
-Higher-scored points execute first within the batch. This steers branches toward unconnected buildings without overriding the breadth-first guarantee.
+The nearest doorway, rather than the building's top-left grid cell, is used as the target. Side-branch probability uses the per-generation `FRandomStream`, avoiding dependence on unrelated global random calls.
 
 #### Configurable Parameters (Blueprint Setters)
 
 | Setter | Default | Description |
 |---|---|---|
 | `SetRoadTileClass(TSubclassOf<ARoadTile>)` | — | Road tile class for spawned branches |
-| `SetBranchBudget(int32)` | 50 | Maximum total road cells to place |
+| `SetBranchBudget(int32)` | 50 | Hard per-generation placement cap; no longer overwritten by the GridManager's full remaining budget |
 | `SetGrowthInterval(float)` | 0.1 | Seconds between each growth step (animation speed) |
 | `SetBranchProbability(float)` | 0.6 | Probability of spawning a side branch at each step |
 | `SetAttractionStrength(float)` | 0.7 | Weight of direction alignment vs. distance in attraction score |
@@ -433,9 +460,12 @@ Higher-scored points execute first within the batch. This steers branches toward
 
 #### Termination Conditions
 
-- Budget exhausted (all remaining budget consumed).
-- All buildings connected (early success).
-- Queue empty — no more legal growth directions.
+- Per-generation branch budget or shared GridManager budget exhausted.
+- All buildings belong to one road component (early success).
+- Both the organic frontier and reserved connection plan are empty.
+- No candidate can place a cell and no valid repair plan can be rebuilt.
+
+Player-triggered generation respects `LSystemBudgetShare`. Automated title-preview matches have no player planning pass, so GameMode grants the generator the full remaining grid budget to avoid starting simulation with disconnected buildings.
 
 #### Road Tile Creation
 
@@ -1151,17 +1181,18 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 ### 2.12 UI System
 
-#### Implementation Status: ✅ Implemented — v0.8 full widget lifecycle with evaluation & countdown
+#### Implementation Status: ✅ Implemented — main menu sub-pages, audio settings, localization, evaluation & countdown
 
 CityFlow's UI is managed by **ACityFlowHUD** as the sole widget lifecycle owner. Widgets follow a main-menu-first flow with four states.
 
 #### Widget Lifecycle
 
 ```
-StartWidget (主菜单)
+StartWidget (Main Menu)
   ├─ ShowStartWidget → GameMode::StartAutomatedRandomMatch(true) for animated title background
-  ├─ Btn_StartGame → HUD::ShowGameWidget() → GameMode::StartNewGame()
   ├─ Btn_RandomMode → HUD::ShowGameWidgetRandom() → GameMode::StartRandomPlanningGame() + EnablePlacement
+  ├─ Btn_Tutorial → TutorialWidget → Btn_Back → StartWidget
+  ├─ Btn_Settings → SettingsWidget → Btn_Back → StartWidget
   ├─ Btn_QuitGame → Quit
   ↓
 GameWidget (规划/模拟 HUD 覆盖层)
@@ -1183,8 +1214,9 @@ EvaluationWidget (结算)
 - `BeginPlay()` shows `StartWidget` (main menu); listens to `GameMode::OnSimulationPhaseEnd` to auto-show `EvaluationWidget`.
 - `ShowStartWidget()` disables placement, enables main-menu camera yaw rotation, and can start an automated randomized preview match when `bEnableMainMenuPreviewMatch` is true.
 - If a menu preview simulation ends, `HandleSimulationEnded()` starts another preview match instead of showing the Evaluation widget.
-- `ShowGameWidget()` exits any menu preview match, starts a normal default Planning game, disables title camera rotation, and enables placement.
 - `ShowGameWidgetRandom()` starts a randomized Planning game through `StartRandomPlanningGame()`, disables title camera rotation, and enables placement.
+- `ShowTutorialWidget()` / `ShowSettingsWidget()` replace the StartWidget without destroying the running menu preview; their shared back handler returns to the title screen.
+- At startup HUD creates the configured Settings widget and calls `LoadAndApplySettings()` before showing the menu, then starts the configured looping background music through an explicit SoundClass override.
 - `TogglePause()` / `ShowPauseOverlay()` / `HidePauseOverlay()` — pause with `FInputModeUIOnly`, resume with `FInputModeGameAndUI`.
 - `ReturnToMainMenu()` — Blueprint-callable; cleans up and returns to `StartWidget`.
 - `HandleReturnToMainClicked()` — pause → `GameMode::ReturnToMainMenu()` → `ShowStartWidget()`.
@@ -1198,7 +1230,12 @@ EvaluationWidget (结算)
 | `GameWidgetClass` | `TSubclassOf<UCityFlowGameWidget>` | Planning/Simulation HUD overlay |
 | `PauseWidgetClass` | `TSubclassOf<UCityFlowPauseWidget>` | Pause menu overlay |
 | `EvaluationWidgetClass` | `TSubclassOf<UCityFlowEvaluationWidget>` | Results screen |
+| `TutorialWidgetClass` | `TSubclassOf<UCityFlowTutorialWidget>` | Tutorial topic browser |
+| `SettingsWidgetClass` | `TSubclassOf<UCityFlowSettingsWidget>` | Audio/language settings |
 | `bEnableMainMenuPreviewMatch` | `bool` | Enables automated randomized background simulation on the title screen |
+| `BackgroundMusic` | `USoundBase*` | Looping title/game background music |
+| `BackgroundMusicSoundClass` | `USoundClass*` | Explicit music routing, normally `SC_Music` under the master class |
+| `BackgroundMusicVolumeMultiplier` | `float` | Per-track gain before master-volume control |
 
 #### CityFlowEvaluationWidget
 
@@ -1250,12 +1287,36 @@ EvaluationWidget (结算)
 #### CityFlowStartWidget
 
 Main menu widget with `BindWidget` controls:
-- `Btn_StartGame` → broadcasts `OnStartGameClicked` (HUD listens → `HandleStartGameClicked` → `ShowGameWidget()`)
 - `Btn_RandomMode` → broadcasts `OnRandomModeClicked` (HUD listens → `HandleRandomModeClicked` → `ShowGameWidgetRandom()` — generates a random Planning game with scenery/buildings only, then enables placement)
+- `Btn_Tutorial` → broadcasts `OnTutorialClicked` (HUD → `ShowTutorialWidget()`)
+- `Btn_Settings` → broadcasts `OnSettingsClicked` (HUD → `ShowSettingsWidget()`)
 - `Btn_QuitGame` → broadcasts `OnQuitGameClicked`
 - `Txt_Title`, `Txt_Version` (BindWidgetOptional) — display text
 
-`ShowGameWidget()` and `ShowGameWidgetRandom()` both use `FInputModeGameAndUI` with `SetHideCursorDuringCapture(false)` to prevent the cursor from vanishing during click-and-drag.
+The legacy `Btn_StartGame` is no longer part of the flow; the native base collapses an old widget with that name for backward compatibility. `ShowGameWidgetRandom()` uses `FInputModeGameAndUI` with `SetHideCursorDuringCapture(false)` to prevent the cursor from vanishing during click-and-drag.
+
+#### Tutorial Data and Widget
+
+- `UCityFlowTutorialDataAsset` owns an ordered array of `FCityFlowTutorialEntry` values: stable `Id`, localizable `FText Title`, multiline localizable `FText Body`, and optional soft `UTexture2D` image.
+- `UCityFlowTutorialWidget` binds optional `TutorialList`, `Txt_TutorialTitle`, `Txt_TutorialBody`, `Img_Tutorial`, and `Btn_Back` controls.
+- With `bBuildDefaultEntryButtons=true`, C++ creates the left-side buttons and selection proxies automatically. Blueprints can disable this and implement `OnTutorialListRebuilt` for custom visual entries that call `SelectTutorial(Index)`.
+- Selecting an entry updates the right-side title/body and loads the optional image synchronously; the image collapses when no texture is configured.
+
+#### Settings, Audio Routing, and Persistence
+
+- `UCityFlowSettingsWidget` binds optional `Sld_SoundVolume`, `Sld_SFXVolume`, `Cmb_Language`, and `Btn_Back` controls.
+- Settings persist in `UCityFlowMenuSettingsSaveGame` under the `CityFlowMenuSettings` slot and are loaded/applied before the main menu appears.
+- Runtime audio uses `UGameplayStatics::PushSoundMixModifier` plus `SetSoundMixClassOverride`: the sound slider targets the configured master `SoundClass`, while the SFX slider targets the configured `SFXSoundClass` and its children.
+- Sound assets must be assigned to the project hierarchy (`SC_Master` → `SC_Music`, `SC_SFX`, optional child classes); playback location/API alone cannot classify an effect as SFX.
+- Language selection calls `UKismetInternationalizationLibrary::SetCurrentCulture(CultureCode, true)` using configurable `en` and `zh-Hans` culture codes and rebuilds the language options after culture changes.
+
+#### Native Text Localization
+
+- Static player-facing C++ text uses `LOCTEXT` in `.cpp` files or `NSLOCTEXT` for header defaults.
+- Dynamic values use `FText::Format` and culture-aware `FText::AsNumber`; `FText::FromString` is not used for player UI.
+- Tutorial titles/bodies remain asset `FText` values and are gathered by the asset localization step.
+- `TEXT()` remains only for non-localizable identifiers, asset/config keys, culture codes, format argument names, and developer logs.
+- Source-only GatherText validation extracts the entries with no namespace/key conflicts.
 
 #### CityFlowPauseWidget
 

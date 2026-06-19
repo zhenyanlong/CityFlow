@@ -1,3 +1,33 @@
+## 2026-06-19
+
+### Main Menu, Tutorial, Settings, and Audio
+
+- Removed the Start Game flow and added Tutorial and Settings entry points while retaining Random Mode and the animated title-screen preview.
+- Added data-driven tutorial support through `UCityFlowTutorialDataAsset`, localizable tutorial entries, optional per-entry images, and `UCityFlowTutorialWidget` Blueprint extension hooks.
+- Added persistent master-volume, SFX-volume, and language settings through `UCityFlowSettingsWidget` and SaveGame storage, with native Unreal culture switching.
+- Added HUD-managed background music and SoundClass override support; individual sound assets still need correct SoundClass routing for the global SFX slider to affect them.
+
+### Connectivity-Safe L-System Refactor
+
+- Refactored `ULSystemManager` into a hybrid generator that reserves doorway-to-primary-road-component connection paths before spending surplus budget on organic branches.
+- Replaced the old reachability assumption with true same-component validation, reusable existing-road paths, multi-source doorway searches, and exact connection-budget reservation.
+- Added rotated doorway direction handling, topology-safe dead-end and straight-segment branch candidates, deduplicated priority growth, global doorway attraction, deterministic `FRandomStream` use, and a strict branch budget cap.
+- Preserved the existing public controls and delegates, kept player-triggered generation within `LSystemBudgetShare`, and allowed automated title previews to use the full remaining budget needed for connectivity.
+- Verified the revised generator in runtime smoke tests with all buildings connected and clean generation termination.
+
+### Localization and Runtime Stability
+
+- Converted player-facing native Source text to `LOCTEXT` or `NSLOCTEXT`, with dynamic values produced through culture-aware `FText` formatting.
+- Verified Source localization gathering with 49 extracted entries and no namespace/key conflicts, and completed a successful editor build.
+- Fixed the vehicle-death delegate binding by exposing its handler as a `UFUNCTION`.
+- Hardened GridManager and ScoringManager teardown so late subsystem shutdown cannot index an empty grid or attempt final scoring after grid destruction.
+- Verified a natural application-exit smoke test completed without the previous array-bounds assertion.
+
+### Documentation
+
+- Updated the English and Chinese GDD with the assisted capillary-road rules and the revised main-menu, tutorial, settings, audio, and localization experience.
+- Updated the English and Chinese TDD with the L-system connection planner, organic-growth mechanics, menu/widget architecture, audio persistence and routing, native text localization, and teardown safety.
+
 ## 2026-06-16
 
 ### GDD-aligned Final Score Refactor

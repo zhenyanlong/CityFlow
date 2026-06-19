@@ -51,7 +51,7 @@ private:
 	void ApplyColor();
 	void UpdateProjectedPosition();
 
-	FText CurrentText = FText::FromString(TEXT("+0"));
+	FText CurrentText = NSLOCTEXT("CityFlowScorePopup", "DefaultScorePopup", "+0");
 	FLinearColor BaseColor = FLinearColor::White;
 	TSharedPtr<STextBlock> FallbackTextBlock;
 	TWeakObjectPtr<APlayerController> PlayerController;

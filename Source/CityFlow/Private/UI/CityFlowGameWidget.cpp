@@ -15,6 +15,8 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 
+#define LOCTEXT_NAMESPACE "CityFlowGameWidget"
+
 // ============================================================================
 //  生命周期
 // ============================================================================
@@ -176,7 +178,11 @@ void UCityFlowGameWidget::HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, EC
 void UCityFlowGameWidget::HandleScoreChanged(int32 NewScore)
 {
 	if (Txt_Score)
-		Txt_Score->SetText(FText::FromString(FString::Printf(TEXT("Score: %d"), NewScore)));
+	{
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("Score"), FText::AsNumber(NewScore));
+		Txt_Score->SetText(FText::Format(LOCTEXT("ScoreFormat", "Score: {Score}"), Args));
+	}
 
 	OnScoreChanged_BP(NewScore);
 }
@@ -227,7 +233,11 @@ void UCityFlowGameWidget::HandleVehicleAbilityActivated(AVehicleActor* Vehicle, 
 void UCityFlowGameWidget::HandleLSystemStep(int32 RemainingBudget)
 {
 	if (Txt_Budget)
-		Txt_Budget->SetText(FText::FromString(FString::Printf(TEXT("Budget: %d"), RemainingBudget)));
+	{
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("Budget"), FText::AsNumber(RemainingBudget));
+		Txt_Budget->SetText(FText::Format(LOCTEXT("BudgetFormat", "Budget: {Budget}"), Args));
+	}
 
 	OnLSystemStep_BP(RemainingBudget);
 }
@@ -246,14 +256,17 @@ void UCityFlowGameWidget::UpdatePhaseText(ECityFlowGamePhase Phase)
 {
 	if (!Txt_Phase) return;
 
-	const TCHAR* PhaseStr = TEXT("Unknown");
+	FText PhaseText = LOCTEXT("UnknownPhase", "Unknown");
 	switch (Phase)
 	{
-	case ECityFlowGamePhase::Planning:   PhaseStr = TEXT("Planning");   break;
-	case ECityFlowGamePhase::Simulating: PhaseStr = TEXT("Simulating"); break;
-	case ECityFlowGamePhase::Evaluation: PhaseStr = TEXT("Evaluation"); break;
+	case ECityFlowGamePhase::Planning:   PhaseText = LOCTEXT("PlanningPhase", "Planning"); break;
+	case ECityFlowGamePhase::Simulating: PhaseText = LOCTEXT("SimulatingPhase", "Simulating"); break;
+	case ECityFlowGamePhase::Evaluation: PhaseText = LOCTEXT("EvaluationPhase", "Evaluation"); break;
+	default: break;
 	}
-	Txt_Phase->SetText(FText::FromString(FString::Printf(TEXT("Phase: %s"), PhaseStr)));
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Phase"), PhaseText);
+	Txt_Phase->SetText(FText::Format(LOCTEXT("PhaseFormat", "Phase: {Phase}"), Args));
 }
 
 void UCityFlowGameWidget::UpdateBudgetText()
@@ -261,7 +274,9 @@ void UCityFlowGameWidget::UpdateBudgetText()
 	if (!Txt_Budget) return;
 
 	const int32 Remaining = GetRemainingBudget();
-	Txt_Budget->SetText(FText::FromString(FString::Printf(TEXT("Budget: %d"), Remaining)));
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Budget"), FText::AsNumber(Remaining));
+	Txt_Budget->SetText(FText::Format(LOCTEXT("BudgetFormat", "Budget: {Budget}"), Args));
 }
 
 void UCityFlowGameWidget::UpdateButtonStates(ECityFlowGamePhase Phase)
@@ -283,8 +298,8 @@ void UCityFlowGameWidget::ShowVehicleAbilityAlert(EVehicleAbilityAlertType Alert
 	}
 
 	const FText AlertText = AlertType == EVehicleAbilityAlertType::Rampage
-		? FText::FromString(TEXT("A vehicle has gone out of control!!!"))
-		: FText::FromString(TEXT("A vehicle teleported!!!"));
+		? LOCTEXT("RampageVehicleAlert", "A vehicle has gone out of control!!!")
+		: LOCTEXT("TeleportVehicleAlert", "A vehicle teleported!!!");
 
 	Txt_VehicleAbilityAlert->SetText(AlertText);
 	Txt_VehicleAbilityAlert->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -699,6 +714,13 @@ void UCityFlowGameWidget::UpdateCountdownText()
 
 	const int32 Mins = CountdownSeconds / 60;
 	const int32 Secs = CountdownSeconds % 60;
-	Txt_Countdown->SetText(FText::FromString(
-		FString::Printf(TEXT("%02d:%02d"), Mins, Secs)));
+	FNumberFormattingOptions TwoDigitOptions;
+	TwoDigitOptions.MinimumIntegralDigits = 2;
+	TwoDigitOptions.MaximumIntegralDigits = 2;
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Minutes"), FText::AsNumber(Mins, &TwoDigitOptions));
+	Args.Add(TEXT("Seconds"), FText::AsNumber(Secs, &TwoDigitOptions));
+	Txt_Countdown->SetText(FText::Format(LOCTEXT("CountdownFormat", "{Minutes}:{Seconds}"), Args));
 }
+
+#undef LOCTEXT_NAMESPACE

@@ -30,10 +30,10 @@ public:
 	void OnMarkerScreenStateChanged_BP(bool bInOnScreen, float DirectionAngleDegrees);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
-	FText OnScreenText = FText::FromString(TEXT("B"));
+	FText OnScreenText = NSLOCTEXT("CityFlowBuildingMarker", "DefaultOnScreenMarker", "B");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
-	FText OffScreenText = FText::FromString(TEXT(">"));
+	FText OffScreenText = NSLOCTEXT("CityFlowBuildingMarker", "DefaultOffScreenMarker", ">");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Building Marker")
 	FLinearColor OnScreenColor = FLinearColor(0.1f, 0.8f, 1.0f, 1.0f);

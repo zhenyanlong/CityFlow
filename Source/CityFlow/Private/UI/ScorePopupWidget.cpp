@@ -8,6 +8,8 @@
 #include "Styling/CoreStyle.h"
 #include "Widgets/Text/STextBlock.h"
 
+#define LOCTEXT_NAMESPACE "CityFlowScorePopupWidget"
+
 void UScorePopupWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -68,8 +70,11 @@ TSharedRef<SWidget> UScorePopupWidget::RebuildWidget()
 void UScorePopupWidget::SetScorePopup(int32 DeltaScore, FLinearColor InColor)
 {
 	BaseColor = InColor;
-	const FString Prefix = DeltaScore >= 0 ? TEXT("+") : TEXT("");
-	CurrentText = FText::FromString(FString::Printf(TEXT("%s%d"), *Prefix, DeltaScore));
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Score"), FText::AsNumber(DeltaScore));
+	CurrentText = DeltaScore >= 0
+		? FText::Format(LOCTEXT("PositiveScoreFormat", "+{Score}"), Args)
+		: FText::Format(LOCTEXT("NegativeScoreFormat", "{Score}"), Args);
 
 	ApplyText();
 	ApplyColor();
@@ -161,3 +166,5 @@ void UScorePopupWidget::UpdateProjectedPosition()
 		SetPositionInViewport(PopupPosition, false);
 	}
 }
+
+#undef LOCTEXT_NAMESPACE

@@ -106,6 +106,8 @@ private:
 	TArray<FGridVector> FindRoadPath(const FGridVector& Start, const FGridVector& End) const;
 	void UpdateCongestion();
 	void SanitizeAllIntersectionLocks();
+
+	UFUNCTION()
 	void OnVehicleDeathHandler(AVehicleActor* Vehicle);
 
 	bool IsIntersection(const FGridVector& Pos) const;

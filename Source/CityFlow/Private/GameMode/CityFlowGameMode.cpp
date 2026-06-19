@@ -406,7 +406,13 @@ void ACityFlowGameMode::TriggerLSystemGrowth()
 		return;
 	}
 
-	LSM->SetBranchBudget(LSystemBudget);
+	// Automated title matches have no player planning pass, so the generator may
+	// use the whole remaining pool. Player-triggered growth keeps its configured share.
+	const UGridManager* GM = GetGridManager();
+	const int32 GenerationBudget = bAutoStartSimulationAfterLSystem && GM
+		? GM->GetRemainingBudget()
+		: LSystemBudget;
+	LSM->SetBranchBudget(GenerationBudget);
 	LSM->StartGenerate();
 }
 
@@ -592,30 +598,7 @@ int32 ACityFlowGameMode::GetActiveTotalRoadBudget() const
 bool ACityFlowGameMode::AreAllBuildingsConnected() const
 {
 	ULSystemManager* LSM = GetWorld()->GetSubsystem<ULSystemManager>();
-	if (!LSM)
-	{
-		return false;
-	}
-
-	UGridManager* GM = GetGridManager();
-	if (!GM)
-	{
-		return false;
-	}
-
-	const TArray<FGridVector> BuildingCells = GM->GetCellsOfType(ECellType::Building);
-	TSet<int32> SeenIDs;
-
-	for (const FGridVector& CellPos : BuildingCells)
-	{
-		const FGridCell& Cell = GM->GetCell(CellPos);
-		if (Cell.BuildingID != INDEX_NONE && !SeenIDs.Contains(Cell.BuildingID))
-		{
-			SeenIDs.Add(Cell.BuildingID);
-		}
-	}
-
-	return true;
+	return LSM && LSM->AreAllBuildingsConnected();
 }
 
 UGridManager* ACityFlowGameMode::GetGridManager() const

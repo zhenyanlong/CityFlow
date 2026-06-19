@@ -5,6 +5,8 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogCityFlowLSystem, Log, All);
+
 void ULSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -39,7 +41,7 @@ void ULSystemManager::SetRoadTileClass(TSubclassOf<ARoadTile> InClass)
 
 void ULSystemManager::SetBranchBudget(int32 NewBudget)
 {
-	BranchBudget = FMath::Max(1, NewBudget);
+	BranchBudget = FMath::Max(0, NewBudget);
 }
 
 void ULSystemManager::SetGrowthInterval(float NewInterval)
@@ -69,7 +71,8 @@ void ULSystemManager::SetMinBranchSpacing(int32 NewSpacing)
 
 void ULSystemManager::AddBudget(int32 Amount)
 {
-	RemainingBudget = FMath::Max(0, RemainingBudget + Amount);
+	BranchBudget = FMath::Max(0, BranchBudget + Amount);
+	RemainingBudget = GetGenerationBudgetRemaining();
 }
 
 void ULSystemManager::StartGenerate()
@@ -90,16 +93,24 @@ void ULSystemManager::StartGenerate()
 		return;
 	}
 
-	RemainingBudget = GM->GetRemainingBudget();
-	BranchBudget = RemainingBudget;
+	CellsPlacedThisGeneration = 0;
+	RemainingBudget = FMath::Min(BranchBudget, GM->GetRemainingBudget());
+	GenerationRandom.Initialize(FMath::Rand());
 	bIsGenerating = true;
 
 	PendingGrowthPoints.Empty();
+	QueuedGrowthPoints.Empty();
+	PendingConnectionCells.Empty();
+	NextConnectionCellIndex = 0;
 	CollectStartPoints();
+	BuildConnectionPlan();
+	UE_LOG(LogCityFlowLSystem, Log,
+		TEXT("Generation started: branch budget=%d, grid budget=%d, organic frontiers=%d, reserved connection cells=%d"),
+		BranchBudget, GM->GetRemainingBudget(), PendingGrowthPoints.Num(), CountPendingConnectionCost());
 
 	OnGenerationStarted.Broadcast();
 
-	if (PendingGrowthPoints.Num() == 0 || RemainingBudget <= 0)
+	if ((PendingGrowthPoints.Num() == 0 && CountPendingConnectionCost() == 0) || RemainingBudget <= 0)
 	{
 		FinishGeneration(AreAllBuildingsConnected());
 		return;
@@ -123,6 +134,9 @@ void ULSystemManager::AbortGeneration()
 
 	GetWorld()->GetTimerManager().ClearTimer(GrowthTimerHandle);
 	PendingGrowthPoints.Empty();
+	QueuedGrowthPoints.Empty();
+	PendingConnectionCells.Empty();
+	NextConnectionCellIndex = 0;
 
 	const bool bAllConnected = AreAllBuildingsConnected();
 	bIsGenerating = false;
@@ -133,6 +147,17 @@ void ULSystemManager::CollectStartPoints()
 {
 	CollectStartPointsFromRoads();
 	CollectStartPointsFromBuildings();
+}
+
+void ULSystemManager::EnqueueGrowthPoint(const FLSystemGrowthPoint& Point)
+{
+	if (Point.Direction == EGridDirection::None || QueuedGrowthPoints.Contains(Point))
+	{
+		return;
+	}
+
+	QueuedGrowthPoints.Add(Point);
+	PendingGrowthPoints.Add(Point);
 }
 
 void ULSystemManager::CollectStartPointsFromRoads()
@@ -165,19 +190,19 @@ void ULSystemManager::CollectStartPointsFromRoads()
 		if (IsDeadEnd(Mask))
 		{
 			Visited.Add(RoadPos);
-
+			// Continue away from the existing road. Side branches are generated later
+			// by TryGrowAt and remain controlled by BranchProbability.
 			for (EGridDirection Dir : AllDirs)
 			{
 				const uint8 DirBit = static_cast<uint8>(Dir);
-				if (Mask & DirBit)
+				if (!(Mask & DirBit))
 				{
-					continue;
-				}
-
-				const FGridVector NeighborPos = RoadPos + GridDirectionUtils::GetVector(Dir);
-				if (GM->IsValidGridPos(NeighborPos) && GM->GetCellType(NeighborPos) == ECellType::Empty)
-				{
-					PendingGrowthPoints.Add(FLSystemGrowthPoint(RoadPos, Dir));
+					const EGridDirection ForwardDir = OppositeDirection(Dir);
+					if (CanGrowInDirection(RoadPos, ForwardDir))
+					{
+						EnqueueGrowthPoint(FLSystemGrowthPoint(RoadPos, ForwardDir));
+					}
+					break;
 				}
 			}
 		}
@@ -191,14 +216,20 @@ void ULSystemManager::CollectStartPointsFromRoads()
 			SegmentCells.Add(RoadPos);
 
 			FGridVector Walker = RoadPos + GridDirectionUtils::GetVector(AxisDirA);
-			while (GM->IsValidGridPos(Walker) && GM->GetCellType(Walker) == ECellType::Road)
+			while (GM->IsValidGridPos(Walker)
+				&& GM->GetCellType(Walker) == ECellType::Road
+				&& IsStraightRoad(GM->GetCell(Walker).ConnectedMask)
+				&& GM->GetCell(Walker).ConnectedMask == Mask)
 			{
 				SegmentCells.Insert(Walker, 0);
 				Walker = Walker + GridDirectionUtils::GetVector(AxisDirA);
 			}
 
 			Walker = RoadPos + GridDirectionUtils::GetVector(AxisDirB);
-			while (GM->IsValidGridPos(Walker) && GM->GetCellType(Walker) == ECellType::Road)
+			while (GM->IsValidGridPos(Walker)
+				&& GM->GetCellType(Walker) == ECellType::Road
+				&& IsStraightRoad(GM->GetCell(Walker).ConnectedMask)
+				&& GM->GetCell(Walker).ConnectedMask == Mask)
 			{
 				SegmentCells.Add(Walker);
 				Walker = Walker + GridDirectionUtils::GetVector(AxisDirB);
@@ -227,13 +258,13 @@ void ULSystemManager::CollectStartPointsFromRoads()
 				if (GM->IsValidGridPos(SamplePos + GridDirectionUtils::GetVector(PerpA))
 					&& GM->GetCellType(SamplePos + GridDirectionUtils::GetVector(PerpA)) == ECellType::Empty)
 				{
-					PendingGrowthPoints.Add(FLSystemGrowthPoint(SamplePos, PerpA));
+					EnqueueGrowthPoint(FLSystemGrowthPoint(SamplePos, PerpA));
 				}
 
 				if (GM->IsValidGridPos(SamplePos + GridDirectionUtils::GetVector(PerpB))
 					&& GM->GetCellType(SamplePos + GridDirectionUtils::GetVector(PerpB)) == ECellType::Empty)
 				{
-					PendingGrowthPoints.Add(FLSystemGrowthPoint(SamplePos, PerpB));
+					EnqueueGrowthPoint(FLSystemGrowthPoint(SamplePos, PerpB));
 				}
 			}
 		}
@@ -253,12 +284,18 @@ void ULSystemManager::CollectStartPointsFromBuildings()
 	}
 
 	TArray<ABuilding*> Buildings = GetAllBuildings();
+	const TSet<FGridVector> PrimaryComponent = GetPrimaryRoadComponent();
 	for (ABuilding* Building : Buildings)
 	{
 		if (!Building || IsBuildingConnected(Building))
 		{
 			continue;
 		}
+
+		bool bFoundDoorway = false;
+		int32 BestDistance = MAX_int32;
+		FGridVector BestBasePos;
+		FGridVector BestConnectionPoint;
 
 		for (const FBuildingDoorway& Doorway : Building->Doorways)
 		{
@@ -276,7 +313,31 @@ void ULSystemManager::CollectStartPointsFromBuildings()
 			const FGridVector LocalPos = Building->TransformLocalPosition(Doorway.RelativePosition);
 			const FGridVector BasePos = Building->GetGridPosition() + LocalPos;
 
-			PendingGrowthPoints.Add(FLSystemGrowthPoint(BasePos, Doorway.FacingDirection));
+			int32 Distance = 0;
+			if (!PrimaryComponent.IsEmpty())
+			{
+				Distance = MAX_int32;
+				for (const FGridVector& RoadPos : PrimaryComponent)
+				{
+					Distance = FMath::Min(Distance,
+						FMath::Abs(ConnPt.X - RoadPos.X) + FMath::Abs(ConnPt.Y - RoadPos.Y));
+				}
+			}
+
+			if (!bFoundDoorway || Distance < BestDistance)
+			{
+				bFoundDoorway = true;
+				BestDistance = Distance;
+				BestBasePos = BasePos;
+				BestConnectionPoint = ConnPt;
+			}
+		}
+
+		if (bFoundDoorway)
+		{
+			const EGridDirection RotatedDirection =
+				GridDirectionUtils::DirectionFromGridDelta(BestConnectionPoint - BestBasePos);
+			EnqueueGrowthPoint(FLSystemGrowthPoint(BestBasePos, RotatedDirection));
 		}
 	}
 }
@@ -295,37 +356,66 @@ void ULSystemManager::ProcessGrowthStep()
 		return;
 	}
 
-	RemainingBudget = GM->GetRemainingBudget();
-
-	if (PendingGrowthPoints.Num() == 0 || RemainingBudget <= 0)
-	{
-		FinishGeneration(AreAllBuildingsConnected());
-		return;
-	}
-
+	RemainingBudget = GetGenerationBudgetRemaining();
 	if (AreAllBuildingsConnected())
 	{
 		FinishGeneration(true);
 		return;
 	}
+	if (RemainingBudget <= 0)
+	{
+		FinishGeneration(false);
+		return;
+	}
 
-	FLSystemGrowthPoint Point = PendingGrowthPoints[0];
-	PendingGrowthPoints.RemoveAt(0);
+	bool bDidWork = false;
+	const int32 ReservedConnectionCost = CountPendingConnectionCost();
 
-	TryGrowAt(Point);
+	// Organic growth can only spend budget that is not reserved for the
+	// connectivity plan. Globally prioritise frontier points by attraction.
+	if (PendingGrowthPoints.Num() > 0 && RemainingBudget > ReservedConnectionCost)
+	{
+		PendingGrowthPoints.Sort([this](const FLSystemGrowthPoint& A, const FLSystemGrowthPoint& B)
+		{
+			ABuilding* TargetA = FindNearestUnconnectedBuilding(A.Position);
+			ABuilding* TargetB = FindNearestUnconnectedBuilding(B.Position);
+			return GetAttractionScore(A.Position, TargetA, A.Direction)
+				< GetAttractionScore(B.Position, TargetB, B.Direction);
+		});
 
-	RemainingBudget = GM->GetRemainingBudget();
+		const FLSystemGrowthPoint Point = PendingGrowthPoints.Pop(EAllowShrinking::No);
+		QueuedGrowthPoints.Remove(Point);
+		const bool bPlacedGrowth = TryGrowAt(Point);
+		// A blocked frontier is not a terminal condition while other candidates remain.
+		bDidWork = bPlacedGrowth || PendingGrowthPoints.Num() > 0;
+	}
+
+	if (!bDidWork && CountPendingConnectionCost() > 0)
+	{
+		bDidWork = ProcessConnectionPlanStep();
+	}
+
+	if (!bDidWork && PendingGrowthPoints.Num() == 0)
+	{
+		BuildConnectionPlan();
+		if (CountPendingConnectionCost() > 0)
+		{
+			bDidWork = ProcessConnectionPlanStep();
+		}
+	}
+
+	RemainingBudget = GetGenerationBudgetRemaining();
 	OnGenerationStep.Broadcast(RemainingBudget);
 
-	if (PendingGrowthPoints.Num() == 0 || RemainingBudget <= 0)
-	{
-		FinishGeneration(AreAllBuildingsConnected());
-		return;
-	}
-
 	if (AreAllBuildingsConnected())
 	{
 		FinishGeneration(true);
+		return;
+	}
+	if (!bDidWork || RemainingBudget <= 0
+		|| (PendingGrowthPoints.Num() == 0 && CountPendingConnectionCost() == 0))
+	{
+		FinishGeneration(false);
 		return;
 	}
 
@@ -336,6 +426,38 @@ void ULSystemManager::ProcessGrowthStep()
 		GrowthInterval,
 		false
 	);
+}
+
+bool ULSystemManager::ProcessConnectionPlanStep()
+{
+	UGridManager* GM = GetGridManager();
+	if (!GM)
+	{
+		return false;
+	}
+
+	while (NextConnectionCellIndex < PendingConnectionCells.Num())
+	{
+		const FGridVector GridPos = PendingConnectionCells[NextConnectionCellIndex++];
+		const ECellType CellType = GM->GetCellType(GridPos);
+		if (CellType == ECellType::Road)
+		{
+			continue;
+		}
+		if (CellType != ECellType::Empty || GetGenerationBudgetRemaining() <= 0)
+		{
+			return false;
+		}
+
+		if (CreateRoadTile(GridPos))
+		{
+			++CellsPlacedThisGeneration;
+			return true;
+		}
+		return false;
+	}
+
+	return false;
 }
 
 bool ULSystemManager::TryGrowAt(const FLSystemGrowthPoint& Point)
@@ -358,7 +480,7 @@ bool ULSystemManager::TryGrowAt(const FLSystemGrowthPoint& Point)
 			break;
 		}
 
-		if (GM->GetRemainingBudget() <= 0)
+		if (GetGenerationBudgetRemaining() <= CountPendingConnectionCost())
 		{
 			break;
 		}
@@ -371,6 +493,7 @@ bool ULSystemManager::TryGrowAt(const FLSystemGrowthPoint& Point)
 
 		LastPlacedPos = NextPos;
 		++CellsPlaced;
+		++CellsPlacedThisGeneration;
 	}
 
 	if (CellsPlaced == 0)
@@ -421,7 +544,7 @@ bool ULSystemManager::TryGrowAt(const FLSystemGrowthPoint& Point)
 				continue;
 			}
 
-			if (FMath::FRand() < BranchProbability)
+			if (GenerationRandom.FRand() < BranchProbability)
 			{
 				NewPoints.Add(FLSystemGrowthPoint(LastPlacedPos, Dir));
 			}
@@ -439,7 +562,7 @@ bool ULSystemManager::TryGrowAt(const FLSystemGrowthPoint& Point)
 
 	for (const FLSystemGrowthPoint& NewPt : NewPoints)
 	{
-		PendingGrowthPoints.Add(NewPt);
+		EnqueueGrowthPoint(NewPt);
 	}
 
 	return true;
@@ -494,8 +617,12 @@ ABuilding* ULSystemManager::FindNearestUnconnectedBuilding(const FGridVector& Fr
 			continue;
 		}
 
-		const FGridVector BuildingPos = Building->GetGridPosition();
-		const int32 Dist = FMath::Abs(From.X - BuildingPos.X) + FMath::Abs(From.Y - BuildingPos.Y);
+		int32 Dist = MAX_int32;
+		for (const FGridVector& DoorwayPos : Building->GetDoorwayWorldPositions())
+		{
+			Dist = FMath::Min(Dist,
+				FMath::Abs(From.X - DoorwayPos.X) + FMath::Abs(From.Y - DoorwayPos.Y));
+		}
 
 		if (Dist < NearestDist)
 		{
@@ -517,7 +644,18 @@ float ULSystemManager::GetAttractionScore(const FGridVector& From, ABuilding* Ta
 	const FGridVector DirVec = GridDirectionUtils::GetVector(Dir);
 	const FGridVector NextPos = From + DirVec;
 
-	const FGridVector TargetPos = Target->GetGridPosition();
+	FGridVector TargetPos = Target->GetGridPosition();
+	int32 BestDoorwayDistance = MAX_int32;
+	for (const FGridVector& DoorwayPos : Target->GetDoorwayWorldPositions())
+	{
+		const int32 DoorwayDistance =
+			FMath::Abs(From.X - DoorwayPos.X) + FMath::Abs(From.Y - DoorwayPos.Y);
+		if (DoorwayDistance < BestDoorwayDistance)
+		{
+			BestDoorwayDistance = DoorwayDistance;
+			TargetPos = DoorwayPos;
+		}
+	}
 
 	const float DX = static_cast<float>(TargetPos.X - NextPos.X);
 	const float DY = static_cast<float>(TargetPos.Y - NextPos.Y);
@@ -543,9 +681,15 @@ float ULSystemManager::GetAttractionScore(const FGridVector& From, ABuilding* Ta
 
 bool ULSystemManager::IsBuildingConnected(ABuilding* Building) const
 {
-	if (!Building)
+	return Building && IsBuildingConnectedToComponent(Building, GetPrimaryRoadComponent());
+}
+
+bool ULSystemManager::AreAllBuildingsConnected() const
+{
+	const TArray<ABuilding*> Buildings = GetAllBuildings();
+	if (Buildings.Num() == 0)
 	{
-		return false;
+		return true;
 	}
 
 	UGridManager* GM = GetGridManager();
@@ -554,35 +698,38 @@ bool ULSystemManager::IsBuildingConnected(ABuilding* Building) const
 		return false;
 	}
 
-	const TArray<FGridVector> DoorwayPositions = Building->GetDoorwayWorldPositions();
-	for (const FGridVector& DoorwayPos : DoorwayPositions)
+	TSet<FGridVector> Unvisited;
+	for (const FGridVector& RoadPos : GM->GetCellsOfType(ECellType::Road))
 	{
-		if (GM->GetCellType(DoorwayPos) == ECellType::Road)
+		Unvisited.Add(RoadPos);
+	}
+
+	while (!Unvisited.IsEmpty())
+	{
+		auto It = Unvisited.CreateConstIterator();
+		const FGridVector Seed = *It;
+		const TSet<FGridVector> Component = FloodRoadComponent(Seed, Unvisited);
+		for (const FGridVector& Cell : Component)
+		{
+			Unvisited.Remove(Cell);
+		}
+
+		bool bContainsEveryBuilding = true;
+		for (const ABuilding* Building : Buildings)
+		{
+			if (Building && !IsBuildingConnectedToComponent(Building, Component))
+			{
+				bContainsEveryBuilding = false;
+				break;
+			}
+		}
+		if (bContainsEveryBuilding)
 		{
 			return true;
 		}
 	}
 
 	return false;
-}
-
-bool ULSystemManager::AreAllBuildingsConnected() const
-{
-	TArray<ABuilding*> Buildings = GetAllBuildings();
-	if (Buildings.Num() == 0)
-	{
-		return true;
-	}
-
-	for (ABuilding* Building : Buildings)
-	{
-		if (Building && !IsBuildingConnected(Building))
-		{
-			return false;
-		}
-	}
-
-	return true;
 }
 
 TArray<ABuilding*> ULSystemManager::GetAllBuildings() const
@@ -622,6 +769,321 @@ TArray<ABuilding*> ULSystemManager::GetAllBuildings() const
 	}
 
 	return Result;
+}
+
+TSet<FGridVector> ULSystemManager::FloodRoadComponent(
+	const FGridVector& Seed, const TSet<FGridVector>& RoadCells) const
+{
+	TSet<FGridVector> Component;
+	if (!RoadCells.Contains(Seed))
+	{
+		return Component;
+	}
+
+	TArray<FGridVector> Queue;
+	Queue.Add(Seed);
+	Component.Add(Seed);
+	int32 Head = 0;
+	while (Head < Queue.Num())
+	{
+		const FGridVector Current = Queue[Head++];
+		for (const EGridDirection Dir : GridDirectionUtils::GetAllDirections())
+		{
+			const FGridVector Neighbor = Current + GridDirectionUtils::GetVector(Dir);
+			if (RoadCells.Contains(Neighbor) && !Component.Contains(Neighbor))
+			{
+				Component.Add(Neighbor);
+				Queue.Add(Neighbor);
+			}
+		}
+	}
+	return Component;
+}
+
+bool ULSystemManager::IsBuildingConnectedToComponent(
+	const ABuilding* Building, const TSet<FGridVector>& Component) const
+{
+	if (!Building || Component.IsEmpty())
+	{
+		return false;
+	}
+
+	for (const FGridVector& DoorwayPos : Building->GetDoorwayWorldPositions())
+	{
+		if (Component.Contains(DoorwayPos))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+TSet<FGridVector> ULSystemManager::GetPrimaryRoadComponent() const
+{
+	TSet<FGridVector> BestComponent;
+	UGridManager* GM = GetGridManager();
+	if (!GM)
+	{
+		return BestComponent;
+	}
+
+	TSet<FGridVector> Unvisited;
+	for (const FGridVector& RoadPos : GM->GetCellsOfType(ECellType::Road))
+	{
+		Unvisited.Add(RoadPos);
+	}
+
+	const TArray<ABuilding*> Buildings = GetAllBuildings();
+	int32 BestAttachedBuildings = -1;
+	while (!Unvisited.IsEmpty())
+	{
+		auto It = Unvisited.CreateConstIterator();
+		const FGridVector Seed = *It;
+		const TSet<FGridVector> Component = FloodRoadComponent(Seed, Unvisited);
+		for (const FGridVector& Cell : Component)
+		{
+			Unvisited.Remove(Cell);
+		}
+
+		int32 AttachedBuildings = 0;
+		for (const ABuilding* Building : Buildings)
+		{
+			if (IsBuildingConnectedToComponent(Building, Component))
+			{
+				++AttachedBuildings;
+			}
+		}
+
+		if (AttachedBuildings > BestAttachedBuildings
+			|| (AttachedBuildings == BestAttachedBuildings && Component.Num() > BestComponent.Num()))
+		{
+			BestAttachedBuildings = AttachedBuildings;
+			BestComponent = Component;
+		}
+	}
+
+	return BestComponent;
+}
+
+void ULSystemManager::ExpandNetworkThroughRoads(
+	TSet<FGridVector>& Network, const TSet<FGridVector>& RoadCells) const
+{
+	TArray<FGridVector> Queue = Network.Array();
+	int32 Head = 0;
+	while (Head < Queue.Num())
+	{
+		const FGridVector Current = Queue[Head++];
+		for (const EGridDirection Dir : GridDirectionUtils::GetAllDirections())
+		{
+			const FGridVector Neighbor = Current + GridDirectionUtils::GetVector(Dir);
+			if (RoadCells.Contains(Neighbor) && !Network.Contains(Neighbor))
+			{
+				Network.Add(Neighbor);
+				Queue.Add(Neighbor);
+			}
+		}
+	}
+}
+
+bool ULSystemManager::FindPathToNetwork(
+	const ABuilding* Building,
+	const TSet<FGridVector>& Network,
+	TArray<FGridVector>& OutPath) const
+{
+	OutPath.Reset();
+	UGridManager* GM = GetGridManager();
+	if (!Building || !GM || Network.IsEmpty())
+	{
+		return false;
+	}
+
+	TArray<FGridVector> Queue;
+	TSet<FGridVector> Visited;
+	TMap<FGridVector, FGridVector> CameFrom;
+	for (const FGridVector& DoorwayPos : Building->GetDoorwayWorldPositions())
+	{
+		if (!GM->IsValidGridPos(DoorwayPos)
+			|| GM->GetCellType(DoorwayPos) == ECellType::Building)
+		{
+			continue;
+		}
+		if (Network.Contains(DoorwayPos))
+		{
+			return true;
+		}
+		if (!Visited.Contains(DoorwayPos))
+		{
+			Visited.Add(DoorwayPos);
+			Queue.Add(DoorwayPos);
+		}
+	}
+
+	int32 Head = 0;
+	FGridVector Goal;
+	bool bFoundGoal = false;
+	while (Head < Queue.Num() && !bFoundGoal)
+	{
+		const FGridVector Current = Queue[Head++];
+		for (const EGridDirection Dir : GridDirectionUtils::GetAllDirections())
+		{
+			const FGridVector Neighbor = Current + GridDirectionUtils::GetVector(Dir);
+			if (!GM->IsValidGridPos(Neighbor) || Visited.Contains(Neighbor)
+				|| GM->GetCellType(Neighbor) == ECellType::Building)
+			{
+				continue;
+			}
+
+			Visited.Add(Neighbor);
+			CameFrom.Add(Neighbor, Current);
+			if (Network.Contains(Neighbor))
+			{
+				Goal = Neighbor;
+				bFoundGoal = true;
+				break;
+			}
+			Queue.Add(Neighbor);
+		}
+	}
+
+	if (!bFoundGoal)
+	{
+		return false;
+	}
+
+	// Reconstruct from the existing network out toward the building doorway so
+	// the animated placement grows as one continuous connection.
+	FGridVector Current = Goal;
+	OutPath.Add(Current);
+	while (const FGridVector* Previous = CameFrom.Find(Current))
+	{
+		Current = *Previous;
+		OutPath.Add(Current);
+	}
+	return true;
+}
+
+void ULSystemManager::BuildConnectionPlan()
+{
+	UGridManager* GM = GetGridManager();
+	PendingConnectionCells.Reset();
+	NextConnectionCellIndex = 0;
+	if (!GM || GetGenerationBudgetRemaining() <= 0)
+	{
+		return;
+	}
+
+	const TArray<ABuilding*> Buildings = GetAllBuildings();
+	if (Buildings.IsEmpty())
+	{
+		return;
+	}
+
+	TSet<FGridVector> RoadCells;
+	for (const FGridVector& RoadPos : GM->GetCellsOfType(ECellType::Road))
+	{
+		RoadCells.Add(RoadPos);
+	}
+	TSet<FGridVector> Network = GetPrimaryRoadComponent();
+	int32 PlannedCost = 0;
+	const int32 AvailableBudget = GetGenerationBudgetRemaining();
+
+	// With no arterial road, seed the network at one valid building doorway.
+	if (Network.IsEmpty())
+	{
+		for (const ABuilding* Building : Buildings)
+		{
+			if (!Building) continue;
+			for (const FGridVector& DoorwayPos : Building->GetDoorwayWorldPositions())
+			{
+				if (GM->IsValidGridPos(DoorwayPos)
+					&& GM->GetCellType(DoorwayPos) == ECellType::Empty)
+				{
+					PendingConnectionCells.Add(DoorwayPos);
+					RoadCells.Add(DoorwayPos);
+					Network.Add(DoorwayPos);
+					++PlannedCost;
+					break;
+				}
+			}
+			if (!Network.IsEmpty()) break;
+		}
+	}
+
+	for (int32 Iteration = 0; Iteration < Buildings.Num() && PlannedCost <= AvailableBudget; ++Iteration)
+	{
+		ABuilding* BestBuilding = nullptr;
+		TArray<FGridVector> BestPath;
+		int32 BestNewCellCount = MAX_int32;
+
+		for (ABuilding* Building : Buildings)
+		{
+			if (!Building || IsBuildingConnectedToComponent(Building, Network))
+			{
+				continue;
+			}
+
+			TArray<FGridVector> CandidatePath;
+			if (!FindPathToNetwork(Building, Network, CandidatePath))
+			{
+				continue;
+			}
+
+			int32 NewCellCount = 0;
+			for (const FGridVector& Cell : CandidatePath)
+			{
+				if (!RoadCells.Contains(Cell)) ++NewCellCount;
+			}
+			if (NewCellCount < BestNewCellCount)
+			{
+				BestBuilding = Building;
+				BestPath = MoveTemp(CandidatePath);
+				BestNewCellCount = NewCellCount;
+			}
+		}
+
+		if (!BestBuilding || PlannedCost + BestNewCellCount > AvailableBudget)
+		{
+			break;
+		}
+
+		for (const FGridVector& Cell : BestPath)
+		{
+			if (!RoadCells.Contains(Cell))
+			{
+				PendingConnectionCells.Add(Cell);
+				RoadCells.Add(Cell);
+				++PlannedCost;
+			}
+			Network.Add(Cell);
+		}
+		ExpandNetworkThroughRoads(Network, RoadCells);
+	}
+}
+
+int32 ULSystemManager::CountPendingConnectionCost() const
+{
+	const UGridManager* GM = GetGridManager();
+	if (!GM)
+	{
+		return 0;
+	}
+
+	int32 Cost = 0;
+	for (int32 Index = NextConnectionCellIndex; Index < PendingConnectionCells.Num(); ++Index)
+	{
+		if (GM->GetCellType(PendingConnectionCells[Index]) == ECellType::Empty)
+		{
+			++Cost;
+		}
+	}
+	return Cost;
+}
+
+int32 ULSystemManager::GetGenerationBudgetRemaining() const
+{
+	const UGridManager* GM = GetGridManager();
+	const int32 LocalRemaining = FMath::Max(0, BranchBudget - CellsPlacedThisGeneration);
+	return GM ? FMath::Min(LocalRemaining, GM->GetRemainingBudget()) : 0;
 }
 
 bool ULSystemManager::CanGrowInDirection(const FGridVector& Pos, EGridDirection Dir) const
@@ -725,6 +1187,13 @@ void ULSystemManager::FinishGeneration(bool bAllConnected)
 {
 	GetWorld()->GetTimerManager().ClearTimer(GrowthTimerHandle);
 	PendingGrowthPoints.Empty();
+	QueuedGrowthPoints.Empty();
+	PendingConnectionCells.Empty();
+	NextConnectionCellIndex = 0;
+	RemainingBudget = GetGenerationBudgetRemaining();
 	bIsGenerating = false;
+	UE_LOG(LogCityFlowLSystem, Log,
+		TEXT("Generation finished: connected=%s, cells placed=%d, local budget remaining=%d"),
+		bAllConnected ? TEXT("true") : TEXT("false"), CellsPlacedThisGeneration, RemainingBudget);
 	OnGenerationFinished.Broadcast(bAllConnected);
 }

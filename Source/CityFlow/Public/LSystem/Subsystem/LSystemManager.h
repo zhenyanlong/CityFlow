@@ -19,6 +19,16 @@ struct FLSystemGrowthPoint
 	FLSystemGrowthPoint() = default;
 	FLSystemGrowthPoint(const FGridVector& InPos, EGridDirection InDir)
 		: Position(InPos), Direction(InDir) {}
+
+	bool operator==(const FLSystemGrowthPoint& Other) const
+	{
+		return Position == Other.Position && Direction == Other.Direction;
+	}
+
+	friend uint32 GetTypeHash(const FLSystemGrowthPoint& Point)
+	{
+		return HashCombine(GetTypeHash(Point.Position), GetTypeHash(static_cast<uint8>(Point.Direction)));
+	}
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLSystemGenerationStarted);
@@ -91,6 +101,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "LSystem")
 	int32 GetRemainingBudget() const { return RemainingBudget; }
 
+	/** True only when every building doorway is attached to the same road component. */
+	UFUNCTION(BlueprintPure, Category = "LSystem")
+	bool AreAllBuildingsConnected() const;
+
 	UPROPERTY(BlueprintAssignable, Category = "LSystem|Events")
 	FOnLSystemGenerationStarted OnGenerationStarted;
 
@@ -106,8 +120,10 @@ private:
 	void CollectStartPoints();
 	void CollectStartPointsFromRoads();
 	void CollectStartPointsFromBuildings();
+	void EnqueueGrowthPoint(const FLSystemGrowthPoint& Point);
 
 	void ProcessGrowthStep();
+	bool ProcessConnectionPlanStep();
 
 	bool TryGrowAt(const FLSystemGrowthPoint& Point);
 
@@ -119,9 +135,15 @@ private:
 
 	bool IsBuildingConnected(ABuilding* Building) const;
 
-	bool AreAllBuildingsConnected() const;
-
 	TArray<ABuilding*> GetAllBuildings() const;
+	TSet<FGridVector> GetPrimaryRoadComponent() const;
+	TSet<FGridVector> FloodRoadComponent(const FGridVector& Seed, const TSet<FGridVector>& RoadCells) const;
+	bool IsBuildingConnectedToComponent(const ABuilding* Building, const TSet<FGridVector>& Component) const;
+	void ExpandNetworkThroughRoads(TSet<FGridVector>& Network, const TSet<FGridVector>& RoadCells) const;
+	bool FindPathToNetwork(const ABuilding* Building, const TSet<FGridVector>& Network, TArray<FGridVector>& OutPath) const;
+	void BuildConnectionPlan();
+	int32 CountPendingConnectionCost() const;
+	int32 GetGenerationBudgetRemaining() const;
 
 	bool CanGrowInDirection(const FGridVector& Pos, EGridDirection Dir) const;
 	bool IsSideBranchValid(const FGridVector& Pos, EGridDirection Dir) const;
@@ -145,6 +167,11 @@ private:
 
 	FTimerHandle GrowthTimerHandle;
 	TArray<FLSystemGrowthPoint> PendingGrowthPoints;
+	TSet<FLSystemGrowthPoint> QueuedGrowthPoints;
+	TArray<FGridVector> PendingConnectionCells;
+	int32 NextConnectionCellIndex = 0;
+	int32 CellsPlacedThisGeneration = 0;
+	FRandomStream GenerationRandom;
 	bool bIsGenerating = false;
 	int32 RemainingBudget = 0;
 };
