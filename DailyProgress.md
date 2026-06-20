@@ -13,6 +13,11 @@
 - Added optional all-rotation display, class deduplication, additional building classes, automatic grid expansion, spawn-animation control, and GridVisualizer creation for showcase maps.
 - Added `ACityFlowShowcaseGameMode` to isolate manually authored showcase levels from the normal HUD and automated title-preview flow.
 - Completed a successful `CityFlow Win64 Development` build for the showcase and placement-audio changes.
+- Rebuilt the procedural sidewalk from inset copies of the final foundation outline so rounded corners and per-edge connection shapes are preserved.
+- Added configurable inward offset, inner/outer geometric bevels, seam embed depth, corner tessellation, and independent foundation/sidewalk collision cooking controls.
+- Added outline sanitization, bounded inset intersections, footprint-aware parameter clamps, and invalid-polygon rejection to prevent degenerate or folded procedural meshes.
+- Updated the bilingual GDD and TDD with the refined foundation visual language, Blueprint properties, and mesh-generation rules.
+- Completed a successful `CityFlowEditor Win64 Development` build for the foundation and sidewalk changes.
 
 ## 2026-06-19
 

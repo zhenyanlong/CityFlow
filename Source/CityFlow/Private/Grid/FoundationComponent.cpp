@@ -51,6 +51,7 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
 
     TArray<FVector2D> Outline;
     GenerateOutline(Conn, HW, HH, Outline);
+    SanitizeOutline(Outline);
 
     const int32 N = Outline.Num();
     if (N < 3)
@@ -187,7 +188,7 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
             1.0f));
     }
     FoundationMesh->CreateMeshSection_LinearColor(0, FoundationVerts, FoundationTris, FoundationNormals, FoundationUVs,
-		TArray<FLinearColor>(), TArray<FProcMeshTangent>(), true);
+		TArray<FLinearColor>(), TArray<FProcMeshTangent>(), bCreateFoundationCollision);
 	
 	if (FoundationMaterial)
 	{
@@ -199,102 +200,127 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
 	}
 	FoundationMesh->RegisterComponent();
 
-    BuildSidewalk(Owner, HW, HH, InOwnerScale);
+    BuildSidewalk(Owner, Outline, InOwnerScale);
 }
 
-void UFoundationComponent::BuildSidewalk(AActor* Owner, float HW, float HH, const FVector& InOwnerScale)
+void UFoundationComponent::BuildSidewalk(AActor* Owner, const TArray<FVector2D>& FoundationOutline,
+    const FVector& InOwnerScale)
 {
-    if (SidewalkWidth <= 0.0f)
+    if (SidewalkWidth <= KINDA_SMALL_NUMBER || FoundationOutline.Num() < 3)
     {
         return;
     }
 
-    const float OX = HW;
-    const float OY = HH;
-    const float IX = FMath::Max(0.0f, HW - SidewalkWidth);
-    const float IY = FMath::Max(0.0f, HH - SidewalkWidth);
+    FVector2D Min(FLT_MAX, FLT_MAX);
+    FVector2D Max(-FLT_MAX, -FLT_MAX);
+    for (const FVector2D& Point : FoundationOutline)
+    {
+        Min.X = FMath::Min(Min.X, Point.X);
+        Min.Y = FMath::Min(Min.Y, Point.Y);
+        Max.X = FMath::Max(Max.X, Point.X);
+        Max.Y = FMath::Max(Max.Y, Point.Y);
+    }
 
+    const float FootprintMaxInset = FMath::Max(0.0f, FMath::Min(Max.X - Min.X, Max.Y - Min.Y) * 0.45f);
+
+    // A sampled round corner stops being a valid inset once the offset reaches its
+    // local radius. Find the largest convex inset instead of allowing those samples
+    // to cross the arc centre and create long fan-shaped triangles.
+    float SafeMaxInset = FootprintMaxInset;
+    TArray<FVector2D> ValidationOutline;
+    if (!BuildInsetOutline(FoundationOutline, SafeMaxInset, ValidationOutline))
+    {
+        float ValidInset = 0.0f;
+        float InvalidInset = SafeMaxInset;
+        for (int32 Iteration = 0; Iteration < 16; ++Iteration)
+        {
+            const float CandidateInset = (ValidInset + InvalidInset) * 0.5f;
+            if (BuildInsetOutline(FoundationOutline, CandidateInset, ValidationOutline))
+            {
+                ValidInset = CandidateInset;
+            }
+            else
+            {
+                InvalidInset = CandidateInset;
+            }
+        }
+        SafeMaxInset = FMath::Max(0.0f, ValidInset - 0.1f);
+    }
+
+    const float OuterInset = FMath::Clamp(SidewalkInset, 0.0f, SafeMaxInset);
+    const float InnerInset = FMath::Clamp(OuterInset + SidewalkWidth, OuterInset, SafeMaxInset);
+    const float ActualWidth = InnerInset - OuterInset;
+    if (ActualWidth <= KINDA_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    const float BevelSize = FMath::Clamp(SidewalkBevelSize, 0.0f, ActualWidth * 0.45f);
+    const float BevelHeight = FMath::Clamp(SidewalkBevelHeight, 0.0f, SidewalkHeight);
     const float TopZ = FoundationHeight + SidewalkHeight;
-    const float BotZ = FoundationHeight;
+    const float BevelStartZ = TopZ - BevelHeight;
+    const float BotZ = FoundationHeight - FMath::Max(0.0f, SidewalkEmbedDepth);
+
+    TArray<FVector2D> OuterBase;
+    TArray<FVector2D> InnerBase;
+    TArray<FVector2D> OuterTop;
+    TArray<FVector2D> InnerTop;
+    if (!BuildInsetOutline(FoundationOutline, OuterInset, OuterBase)
+        || !BuildInsetOutline(FoundationOutline, InnerInset, InnerBase)
+        || !BuildInsetOutline(FoundationOutline, OuterInset + BevelSize, OuterTop)
+        || !BuildInsetOutline(FoundationOutline, InnerInset - BevelSize, InnerTop))
+    {
+        return;
+    }
 
     TArray<FVector> V;
     TArray<int32> T;
     TArray<FVector> N;
-
-    auto AddWall = [&](float X0, float Y0, float X1, float Y1, const FVector& Nrm)
-    {
-        const int32 Base = V.Num();
-        V.Add(FVector(X0, Y0, TopZ));
-        V.Add(FVector(X1, Y1, TopZ));
-        V.Add(FVector(X1, Y1, BotZ));
-        V.Add(FVector(X0, Y0, BotZ));
-        // 修正：顺时针环绕
-        T.Add(Base); T.Add(Base + 1); T.Add(Base + 2);
-        T.Add(Base); T.Add(Base + 2); T.Add(Base + 3);
-        for (int32 i = 0; i < 4; ++i) N.Add(Nrm);
-    };
-
-    const FVector Up(0, 0, 1);
-    const FVector Down(0, -1, 0);
-    const FVector Fwd(0, 1, 0);
-    const FVector Right(1, 0, 0);
-    const FVector Left(-1, 0, 0);
-
-    // 外墙
-    AddWall(-OX, -OY,  OX, -OY, Down);
-    AddWall( OX, -OY,  OX,  OY, Right);
-    AddWall( OX,  OY, -OX,  OY, Fwd);
-    AddWall(-OX,  OY, -OX, -OY, Left);
-
-    // 内墙
-    AddWall( IX, -IY, -IX, -IY, Fwd);
-    AddWall( IX,  IY,  IX, -IY, Left);
-    AddWall(-IX,  IY,  IX,  IY, Down);
-    AddWall(-IX, -IY, -IX,  IY, Right);
-
-    // 顶面
-    auto AddTop = [&](float X0, float Y0, float X1, float Y1, float X2, float Y2, float X3, float Y3)
-    {
-        const int32 Base = V.Num();
-        V.Add(FVector(X0, Y0, TopZ));
-        V.Add(FVector(X1, Y1, TopZ));
-        V.Add(FVector(X2, Y2, TopZ));
-        V.Add(FVector(X3, Y3, TopZ));
-        // 修正：将原逆时针翻转为顺时针
-        T.Add(Base); T.Add(Base + 2); T.Add(Base + 1);
-        T.Add(Base); T.Add(Base + 3); T.Add(Base + 2);
-        for (int32 i = 0; i < 4; ++i) N.Add(Up);
-    };
-
-    AddTop(-OX, -OY,  OX, -OY,  IX, -IY, -IX, -IY);
-    AddTop( OX, -OY,  OX,  OY,  IX,  IY,  IX, -IY);
-    AddTop( OX,  OY, -OX,  OY, -IX,  IY,  IX,  IY);
-    AddTop(-OX,  OY, -OX, -OY, -IX, -IY, -IX,  IY);
-
-    // 补充：为了完全封闭无死角，我们也加上人行道的底面
-    auto AddBottom = [&](float X0, float Y0, float X1, float Y1, float X2, float Y2, float X3, float Y3)
-    {
-        const int32 Base = V.Num();
-        V.Add(FVector(X0, Y0, BotZ));
-        V.Add(FVector(X1, Y1, BotZ));
-        V.Add(FVector(X2, Y2, BotZ));
-        V.Add(FVector(X3, Y3, BotZ));
-        // 底面朝下，环绕顺序需要和顶面相反
-        T.Add(Base); T.Add(Base + 1); T.Add(Base + 2);
-        T.Add(Base); T.Add(Base + 2); T.Add(Base + 3);
-        for (int32 i = 0; i < 4; ++i) N.Add(Down);
-    };
-
-    AddBottom(-OX, -OY,  OX, -OY,  IX, -IY, -IX, -IY);
-    AddBottom( OX, -OY,  OX,  OY,  IX,  IY,  IX, -IY);
-    AddBottom( OX,  OY, -OX,  OY, -IX,  IY,  IX,  IY);
-    AddBottom(-OX,  OY, -OX, -OY, -IX, -IY, -IX,  IY);
-
     TArray<FVector2D> UVs;
-    UVs.SetNum(V.Num());
-    for (int32 i = 0; i < V.Num(); ++i)
+
+    auto AddQuad = [&](const FVector& A, const FVector& B, const FVector& C, const FVector& D,
+        const FVector& Normal)
     {
-        UVs[i] = FVector2D(V[i].X * 0.01f, V[i].Y * 0.01f);
+        const int32 Base = V.Num();
+        V.Append({A, B, C, D});
+        // ProceduralMesh front faces follow the same clockwise convention used by
+        // FoundationMesh. The supplied normals describe the visible side, so the
+        // geometric winding must be reversed from the conventional RH cross product.
+        T.Append({Base, Base + 2, Base + 1, Base, Base + 3, Base + 2});
+        for (int32 Index = 0; Index < 4; ++Index)
+        {
+            N.Add(Normal);
+            UVs.Add(FVector2D(V[Base + Index].X, V[Base + Index].Y) * 0.01f);
+        }
+    };
+
+    const int32 NumPoints = FoundationOutline.Num();
+    for (int32 Index = 0; Index < NumPoints; ++Index)
+    {
+        const int32 Next = (Index + 1) % NumPoints;
+        const FVector2D Edge = (OuterBase[Next] - OuterBase[Index]).GetSafeNormal();
+        const FVector OuterNormal(Edge.Y, -Edge.X, 0.0f);
+        const FVector InnerNormal(-Edge.Y, Edge.X, 0.0f);
+
+        AddQuad(FVector(OuterBase[Index], BotZ), FVector(OuterBase[Next], BotZ),
+            FVector(OuterBase[Next], BevelStartZ), FVector(OuterBase[Index], BevelStartZ), OuterNormal);
+        AddQuad(FVector(InnerBase[Next], BotZ), FVector(InnerBase[Index], BotZ),
+            FVector(InnerBase[Index], BevelStartZ), FVector(InnerBase[Next], BevelStartZ), InnerNormal);
+
+        if (BevelSize > KINDA_SMALL_NUMBER && BevelHeight > KINDA_SMALL_NUMBER)
+        {
+            const FVector OuterBevelNormal = (OuterNormal * BevelHeight + FVector::UpVector * BevelSize).GetSafeNormal();
+            const FVector InnerBevelNormal = (InnerNormal * BevelHeight + FVector::UpVector * BevelSize).GetSafeNormal();
+            AddQuad(FVector(OuterBase[Index], BevelStartZ), FVector(OuterBase[Next], BevelStartZ),
+                FVector(OuterTop[Next], TopZ), FVector(OuterTop[Index], TopZ), OuterBevelNormal);
+            AddQuad(FVector(InnerBase[Next], BevelStartZ), FVector(InnerBase[Index], BevelStartZ),
+                FVector(InnerTop[Index], TopZ), FVector(InnerTop[Next], TopZ), InnerBevelNormal);
+        }
+
+        AddQuad(FVector(OuterTop[Index], TopZ), FVector(OuterTop[Next], TopZ),
+            FVector(InnerTop[Next], TopZ), FVector(InnerTop[Index], TopZ), FVector::UpVector);
+        AddQuad(FVector(InnerBase[Index], BotZ), FVector(InnerBase[Next], BotZ),
+            FVector(OuterBase[Next], BotZ), FVector(OuterBase[Index], BotZ), FVector::DownVector);
     }
 
     SidewalkMesh = NewObject<UProceduralMeshComponent>(Owner);
@@ -307,7 +333,7 @@ void UFoundationComponent::BuildSidewalk(AActor* Owner, float HW, float HH, cons
             1.0f));
     }
     SidewalkMesh->CreateMeshSection_LinearColor(0, V, T, N, UVs,
-		TArray<FLinearColor>(), TArray<FProcMeshTangent>(), true);
+		TArray<FLinearColor>(), TArray<FProcMeshTangent>(), bCreateSidewalkCollision);
 	
 	if (SidewalkMaterial)
 	{
@@ -333,6 +359,111 @@ void UFoundationComponent::ClearFoundation()
         SidewalkMesh->DestroyComponent();
     }
     SidewalkMesh = nullptr;
+}
+
+void UFoundationComponent::SanitizeOutline(TArray<FVector2D>& Outline) const
+{
+    TArray<FVector2D> CleanOutline;
+    CleanOutline.Reserve(Outline.Num());
+
+    for (const FVector2D& Point : Outline)
+    {
+        if (CleanOutline.IsEmpty() || !CleanOutline.Last().Equals(Point, 0.01f))
+        {
+            CleanOutline.Add(Point);
+        }
+    }
+
+    if (CleanOutline.Num() > 1 && CleanOutline[0].Equals(CleanOutline.Last(), 0.01f))
+    {
+        CleanOutline.Pop(EAllowShrinking::No);
+    }
+
+    Outline = MoveTemp(CleanOutline);
+}
+
+bool UFoundationComponent::BuildInsetOutline(const TArray<FVector2D>& Source, float Inset,
+    TArray<FVector2D>& OutOutline) const
+{
+    OutOutline.Reset(Source.Num());
+    if (Source.Num() < 3 || Inset < 0.0f)
+    {
+        return false;
+    }
+    if (Inset <= KINDA_SMALL_NUMBER)
+    {
+        OutOutline = Source;
+        return true;
+    }
+
+    auto Cross2D = [](const FVector2D& A, const FVector2D& B)
+    {
+        return A.X * B.Y - A.Y * B.X;
+    };
+
+    for (int32 Index = 0; Index < Source.Num(); ++Index)
+    {
+        const FVector2D& Previous = Source[(Index - 1 + Source.Num()) % Source.Num()];
+        const FVector2D& Current = Source[Index];
+        const FVector2D& Next = Source[(Index + 1) % Source.Num()];
+        const FVector2D PreviousDirection = (Current - Previous).GetSafeNormal();
+        const FVector2D NextDirection = (Next - Current).GetSafeNormal();
+        if (PreviousDirection.IsNearlyZero() || NextDirection.IsNearlyZero())
+        {
+            continue;
+        }
+
+        const FVector2D PreviousNormal(-PreviousDirection.Y, PreviousDirection.X);
+        const FVector2D NextNormal(-NextDirection.Y, NextDirection.X);
+        const FVector2D PreviousOffset = Current + PreviousNormal * Inset;
+        const FVector2D NextOffset = Current + NextNormal * Inset;
+        const float Denominator = Cross2D(PreviousDirection, NextDirection);
+
+        FVector2D InsetPoint;
+        if (FMath::Abs(Denominator) > KINDA_SMALL_NUMBER)
+        {
+            const float DistanceAlongPrevious = Cross2D(NextOffset - PreviousOffset, NextDirection) / Denominator;
+            InsetPoint = PreviousOffset + PreviousDirection * DistanceAlongPrevious;
+        }
+        else
+        {
+            InsetPoint = Current + PreviousNormal * Inset;
+        }
+
+        const float MaxMiterLength = FMath::Max(1.0f, Inset * 4.0f);
+        if (!FMath::IsFinite(InsetPoint.X) || !FMath::IsFinite(InsetPoint.Y)
+            || FVector2D::Distance(Current, InsetPoint) > MaxMiterLength)
+        {
+            const FVector2D Bisector = (PreviousNormal + NextNormal).GetSafeNormal();
+            const float Projection = FMath::Max(0.25f, FMath::Abs(FVector2D::DotProduct(Bisector, PreviousNormal)));
+            InsetPoint = Current + Bisector * (Inset / Projection);
+        }
+
+        OutOutline.Add(InsetPoint);
+    }
+
+    if (OutOutline.Num() != Source.Num())
+    {
+        OutOutline.Reset();
+        return false;
+    }
+
+    float SignedDoubleArea = 0.0f;
+    for (int32 Index = 0; Index < OutOutline.Num(); ++Index)
+    {
+        const FVector2D& Current = OutOutline[Index];
+        const FVector2D& Next = OutOutline[(Index + 1) % OutOutline.Num()];
+        const FVector2D& AfterNext = OutOutline[(Index + 2) % OutOutline.Num()];
+        const FVector2D Edge = Next - Current;
+        const FVector2D NextEdge = AfterNext - Next;
+        if (Edge.SizeSquared() <= 0.01f || Cross2D(Edge, NextEdge) < -0.01f)
+        {
+            OutOutline.Reset();
+            return false;
+        }
+        SignedDoubleArea += Cross2D(Current, Next);
+    }
+    return SignedDoubleArea > KINDA_SMALL_NUMBER;
 }
 
 float UFoundationComponent::GetEdgePad(float BasePad, bool bConnected) const
@@ -366,7 +497,7 @@ void UFoundationComponent::GenerateOutline(const FEdgeConnection& Conn, float HW
     const float R_SW = ComputeR(PadW, PadS);
     const float R_SE = ComputeR(PadE, PadS);
 
-    const int32 ArcSegs = 8;
+    const int32 ArcSegs = FMath::Clamp(CornerSegments, 1, 32);
 
     OutOutline.Empty();
 

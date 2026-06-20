@@ -311,8 +311,9 @@ ABuilding
 **核心设计原则：**
 
 - **Actor 缩放抵消：** 建筑 Actor 使用 `SetActorScale3D` 来视觉缩放。程序化顶点以世界单位计算，然后通过 `SetRelativeScale3D(1/S.X, 1/S.Y, 1)` 抵消父级缩放，防止双重变换。**v0.11 修复：** `BuildFoundation` 现在接收显式 `InOwnerScale` 参数（由 `RefreshFoundation` 计算 `TargetScale = EffSize × CellSize / ReferenceMeshSize` 并传入），而非在构建时读取 `Owner->GetActorScale3D()`，避免在 spawn 动画期间重建地基时读取到动画中间缩放值。
-- **Z 轴惯例：** 地基落在地面（Z=0），向上挤出至 `FoundationHeight`。人行道落在地基顶部（`FoundationHeight` → `FoundationHeight + SidewalkHeight`）。底面也生成在 Z=0 以保证完整性。
+- **Z 轴惯例：** 地基落在地面（Z=0），向上挤出至 `FoundationHeight`。人行道顶部位于 `FoundationHeight + SidewalkHeight`，底部通过 `SidewalkEmbedDepth` 轻微嵌入地基，以隐藏接触缝隙。
 - **统一缠绕顺序：** UE 使用左手坐标系，**顺时针 (CW)** 缠绕为正面。轮廓为逆时针 (CCW) 生成；所有顶面/墙面三角形的缠绕均转换为 CW 以朝外。
+- **继承轮廓的人行道：** 人行道通过对清洗后的最终地基轮廓连续内偏移生成，因此会保留圆角和逐边道路连接变化，不再退化为矩形 footprint。
 
 #### 蓝图可配置属性
 
@@ -321,8 +322,15 @@ ABuilding
 | `FoundationHeight` | 50 | 地基挤出高度（Z=0 到 Z=50） |
 | `Padding` | 50 | 从建筑边缘到地基边缘的内缩边距 |
 | `CornerRadius` | 40 | 圆角半径（根据相邻边的 padding 自适应） |
-| `SidewalkWidth` | 20 | 人行道环宽（从地基边缘向外） |
+| `CornerSegments` | 8 | 每个圆角的采样段数（限制为 1–32） |
+| `SidewalkWidth` | 20 | 从人行道外沿向内测量的环带宽度 |
+| `SidewalkInset` | 10 | 从最终地基轮廓到人行道外沿的向内偏移 |
 | `SidewalkHeight` | 10 | 人行道在地基顶部之上的挤出高度 |
+| `SidewalkBevelSize` | 4 | 人行道外沿和内沿顶部的水平倒角深度 |
+| `SidewalkBevelHeight` | 4 | 人行道倒角的垂直高度 |
+| `SidewalkEmbedDepth` | 1 | 嵌入地基顶部以消除接缝的深度 |
+| `bCreateFoundationCollision` | `true` | 是否为地基程序网格烘焙碰撞 |
+| `bCreateSidewalkCollision` | `true` | 是否为人行道程序网格烘焙碰撞 |
 | `FoundationMaterial` | — | 地基主体的材质 |
 | `SidewalkMaterial` | — | 人行道环的材质 |
 | `FoundationCollisionProfileName` | `None` | 地基 ProceduralMesh 的碰撞预设。通过 `GetCollisionProfileOptions()` 以下拉菜单形式暴露，列出所有引擎和项目碰撞预设。 |
@@ -339,9 +347,12 @@ ABuilding
 | **顶面** | 从 Outline 顶点在 Z=`FoundationHeight` 进行 N 边形扇形三角剖分 | `(0, i+2, i+1)` CW |
 | **底面** | 同样的 N 边形在 Z=0，法线=`(0,0,-1)` | `(0, i+1, i+2)`（从下方看 CCW→CW） |
 | **墙面四边形** | 每段：`(A_Top, B_Top, B_Bot, A_Bot)`，法线=`(Edge.Y, -Edge.X, 0)`（朝外） | `(0,1,2), (0,2,3)` CW |
-| **人行道外/内墙** | 环绕环形的 4 个外墙 + 4 个内墙四边形 | CW |
-| **人行道顶面** | 4 个梯形组成环形顶面，Z=`FoundationHeight + SidewalkHeight` | `(Base, Base+2, Base+1)` CW |
-| **人行道底面** | 4 个梯形在 Z=`FoundationHeight`，法线=`(0,0,-1)` | `(Base, Base+1, Base+2)`（翻转以朝下） |
+| **人行道轮廓环** | 四条顶点数一致的内偏移轮廓：外/内墙底边与外/内顶边 | 清洗后的 CCW 轮廓 |
+| **人行道外/内墙** | 地基轮廓的每一段对应一个四边形，包含圆角采样段 | 朝外 CW |
+| **人行道倒角** | 斜面四边形连接墙体轮廓与收窄后的顶面轮廓，并使用倾斜法线 | 朝外 CW |
+| **人行道顶面/底面** | 按段封闭环带；底面通过 `SidewalkEmbedDepth` 嵌入地基 | 向上/向下 CW |
+
+所有偏移量与倒角尺寸都会按照当前 footprint 尺寸和人行道宽度进行限制。偏移线交点采用有限长度的斜接回退策略；如果生成的内偏移多边形无效或翻转，则停止生成人行道，避免出现折叠网格。生成两套网格前还会移除轮廓中相邻的重复采样点。
 
 #### 连接状态刷新
 
