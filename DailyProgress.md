@@ -8,6 +8,11 @@
 - Added configurable default traffic-density controls to CityFlow Developer Settings and completed a successful `CityFlow Win64 Development` build.
 - Updated the bilingual GDD and TDD with the difficulty curve, traffic-density design, runtime data flow, and Blueprint configuration contract.
 - Verified the standalone game target successfully; the Editor target compiled all source actions but could not relink `UnrealEditor-CityFlow.dll` while a running Unreal Editor process held the module open.
+- Added player-only placement SFX support with explicit SoundClass override so procedural building and L-system placement remain silent.
+- Added `ABuildingShowcaseDirector` to initialize a real grid and automatically arrange every BuildingDataAsset class through the production `PlaceOnGrid()` path.
+- Added optional all-rotation display, class deduplication, additional building classes, automatic grid expansion, spawn-animation control, and GridVisualizer creation for showcase maps.
+- Added `ACityFlowShowcaseGameMode` to isolate manually authored showcase levels from the normal HUD and automated title-preview flow.
+- Completed a successful `CityFlow Win64 Development` build for the showcase and placement-audio changes.
 
 ## 2026-06-19
 

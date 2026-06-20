@@ -83,7 +83,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Audio")
 	TObjectPtr<USoundBase> BackgroundMusic;
 
-	/** Assign the master SoundClass here so the Sound slider always controls the music. */
+	/** Assign SC_Music here; it should be a child of the master SoundClass controlled by Settings. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Audio")
 	TObjectPtr<USoundClass> BackgroundMusicSoundClass;
 

@@ -1467,6 +1467,25 @@ V = WorldLocation.Y * MaterialTile.Y + MaterialOffset.Y;
 
 ---
 
+### 2.14 建筑展示关卡支持
+
+`ABuildingShowcaseDirector` 位于 `Showcase/Actor`，是手动创建展示地图时唯一必需放入场景的运行时 Actor。
+
+#### 构建流程
+
+1. 从现有 `UBuildingDataAsset` 收集有效 `BuildingClass`，追加 `AdditionalBuildingClasses`，并可选择按类去重。
+2. 每个建筑类生成 `SingleRotation` 指定方向，或展开为全部四种 `EGridRotation`。
+3. 读取类默认对象的占地尺寸，对 90°/270° 交换宽高，再使用 `PaddingCells` 在建筑之间和网格边缘进行行式排版。
+4. 启用 `bAutoExpandGridToFit` 时，在调用 `GridManager::InitGrid()` 前扩展最小宽度和所需高度。
+5. 生成每个 `ABuilding`，设置旋转和动画选项，再调用真实 `PlaceOnGrid()`；由此覆盖正常占地注册、居中、缩放、地基、门口验证和邻居通知行为。
+6. 可在网格初始化后生成 `AGridVisualizer`，显示最终逻辑占地区域。
+
+`BuildShowcase()` 和 `ClearShowcase()` 可供蓝图手动重建。`OnShowcaseBuilt(PlacedBuildingCount, FailedBuildingCount)` 报告部分失败，`GetSpawnedBuildings()` 返回成功放置的实例。
+
+`ACityFlowShowcaseGameMode` 是不创建 HUD 和默认 Pawn、以 spectator 启动玩家的轻量 `AGameModeBase`。将其设为关卡 GameMode Override，可阻止 `ACityFlowHUD` 启动标题预览循环。手动放置的 CameraActor 可设置 Auto Activate for Player 0。
+
+展示系统不修改现有 `ABuilding`、`UGridManager`、`UBuildingDataAsset` 或正常 GameMode 接口。最终运行时视觉验证仍依赖用户手动创建的展示地图。
+
 ## 3. 性能考量
 
 | 关注点 | 策略 |

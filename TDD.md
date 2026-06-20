@@ -1481,6 +1481,25 @@ Grass sparse-density contrast is still not visually obvious even after the sampl
 
 ---
 
+### 2.14 Building Showcase Level Support
+
+`ABuildingShowcaseDirector` lives under `Showcase/Actor` and is the only runtime Actor required in a manually created showcase map.
+
+#### Build Flow
+
+1. Collect valid `BuildingClass` entries from the existing `UBuildingDataAsset`, append `AdditionalBuildingClasses`, and optionally deduplicate classes.
+2. Expand each class into either `SingleRotation` or all four `EGridRotation` values.
+3. Read each class default object's footprint, swap width/height for 90°/270°, and shelf-pack entries with `PaddingCells` around buildings and grid edges.
+4. When `bAutoExpandGridToFit` is enabled, increase the grid's minimum width and required height before calling `GridManager::InitGrid()`.
+5. Spawn each `ABuilding`, assign its rotation and animation setting, then call the real `PlaceOnGrid()` path. This exercises normal footprint registration, centering, scale, foundation, doorway validation, and neighbour notification behavior.
+6. Optionally spawn `AGridVisualizer` after grid initialization so the final logical footprint is visible.
+
+`BuildShowcase()` and `ClearShowcase()` are Blueprint-callable for manual rebuilds. `OnShowcaseBuilt(PlacedBuildingCount, FailedBuildingCount)` reports partial failures, while `GetSpawnedBuildings()` exposes successfully placed instances.
+
+`ACityFlowShowcaseGameMode` is a lightweight `AGameModeBase` with no HUD or default pawn and starts players as spectators. Setting it as the level's GameMode Override prevents `ACityFlowHUD` from launching the title-preview loop. A manually placed CameraActor can use Auto Activate for Player 0.
+
+The showcase does not alter existing `ABuilding`, `UGridManager`, `UBuildingDataAsset`, or normal GameMode interfaces. Runtime visual verification remains dependent on the manually authored showcase map.
+
 ## 3. Performance Considerations
 
 | Concern | Strategy |

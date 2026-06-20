@@ -8,6 +8,11 @@
 - 在 CityFlow Developer Settings 中加入默认车流密度控制参数，并通过 `CityFlow Win64 Development` 构建验证。
 - 更新中英文 GDD 与 TDD，记录难度梯度、车流密度设计、运行时数据流和蓝图配置约定。
 - 独立游戏目标构建验证成功；Editor 目标的全部源码动作均已编译，但运行中的 Unreal Editor 进程占用 `UnrealEditor-CityFlow.dll`，因此无法完成模块重新链接。
+- 新增仅由玩家成功放置触发的音效与显式 SoundClass 覆写，使程序化建筑和 L-system 放置保持静音。
+- 新增 `ABuildingShowcaseDirector`，用于初始化真实网格，并通过正式 `PlaceOnGrid()` 流程自动排列 BuildingDataAsset 中的全部建筑类。
+- 为展示地图加入全旋转展示、建筑类去重、额外类列表、网格自动扩展、生成动画控制和 GridVisualizer 创建选项。
+- 新增 `ACityFlowShowcaseGameMode`，将手动制作的展示关卡与正常 HUD 和标题自动预览流程隔离。
+- 建筑展示与放置音效改动已通过 `CityFlow Win64 Development` 构建验证。
 
 ## 2026-06-19
 

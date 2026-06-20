@@ -10,6 +10,9 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundClass.h"
 
 #define CF_DEBUG(fmt, ...) if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, FString::Printf(TEXT(fmt), ##__VA_ARGS__)); }
 
@@ -206,6 +209,7 @@ void ACityFlowPlayerController::TryPlaceAtCursor()
 
 	if (PreviewActor->PlaceOnGrid(GridPos))
 	{
+		PlayPlacementSound();
 		LastPlacedGridPos = GridPos;
 		PreviewActor = nullptr;
 		SpawnPreview();
@@ -214,6 +218,35 @@ void ACityFlowPlayerController::TryPlaceAtCursor()
 	{
 		PreviewActor->SetActorEnableCollision(false);
 	}
+}
+
+void ACityFlowPlayerController::PlayPlacementSound()
+{
+	if (!PlacementSound)
+	{
+		return;
+	}
+
+	UAudioComponent* AudioComponent = UGameplayStatics::CreateSound2D(
+		GetWorld(),
+		PlacementSound,
+		PlacementSoundVolumeMultiplier,
+		PlacementSoundPitchMultiplier,
+		0.0f,
+		nullptr,
+		false,
+		true);
+	if (!AudioComponent)
+	{
+		return;
+	}
+
+	if (PlacementSoundClass)
+	{
+		AudioComponent->SoundClassOverride = PlacementSoundClass;
+	}
+
+	AudioComponent->Play();
 }
 
 void ACityFlowPlayerController::OnPlaceItemStarted_Implementation()

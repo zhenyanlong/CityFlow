@@ -9,6 +9,8 @@ class UInputAction;
 class UInputMappingContext;
 class AGridPlaceableActor;
 class AVehicleActor;
+class USoundBase;
+class USoundClass;
 
 UCLASS()
 class CITYFLOW_API ACityFlowPlayerController : public APlayerController
@@ -76,6 +78,20 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
 	TSubclassOf<AGridPlaceableActor> PlaceableActorClass;
 
+	/** Played only after a player-driven placement succeeds; procedural placement stays silent. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CityFlow|Audio")
+	TObjectPtr<USoundBase> PlacementSound;
+
+	/** Assign SC_SFX so the Settings SFX slider always controls placement feedback. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CityFlow|Audio")
+	TObjectPtr<USoundClass> PlacementSoundClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CityFlow|Audio", meta = (ClampMin = "0.0"))
+	float PlacementSoundVolumeMultiplier = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CityFlow|Audio", meta = (ClampMin = "0.01"))
+	float PlacementSoundPitchMultiplier = 1.0f;
+
 	UPROPERTY()
 	TObjectPtr<AGridPlaceableActor> PreviewActor;
 
@@ -83,6 +99,7 @@ protected:
 
 private:
 	void TryPlaceAtCursor();
+	void PlayPlacementSound();
 	void TryRemoveAtCursor();
 	void UpdateVehicleHover();
 	void ClearHoveredVehicle();

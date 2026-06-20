@@ -259,3 +259,7 @@ CityFlow is set in a rapidly expanding modern city. The municipal planner (the p
 ## 4. Art Style
 
 The game adopts a low-poly style. Roads are presented as clean gray modules, buildings are color-coded cuboid blocks (residential = blue tones, commercial = warm tones). Vehicles are small rectangular prisms in vibrant colors, making it easy to track their flow across the network. The overall visual approach references the clean, abstract style of *Mini Motorway*, complemented by soft top-down lighting and light-colored ground, keeping the road network structure and traffic flow as the absolute visual focus. The rationale for this style choice: low-poly asset production is inexpensive, visual readability is high, and it can achieve a cohesive, polished level of finish within a one-month development cycle.
+
+### 4.1 Building Showcase Level
+
+A separate non-gameplay showcase level presents every configured building on the same real grid used by Random Mode. Buildings are arranged with readable spacing and may optionally be shown in all four rotations, allowing footprint scale, foundations, doorway orientation, spawn animation, and overall art consistency to be reviewed together. The showcase deliberately excludes the main menu, scoring, traffic, and automated-match state machine.
