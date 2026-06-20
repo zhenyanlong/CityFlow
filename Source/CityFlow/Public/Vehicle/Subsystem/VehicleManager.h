@@ -49,6 +49,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")
 	void SetLaneOffsetFactor(float Factor) { LaneOffsetFactor = FMath::Clamp(Factor, 0.0f, 0.45f); }
 
+	/** Configures a target-population refill policy for the next simulation. */
+	UFUNCTION(BlueprintCallable, Category = "Vehicle|Spawning")
+	void ConfigureSpawnProfile(float InSpawnInterval, int32 InTargetActiveVehicles,
+		int32 InMaxActiveVehicles, int32 InSpawnBurstSize);
+
+	UFUNCTION(BlueprintPure, Category = "Vehicle|Spawning")
+	float GetSpawnInterval() const { return SpawnInterval; }
+
+	UFUNCTION(BlueprintPure, Category = "Vehicle|Spawning")
+	int32 GetSpawnBurstSize() const { return SpawnBurstSize; }
+
 	/** 设置车辆生成数据资产。优先于 DeveloperSettings 中的配置。 */
 	void SetVehicleDataAsset(UVehicleDataAsset* InDataAsset) { ExternalVehicleDataAsset = InDataAsset; }
 
@@ -130,6 +141,10 @@ private:
 	bool bIsActive = false;
 	float TimeSinceLastSpawn = 0.0f;
 	float SpawnInterval = 5.0f;
+	int32 TargetActiveVehicleCount = 24;
+	int32 MaxActiveVehicleCount = 40;
+	int32 SpawnBurstSize = 3;
+	bool bHasSpawnProfileOverride = false;
 
 	TSet<FGridVector> CongestedCells;
 

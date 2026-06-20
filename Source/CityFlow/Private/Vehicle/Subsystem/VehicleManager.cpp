@@ -34,6 +34,13 @@ void UVehicleManager::Tick(float DeltaTime)
 	if (TimeSinceLastSpawn >= SpawnInterval)
 	{
 		TimeSinceLastSpawn = 0.0f;
+		const int32 AvailableSlots = FMath::Min(
+			TargetActiveVehicleCount - ActiveVehicles.Num(),
+			MaxActiveVehicleCount - ActiveVehicles.Num());
+		const int32 SpawnAttempts = FMath::Min(SpawnBurstSize, FMath::Max(0, AvailableSlots));
+
+		for (int32 SpawnAttempt = 0; SpawnAttempt < SpawnAttempts; ++SpawnAttempt)
+		{
 
 		TArray<ABuilding*> Origins, Destinations;
 		CollectOriginDestinations(Origins, Destinations);
@@ -109,6 +116,7 @@ void UVehicleManager::Tick(float DeltaTime)
 					UnblockedOrigins.Num(), Destinations.Num());
 			}
 		}
+		}
 	}
 
 	for (int32 i = ActiveVehicles.Num() - 1; i >= 0; --i)
@@ -156,9 +164,12 @@ void UVehicleManager::StartSpawning()
 	bIsActive = true;
 
 	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
-	if (Settings)
+	if (Settings && !bHasSpawnProfileOverride)
 	{
-		SpawnInterval = Settings->VehicleSpawnInterval;
+		SpawnInterval = FMath::Max(0.1f, Settings->VehicleSpawnInterval);
+		TargetActiveVehicleCount = FMath::Max(1, Settings->TargetActiveVehicleCount);
+		MaxActiveVehicleCount = FMath::Max(TargetActiveVehicleCount, Settings->MaxVehicleCount);
+		SpawnBurstSize = FMath::Max(1, Settings->MaxSpawnBurstSize);
 	}
 
 	UWorld* World = GetWorld();
@@ -199,6 +210,16 @@ void UVehicleManager::StartSpawning()
 	TimeSinceLastSpawn = SpawnInterval;
 }
 
+void UVehicleManager::ConfigureSpawnProfile(float InSpawnInterval, int32 InTargetActiveVehicles,
+	int32 InMaxActiveVehicles, int32 InSpawnBurstSize)
+{
+	SpawnInterval = FMath::Max(0.1f, InSpawnInterval);
+	TargetActiveVehicleCount = FMath::Max(1, InTargetActiveVehicles);
+	MaxActiveVehicleCount = FMath::Max(TargetActiveVehicleCount, InMaxActiveVehicles);
+	SpawnBurstSize = FMath::Clamp(InSpawnBurstSize, 1, 10);
+	bHasSpawnProfileOverride = true;
+}
+
 void UVehicleManager::StopSpawning()
 {
 	UWorld* World = GetWorld();
@@ -226,6 +247,7 @@ void UVehicleManager::ClearAllVehicles()
 	ArrivedVehicles.Empty();
 	CachedSpawnEntries.Empty();
 	TotalSpawnWeight = 0.0f;
+	bHasSpawnProfileOverride = false;
 }
 
 AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Destination)
@@ -236,11 +258,10 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 		return nullptr;
 	}
 
-	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
-	if (Settings && ActiveVehicles.Num() >= Settings->MaxVehicleCount)
+	if (ActiveVehicles.Num() >= MaxActiveVehicleCount)
 	{
 		UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: max vehicle count reached (%d/%d)"),
-			ActiveVehicles.Num(), Settings->MaxVehicleCount);
+			ActiveVehicles.Num(), MaxActiveVehicleCount);
 		return nullptr;
 	}
 

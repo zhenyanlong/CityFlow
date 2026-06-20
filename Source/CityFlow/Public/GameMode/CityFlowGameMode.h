@@ -30,6 +30,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void StartRandomPlanningGame();
 
+	/** Starts Random Mode with an explicit, Blueprint-configurable difficulty profile. */
+	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
+	void StartRandomPlanningGameWithDifficulty(ECityFlowDifficulty Difficulty);
+
 	/** 回到主菜单 —— 清理所有 Actor 和状态 */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void ReturnToMainMenu();
@@ -70,6 +74,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "CityFlow|Game")
 	bool IsCurrentMatchMenuPreview() const { return bCurrentMatchIsMenuPreview; }
 
+	UFUNCTION(BlueprintPure, Category = "CityFlow|Difficulty")
+	FCityFlowDifficultyProfile GetDifficultyProfile(ECityFlowDifficulty Difficulty) const;
+
+	UFUNCTION(BlueprintPure, Category = "CityFlow|Difficulty")
+	ECityFlowDifficulty GetActiveDifficulty() const { return ActiveDifficulty; }
+
+	UFUNCTION(BlueprintPure, Category = "CityFlow|Difficulty")
+	float GetActiveSimulationDuration() const { return ActiveSimulationDuration; }
+
+	UFUNCTION(BlueprintPure, Category = "CityFlow|Difficulty")
+	float GetActiveVehicleSpawnInterval() const { return ActiveVehicleSpawnInterval; }
+
+	UFUNCTION(BlueprintPure, Category = "CityFlow|Difficulty")
+	int32 GetActiveVehicleSpawnBurstSize() const { return ActiveVehicleSpawnBurstSize; }
+
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void InitializeDefaultScene();
 
@@ -103,6 +122,17 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Buildings")
 	int32 DefaultBuildingCount = 8;
+
+	/** Easy gives generous road budget per building and lighter traffic pressure. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Difficulty")
+	FCityFlowDifficultyProfile EasyDifficultyProfile;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Difficulty")
+	FCityFlowDifficultyProfile MediumDifficultyProfile;
+
+	/** Hard increases map complexity and traffic while reducing budget per building. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Difficulty")
+	FCityFlowDifficultyProfile HardDifficultyProfile;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Grid")
 	int32 DefaultGridWidth = 24;
@@ -155,6 +185,8 @@ private:
 	void HandleAutoLSystemFinished(bool bAllConnected);
 
 	void ResetRuntimeScene();
+	void ResetActiveMatchSettings();
+	void ApplyDifficultyProfile(ECityFlowDifficulty Difficulty);
 	void PickRandomSceneParameters(int32& OutGridWidth, int32& OutGridHeight, int32& OutBuildingCount, int32& OutRoadBudget, int32& OutRandomSeed) const;
 	void InitializeScene(int32 GridWidth, int32 GridHeight, float CellSize, int32 BuildingCount, int32 RoadBudget, int32 RandomSeed);
 	void ConfigureLSystemForActiveScene();
@@ -172,6 +204,12 @@ private:
 	int32 PlayerBudget = 0;
 	int32 LSystemBudget = 0;
 	float SimulationTimeRemaining = 0.0f;
+	float ActiveSimulationDuration = 180.0f;
+	float ActiveVehicleSpawnInterval = 0.65f;
+	int32 ActiveVehicleTargetCount = 26;
+	int32 ActiveVehicleSpawnBurstSize = 3;
+	int32 ActiveMaxVehicleCount = 36;
+	ECityFlowDifficulty ActiveDifficulty = ECityFlowDifficulty::Medium;
 	bool bCurrentMatchIsMenuPreview = false;
 	bool bAutoStartSimulationAfterLSystem = false;
 

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
+#include "GameMode/Types/CityFlowGameTypes.h"
 #include "CityFlowHUD.generated.h"
 
 class UCityFlowStartWidget;
@@ -10,6 +11,7 @@ class UCityFlowPauseWidget;
 class UCityFlowEvaluationWidget;
 class UCityFlowTutorialWidget;
 class UCityFlowSettingsWidget;
+class UCityFlowDifficultyWidget;
 class UAudioComponent;
 class USoundBase;
 class USoundClass;
@@ -70,6 +72,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
 	TSubclassOf<UCityFlowSettingsWidget> SettingsWidgetClass;
 
+	/** Optional custom Blueprint. When unset, the native difficulty widget builds a usable fallback UI. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
+	TSubclassOf<UCityFlowDifficultyWidget> DifficultyWidgetClass;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
 	bool bEnableMainMenuPreviewMatch = true;
 
@@ -111,6 +117,9 @@ protected:
 	void HandleQuitGameClicked();
 
 	UFUNCTION()
+	void HandleDifficultySelected(ECityFlowDifficulty Difficulty);
+
+	UFUNCTION()
 	void HandleMenuPanelBackClicked();
 
 	UFUNCTION()
@@ -120,7 +129,8 @@ private:
 	// ---- Widget 创建 / 切换 ----
 	void ShowStartWidget();
 
-	void ShowGameWidgetRandom();
+	void ShowGameWidgetRandom(ECityFlowDifficulty Difficulty);
+	void ShowDifficultyWidget();
 	void ShowTutorialWidget();
 	void ShowSettingsWidget();
 	void ShowPauseOverlay();
@@ -146,6 +156,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UCityFlowSettingsWidget> SettingsWidget;
+
+	UPROPERTY()
+	TObjectPtr<UCityFlowDifficultyWidget> DifficultyWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> BackgroundMusicComponent;

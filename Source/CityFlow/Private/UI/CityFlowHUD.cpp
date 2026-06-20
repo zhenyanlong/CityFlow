@@ -5,6 +5,7 @@
 #include "UI/CityFlowEvaluationWidget.h"
 #include "UI/Widget/CityFlowTutorialWidget.h"
 #include "UI/Widget/CityFlowSettingsWidget.h"
+#include "UI/Widget/CityFlowDifficultyWidget.h"
 #include "GameMode/CityFlowGameMode.h"
 #include "Scoring/Subsystem/ScoringManager.h"
 #include "Grid/GridManager.h"
@@ -76,6 +77,8 @@ void ACityFlowHUD::ShowStartWidget()
 		TutorialWidget->RemoveFromParent();
 	if (SettingsWidget && SettingsWidget->IsInViewport())
 		SettingsWidget->RemoveFromParent();
+	if (DifficultyWidget && DifficultyWidget->IsInViewport())
+		DifficultyWidget->RemoveFromParent();
 	HidePauseOverlay();
 
 	if (!StartWidget && StartWidgetClass)
@@ -286,7 +289,7 @@ void ACityFlowHUD::HandleEvaluationReturn()
 
 void ACityFlowHUD::HandleRandomModeClicked()
 {
-	ShowGameWidgetRandom();
+	ShowDifficultyWidget();
 }
 
 void ACityFlowHUD::HandleTutorialClicked()
@@ -313,18 +316,26 @@ void ACityFlowHUD::HandleMenuPanelBackClicked()
 	ShowStartWidget();
 }
 
-void ACityFlowHUD::HandleRestartClicked()
+void ACityFlowHUD::HandleDifficultySelected(ECityFlowDifficulty Difficulty)
 {
-	ShowGameWidgetRandom();
+	ShowGameWidgetRandom(Difficulty);
 }
 
-void ACityFlowHUD::ShowGameWidgetRandom()
+void ACityFlowHUD::HandleRestartClicked()
+{
+	const ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode());
+	ShowGameWidgetRandom(GM ? GM->GetActiveDifficulty() : ECityFlowDifficulty::Medium);
+}
+
+void ACityFlowHUD::ShowGameWidgetRandom(ECityFlowDifficulty Difficulty)
 {
 	// 隐藏 StartWidget
 	if (StartWidget && StartWidget->IsInViewport())
 		StartWidget->RemoveFromParent();
 	if (EvaluationWidget && EvaluationWidget->IsInViewport())
 		EvaluationWidget->RemoveFromParent();
+	if (DifficultyWidget && DifficultyWidget->IsInViewport())
+		DifficultyWidget->RemoveFromParent();
 	HidePauseOverlay();
 
 	if (!GameWidget && GameWidgetClass)
@@ -336,7 +347,7 @@ void ACityFlowHUD::ShowGameWidgetRandom()
 	ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode());
 	if (!GM) return;
 
-	GM->StartRandomPlanningGame();
+	GM->StartRandomPlanningGameWithDifficulty(Difficulty);
 
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
@@ -352,6 +363,30 @@ void ACityFlowHUD::ShowGameWidgetRandom()
 		PC->SetInputMode(InputMode);
 		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
 			CFPC->EnablePlacement();
+	}
+}
+
+void ACityFlowHUD::ShowDifficultyWidget()
+{
+	if (StartWidget && StartWidget->IsInViewport())
+		StartWidget->RemoveFromParent();
+
+	if (!DifficultyWidget)
+	{
+		UClass* WidgetClass = DifficultyWidgetClass
+			? DifficultyWidgetClass.Get()
+			: UCityFlowDifficultyWidget::StaticClass();
+		DifficultyWidget = CreateWidget<UCityFlowDifficultyWidget>(GetWorld(), WidgetClass);
+	}
+
+	if (DifficultyWidget && !DifficultyWidget->IsInViewport())
+	{
+		DifficultyWidget->OnDifficultySelected.RemoveAll(this);
+		DifficultyWidget->OnDifficultySelected.AddDynamic(this, &ACityFlowHUD::HandleDifficultySelected);
+		DifficultyWidget->OnBackClicked.RemoveAll(this);
+		DifficultyWidget->OnBackClicked.AddDynamic(this, &ACityFlowHUD::HandleMenuPanelBackClicked);
+		DifficultyWidget->RefreshProfileDetails();
+		DifficultyWidget->AddToViewport();
 	}
 }
 

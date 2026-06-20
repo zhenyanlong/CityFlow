@@ -26,11 +26,36 @@ DEFINE_LOG_CATEGORY_STATIC(LogCityFlowGM, Log, All);
 ACityFlowGameMode::ACityFlowGameMode()
 {
 	PrimaryActorTick.bCanEverTick = true;
+
+	EasyDifficultyProfile.BuildingCount = 8;
+	EasyDifficultyProfile.VehicleSpawnInterval = 0.9f;
+	EasyDifficultyProfile.SimulationDuration = 120.0f;
+	EasyDifficultyProfile.RoadBudget = 220;
+	EasyDifficultyProfile.TargetActiveVehicles = 16;
+	EasyDifficultyProfile.SpawnBurstSize = 2;
+	EasyDifficultyProfile.MaxActiveVehicles = 24;
+
+	MediumDifficultyProfile.BuildingCount = 12;
+	MediumDifficultyProfile.VehicleSpawnInterval = 0.65f;
+	MediumDifficultyProfile.SimulationDuration = 180.0f;
+	MediumDifficultyProfile.RoadBudget = 230;
+	MediumDifficultyProfile.TargetActiveVehicles = 26;
+	MediumDifficultyProfile.SpawnBurstSize = 3;
+	MediumDifficultyProfile.MaxActiveVehicles = 36;
+
+	HardDifficultyProfile.BuildingCount = 16;
+	HardDifficultyProfile.VehicleSpawnInterval = 0.45f;
+	HardDifficultyProfile.SimulationDuration = 240.0f;
+	HardDifficultyProfile.RoadBudget = 240;
+	HardDifficultyProfile.TargetActiveVehicles = 38;
+	HardDifficultyProfile.SpawnBurstSize = 4;
+	HardDifficultyProfile.MaxActiveVehicles = 50;
 }
 
 void ACityFlowGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	ResetActiveMatchSettings();
 
 	ActiveTotalRoadBudget = TotalRoadBudget;
 	RemainingBudget = ActiveTotalRoadBudget;
@@ -47,6 +72,7 @@ void ACityFlowGameMode::StartNewGame()
 		return;
 
 	ResetRuntimeScene();
+	ResetActiveMatchSettings();
 	bCurrentMatchIsMenuPreview = false;
 	bAutoStartSimulationAfterLSystem = false;
 	InitializeScene(DefaultGridWidth, DefaultGridHeight, DefaultCellSize, DefaultBuildingCount, TotalRoadBudget, INDEX_NONE);
@@ -56,6 +82,7 @@ void ACityFlowGameMode::StartNewGame()
 void ACityFlowGameMode::StartAutomatedRandomMatch(bool bAsMenuPreview)
 {
 	ResetRuntimeScene();
+	ResetActiveMatchSettings();
 
 	bCurrentMatchIsMenuPreview = bAsMenuPreview;
 	bAutoStartSimulationAfterLSystem = true;
@@ -81,7 +108,13 @@ void ACityFlowGameMode::StartAutomatedRandomMatch(bool bAsMenuPreview)
 
 void ACityFlowGameMode::StartRandomPlanningGame()
 {
+	StartRandomPlanningGameWithDifficulty(ECityFlowDifficulty::Medium);
+}
+
+void ACityFlowGameMode::StartRandomPlanningGameWithDifficulty(ECityFlowDifficulty Difficulty)
+{
 	ResetRuntimeScene();
+	ApplyDifficultyProfile(Difficulty);
 
 	bCurrentMatchIsMenuPreview = false;
 	bAutoStartSimulationAfterLSystem = false;
@@ -92,6 +125,10 @@ void ACityFlowGameMode::StartRandomPlanningGame()
 	int32 MatchRoadBudget = TotalRoadBudget;
 	int32 RandomSeed = INDEX_NONE;
 	PickRandomSceneParameters(MatchGridWidth, MatchGridHeight, MatchBuildingCount, MatchRoadBudget, RandomSeed);
+
+	const FCityFlowDifficultyProfile Profile = GetDifficultyProfile(Difficulty);
+	MatchBuildingCount = Profile.BuildingCount;
+	MatchRoadBudget = Profile.RoadBudget;
 
 	InitializeScene(
 		FMath::Max(4, MatchGridWidth),
@@ -295,6 +332,11 @@ void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
 		{
 			VM->SetDrivingSide(DrivingSide);
 			VM->SetLaneOffsetFactor(LaneOffsetFactor);
+			VM->ConfigureSpawnProfile(
+				ActiveVehicleSpawnInterval,
+				ActiveVehicleTargetCount,
+				ActiveMaxVehicleCount,
+				ActiveVehicleSpawnBurstSize);
 
 			// 优先使用 GameMode 上的 VehicleDataAsset，否则 VehicleManager 回退到 DeveloperSettings
 			if (VehicleDataAsset)
@@ -310,12 +352,12 @@ void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
 			SM->StartScoring();
 		}
 
-		SimulationTimeRemaining = SimulationDuration;
+		SimulationTimeRemaining = ActiveSimulationDuration;
 		GetWorldTimerManager().SetTimer(
 			SimulationTimerHandle,
 			this,
 			&ACityFlowGameMode::OnSimulationTimerExpired,
-			SimulationDuration,
+			ActiveSimulationDuration,
 			false
 		);
 
@@ -479,6 +521,45 @@ void ACityFlowGameMode::HandleAutoLSystemFinished(bool bAllConnected)
 	{
 		StartSimulationPhase();
 	}
+}
+
+FCityFlowDifficultyProfile ACityFlowGameMode::GetDifficultyProfile(ECityFlowDifficulty Difficulty) const
+{
+	switch (Difficulty)
+	{
+	case ECityFlowDifficulty::Easy:
+		return EasyDifficultyProfile;
+	case ECityFlowDifficulty::Hard:
+		return HardDifficultyProfile;
+	case ECityFlowDifficulty::Medium:
+	default:
+		return MediumDifficultyProfile;
+	}
+}
+
+void ACityFlowGameMode::ResetActiveMatchSettings()
+{
+	ActiveDifficulty = ECityFlowDifficulty::Medium;
+	ActiveSimulationDuration = FMath::Max(1.0f, SimulationDuration);
+
+	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
+	ActiveVehicleSpawnInterval = Settings ? FMath::Max(0.1f, Settings->VehicleSpawnInterval) : 0.65f;
+	ActiveVehicleTargetCount = Settings ? FMath::Max(1, Settings->TargetActiveVehicleCount) : 24;
+	ActiveVehicleSpawnBurstSize = Settings ? FMath::Max(1, Settings->MaxSpawnBurstSize) : 3;
+	ActiveMaxVehicleCount = Settings
+		? FMath::Max(ActiveVehicleTargetCount, Settings->MaxVehicleCount)
+		: 40;
+}
+
+void ACityFlowGameMode::ApplyDifficultyProfile(ECityFlowDifficulty Difficulty)
+{
+	const FCityFlowDifficultyProfile Profile = GetDifficultyProfile(Difficulty);
+	ActiveDifficulty = Difficulty;
+	ActiveSimulationDuration = FMath::Max(1.0f, Profile.SimulationDuration);
+	ActiveVehicleSpawnInterval = FMath::Max(0.1f, Profile.VehicleSpawnInterval);
+	ActiveVehicleTargetCount = FMath::Max(1, Profile.TargetActiveVehicles);
+	ActiveVehicleSpawnBurstSize = FMath::Max(1, Profile.SpawnBurstSize);
+	ActiveMaxVehicleCount = FMath::Max(ActiveVehicleTargetCount, Profile.MaxActiveVehicles);
 }
 
 void ACityFlowGameMode::ResetRuntimeScene()

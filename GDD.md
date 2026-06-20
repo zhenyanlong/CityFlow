@@ -36,6 +36,22 @@ The title screen presents **Random Mode**, **Tutorial**, **Settings**, and **Qui
 - Master-menu background music plays through the project's sound-class hierarchy; SFX volume affects sounds routed to the SFX class or its children.
 - Runtime language switching uses Unreal Engine's native culture/localization system. All player-facing C++ text uses localizable `FText` resources, and tutorial text remains asset-driven for localization gathering.
 
+### 1.3 Random Mode Difficulty and Traffic Pressure
+
+Selecting **Random Mode** opens a difficulty panel before the city is generated. Difficulty changes four player-facing match parameters together: building count, vehicle spawn interval, simulation duration, and total road budget.
+
+The panel uses one shared details area: Medium is shown initially, and hovering Easy, Medium, or Hard previews that preset's four values before the player confirms by clicking.
+
+| Difficulty | Buildings | Vehicle Spawn Interval | Runtime | Road Budget | Budget per Building |
+|---|---:|---:|---:|---:|---:|
+| Easy | 8 | 0.90 s | 120 s | 220 | 27.5 |
+| Medium | 12 | 0.65 s | 180 s | 230 | 19.2 |
+| Hard | 16 | 0.45 s | 240 s | 240 | 15.0 |
+
+Absolute budget rises slightly on harder presets so larger maps remain solvable, but building count and traffic pressure rise faster. The effective budget available per building therefore falls at each step.
+
+Traffic generation aims for a preset-dependent number of vehicles currently travelling on the road network. At each spawn pulse, the system refills several free slots until the target population is reached, while respecting origin blockage and a hard vehicle cap. This keeps roads visually active after short trips finish without allowing unbounded vehicle growth.
+
 ## 2. Win / Lose Conditions
 
 The game uses a scoring system. There is no traditional "victory" or "defeat"; instead, the final total score measures the player's planning ability. The score is designed as a **planning evaluation report** rather than a simple real-time arcade counter. During simulation, the HUD only needs to surface immediate feedback for vehicle arrivals and deaths; the full score breakdown appears at evaluation time.

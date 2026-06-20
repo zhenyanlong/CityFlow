@@ -2,6 +2,7 @@
 #include "Vehicle/Subsystem/VehicleManager.h"
 #include "Vehicle/Actor/VehicleActor.h"
 #include "Vehicle/Subsystem/CityFlowDeveloperSettings.h"
+#include "GameMode/CityFlowGameMode.h"
 #include "Grid/GridManager.h"
 #include "Grid/Building.h"
 #include "Engine/World.h"
@@ -320,8 +321,15 @@ void UScoringManager::ComputeFinalScore()
 	}
 
 	const float CompletionRatio = NewBreakdown.ArrivalRate * (1.0f - NewBreakdown.DeathRate);
-	const float SimulationDuration = Settings ? Settings->SimulationDurationSeconds : 180.0f;
-	const float VehicleSpawnInterval = Settings ? Settings->VehicleSpawnInterval : 5.0f;
+	const ACityFlowGameMode* CityFlowGameMode = GetWorld()
+		? Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode())
+		: nullptr;
+	const float SimulationDuration = CityFlowGameMode
+		? CityFlowGameMode->GetActiveSimulationDuration()
+		: (Settings ? Settings->SimulationDurationSeconds : 180.0f);
+	const float VehicleSpawnInterval = CityFlowGameMode
+		? CityFlowGameMode->GetActiveVehicleSpawnInterval()
+		: (Settings ? Settings->VehicleSpawnInterval : 5.0f);
 	const float ExpectedSpawnedVehicles = VehicleSpawnInterval > KINDA_SMALL_NUMBER
 		? SimulationDuration / VehicleSpawnInterval
 		: 0.0f;

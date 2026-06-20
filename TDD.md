@@ -967,7 +967,16 @@ A new helper `GetDoorwayConnectionPointForPosition(Doorway, BasePos)` computes a
 
 #### Vehicle Spawning
 
-`UVehicleManager::Tick()` spawns vehicles at `SpawnInterval` intervals (default 5s). Each tick picks a random origin and destination, calls `SpawnVehicle()` which computes an A\* path and spawns the actor. If no path exists, the vehicle is silently skipped; no alert is raised yet (future).
+`UVehicleManager` now uses a **target-population refill policy** instead of assuming that one vehicle per interval is enough to keep the network busy:
+
+1. `ConfigureSpawnProfile(Interval, Target, Max, Burst)` receives the active match parameters from GameMode before `StartSpawning()`.
+2. Every `SpawnInterval`, available slots are `min(Target - ActiveCount, Max - ActiveCount)`.
+3. The manager attempts up to `SpawnBurstSize` successful spawns during that pulse.
+4. Origins are re-collected and checked with `IsBuildingBlocked()` for each burst attempt, preventing multiple vehicles from stacking at one doorway.
+5. Each attempt shuffles destinations and falls back across other origins when the first origin/destination pair has no valid A\* route.
+6. Spawning pauses automatically at the target population and resumes as vehicles arrive or die; `MaxActiveVehicleCount` remains the hard safety cap.
+
+Non-difficulty matches use `UCityFlowDeveloperSettings` defaults (`VehicleSpawnInterval`, `TargetActiveVehicleCount`, `MaxSpawnBurstSize`, `MaxVehicleCount`). Random Mode difficulty profiles override all four runtime values.
 
 #### Scoring Mechanism (UScoringManager)
 
@@ -1137,7 +1146,7 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 | Phase | Transition | Actions |
 |---|---|---|
-| **None** → **Planning** | `StartNewGame()` (normal start) or `StartRandomPlanningGame()` (Random Mode / Evaluation restart) | Init grid, spawn buildings, set budget; random planning games also randomize seed, grid size, building count, and road budget |
+| **None** → **Planning** | `StartNewGame()` or `StartRandomPlanningGameWithDifficulty()` | Init grid, spawn buildings, set budget; difficulty-driven games randomize seed/grid size and apply the selected building, budget, duration, and traffic profile |
 | **Planning** → **Simulating** | `StartSimulationPhase()` (UI/Cheat) | Lock road placement, start VehicleManager spawning + ScoringManager, start simulation timer |
 | **Simulating** → **Evaluation** | Timer expiry or `EndSimulationPhase()` (UI/Cheat) | Stop spawning, finalize scoring, broadcast events |
 | **Evaluation** → **Planning** | `RestartPlanningPhase()` (UI/Cheat) | Clear vehicles, reset budget, re-enable placement |
@@ -1151,7 +1160,19 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 
 #### Random Planning Game
 
-`StartRandomPlanningGame()` is the player-facing Random Mode flow. It uses the same randomized scene parameter helper as the automated preview, but it only generates scenery and buildings, transitions to Planning, and leaves road placement, L-system triggering, and simulation start under player control.
+`StartRandomPlanningGameWithDifficulty(ECityFlowDifficulty)` is the player-facing Random Mode flow. It keeps the randomized seed and grid-size helper, then replaces building count and road budget with the selected `FCityFlowDifficultyProfile`. It generates scenery/buildings, transitions to Planning, and leaves road placement, L-system triggering, and simulation start under player control. The legacy no-argument `StartRandomPlanningGame()` remains Blueprint-compatible and selects Medium.
+
+#### Difficulty Profiles and Active Match Settings
+
+`EasyDifficultyProfile`, `MediumDifficultyProfile`, and `HardDifficultyProfile` are editable on the GameMode Blueprint. Each profile contains the four player-facing values plus internal density controls:
+
+| Profile | Buildings | Spawn Interval | Duration | Budget | Target Active | Burst | Hard Cap |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Easy | 8 | 0.90 s | 120 s | 220 | 16 | 2 | 24 |
+| Medium | 12 | 0.65 s | 180 s | 230 | 26 | 3 | 36 |
+| Hard | 16 | 0.45 s | 240 s | 240 | 38 | 4 | 50 |
+
+`ApplyDifficultyProfile()` copies the selection into active-match fields rather than mutating project defaults. Simulation timers and the HUD countdown read `GetActiveSimulationDuration()`, VehicleManager receives the active traffic profile on the Planning-to-Simulating transition, and final-score runtime demand uses the active duration/spawn interval. Automated menu previews call `ResetActiveMatchSettings()` and continue using DeveloperSettings/default GameMode values.
 
 **New APIs:**
 
@@ -1160,6 +1181,8 @@ A **shared road budget** pool is tracked by `GridManager::RoadBudget`. Both play
 | `StartNewGame()` | Initialises default scene and transitions to Planning. Guards: only from `None` phase. |
 | `StartAutomatedRandomMatch(bool bAsMenuPreview)` | Creates a randomized automated match for title-screen background simulation; auto-generates roads and starts simulation after L-system completion. |
 | `StartRandomPlanningGame()` | Creates a randomized player Planning game; generates scenery/buildings only and does not auto-generate roads or start simulation. |
+| `StartRandomPlanningGameWithDifficulty(ECityFlowDifficulty)` | Applies the selected difficulty profile, then creates a randomized player Planning game. |
+| `GetDifficultyProfile(ECityFlowDifficulty)` | Returns the Blueprint-configurable profile used by the difficulty UI and match setup. |
 | `ReturnToMainMenu()` | Full cleanup: stops spawning/vehicles/scoring/timer, destroys all `AGridPlaceableActor` via `TActorIterator`, re-initialises grid, calls `LSystemManager::AbortGeneration()`, returns phase to `None`. |
 
 **Removed from GameMode:** `GameWidgetClass` and `GameWidgetInstance` — HUD is now the sole widget lifecycle owner.
@@ -1190,7 +1213,7 @@ CityFlow's UI is managed by **ACityFlowHUD** as the sole widget lifecycle owner.
 ```
 StartWidget (Main Menu)
   ├─ ShowStartWidget → GameMode::StartAutomatedRandomMatch(true) for animated title background
-  ├─ Btn_RandomMode → HUD::ShowGameWidgetRandom() → GameMode::StartRandomPlanningGame() + EnablePlacement
+  ├─ Btn_RandomMode → DifficultyWidget → HUD::ShowGameWidgetRandom(Difficulty) → GameMode::StartRandomPlanningGameWithDifficulty() + EnablePlacement
   ├─ Btn_Tutorial → TutorialWidget → Btn_Back → StartWidget
   ├─ Btn_Settings → SettingsWidget → Btn_Back → StartWidget
   ├─ Btn_QuitGame → Quit
@@ -1207,14 +1230,15 @@ PauseWidget (Overlay, ZOrder=100)
   ↓
 EvaluationWidget (结算)
   ├─ Btn_BackToMain → HUD::HandleEvaluationReturn() → StartWidget
-  └─ Btn_Restart → HUD::HandleRestartClicked() → ShowGameWidgetRandom() → randomized Planning game
+  └─ Btn_Restart → HUD::HandleRestartClicked() → ShowGameWidgetRandom(CurrentDifficulty) → randomized Planning game
 ```
 
 **ACityFlowHUD** — central widget manager:
 - `BeginPlay()` shows `StartWidget` (main menu); listens to `GameMode::OnSimulationPhaseEnd` to auto-show `EvaluationWidget`.
 - `ShowStartWidget()` disables placement, enables main-menu camera yaw rotation, and can start an automated randomized preview match when `bEnableMainMenuPreviewMatch` is true.
 - If a menu preview simulation ends, `HandleSimulationEnded()` starts another preview match instead of showing the Evaluation widget.
-- `ShowGameWidgetRandom()` starts a randomized Planning game through `StartRandomPlanningGame()`, disables title camera rotation, and enables placement.
+- `ShowDifficultyWidget()` replaces StartWidget and keeps the animated preview running; the selected enum is forwarded to `ShowGameWidgetRandom(Difficulty)`.
+- `ShowGameWidgetRandom(Difficulty)` starts a randomized Planning game through `StartRandomPlanningGameWithDifficulty()`, disables title camera rotation, and enables placement.
 - `ShowTutorialWidget()` / `ShowSettingsWidget()` replace the StartWidget without destroying the running menu preview; their shared back handler returns to the title screen.
 - At startup HUD creates the configured Settings widget and calls `LoadAndApplySettings()` before showing the menu, then starts the configured looping background music through an explicit SoundClass override.
 - `TogglePause()` / `ShowPauseOverlay()` / `HidePauseOverlay()` — pause with `FInputModeUIOnly`, resume with `FInputModeGameAndUI`.
@@ -1232,6 +1256,7 @@ EvaluationWidget (结算)
 | `EvaluationWidgetClass` | `TSubclassOf<UCityFlowEvaluationWidget>` | Results screen |
 | `TutorialWidgetClass` | `TSubclassOf<UCityFlowTutorialWidget>` | Tutorial topic browser |
 | `SettingsWidgetClass` | `TSubclassOf<UCityFlowSettingsWidget>` | Audio/language settings |
+| `DifficultyWidgetClass` | `TSubclassOf<UCityFlowDifficultyWidget>` | Optional custom Random Mode difficulty picker; native fallback is used when unset |
 | `bEnableMainMenuPreviewMatch` | `bool` | Enables automated randomized background simulation on the title screen |
 | `BackgroundMusic` | `USoundBase*` | Looping title/game background music |
 | `BackgroundMusicSoundClass` | `USoundClass*` | Explicit music routing, normally `SC_Music` under the master class |
@@ -1255,7 +1280,7 @@ EvaluationWidget (结算)
 - `Txt_TotalScore` — total score display
 - `Txt_Arrivals`, `Txt_Penalty`, `Txt_HighScore`, `Txt_SimulationTime` — BindWidgetOptional detail rows
 - `Btn_BackToMain` → broadcasts `OnBackToMainClicked` (HUD → `HandleEvaluationReturn` → main menu)
-- `Btn_Restart` → broadcasts `OnRestartClicked` (HUD → `HandleRestartClicked` → `ShowGameWidgetRandom()` → randomized Planning game)
+- `Btn_Restart` → broadcasts `OnRestartClicked` (HUD → `HandleRestartClicked` → `ShowGameWidgetRandom(CurrentDifficulty)` → randomized Planning game)
 
 **Public API:**
 | Method | Description |
@@ -1287,13 +1312,22 @@ EvaluationWidget (结算)
 #### CityFlowStartWidget
 
 Main menu widget with `BindWidget` controls:
-- `Btn_RandomMode` → broadcasts `OnRandomModeClicked` (HUD listens → `HandleRandomModeClicked` → `ShowGameWidgetRandom()` — generates a random Planning game with scenery/buildings only, then enables placement)
+- `Btn_RandomMode` → broadcasts `OnRandomModeClicked` (HUD → `ShowDifficultyWidget()`; selecting a preset calls `ShowGameWidgetRandom(Difficulty)` and then enables placement)
 - `Btn_Tutorial` → broadcasts `OnTutorialClicked` (HUD → `ShowTutorialWidget()`)
 - `Btn_Settings` → broadcasts `OnSettingsClicked` (HUD → `ShowSettingsWidget()`)
 - `Btn_QuitGame` → broadcasts `OnQuitGameClicked`
 - `Txt_Title`, `Txt_Version` (BindWidgetOptional) — display text
 
 The legacy `Btn_StartGame` is no longer part of the flow; the native base collapses an old widget with that name for backward compatibility. `ShowGameWidgetRandom()` uses `FInputModeGameAndUI` with `SetHideCursorDuringCapture(false)` to prevent the cursor from vanishing during click-and-drag.
+
+#### Difficulty Widget
+
+- `UCityFlowDifficultyWidget` exposes optional `Btn_Easy`, `Btn_Medium`, `Btn_Hard`, `Btn_Back`, and one shared `Txt_DifficultyDetails` binding.
+- The shared details block defaults to Medium and switches to the corresponding profile when a difficulty button receives hover focus.
+- If `DifficultyWidgetClass` is unset, HUD creates the native class and `BuildFallbackLayout()` constructs a complete localizable selector at runtime.
+- A custom `WBP_DifficultyWidget` can inherit the native class and bind the named controls; profile detail text is populated from GameMode, so Blueprint labels remain consistent with actual runtime values.
+- `OnDifficultySelected(ECityFlowDifficulty)` returns the selection to HUD. Back returns to StartWidget without terminating the animated menu-preview match.
+- Evaluation Restart reuses the current match difficulty; entering Random Mode from the main menu opens the selector again.
 
 #### Tutorial Data and Widget
 

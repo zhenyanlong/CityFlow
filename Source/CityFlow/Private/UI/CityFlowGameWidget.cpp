@@ -680,7 +680,7 @@ void UCityFlowGameWidget::StartCountdown()
 	ACityFlowGameMode* GM = GetCityFlowGameMode();
 	if (!GM) return;
 
-	CountdownSeconds = FMath::CeilToInt(GM->SimulationDuration);
+	CountdownSeconds = FMath::CeilToInt(GM->GetActiveSimulationDuration());
 	UpdateCountdownText();
 
 	GetWorld()->GetTimerManager().SetTimer(

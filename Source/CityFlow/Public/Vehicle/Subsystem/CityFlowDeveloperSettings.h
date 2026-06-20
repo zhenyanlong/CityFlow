@@ -38,6 +38,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Simulation", meta = (ClampMin = "5", ClampMax = "100"))
 	int32 MaxVehicleCount = 40;
 
+	/** Default desired in-flight population for non-difficulty matches such as the menu preview. */
+	UPROPERTY(Config, EditAnywhere, Category = "Simulation", meta = (ClampMin = "1", ClampMax = "100"))
+	int32 TargetActiveVehicleCount = 24;
+
+	/** Maximum vehicles created on one refill pulse while below the target population. */
+	UPROPERTY(Config, EditAnywhere, Category = "Simulation", meta = (ClampMin = "1", ClampMax = "10"))
+	int32 MaxSpawnBurstSize = 3;
+
 	UPROPERTY(Config, EditAnywhere, Category = "Vehicle", meta = (AllowedClasses = "/Script/CityFlow.VehicleDataAsset"))
 	FSoftObjectPath DefaultVehicleDataAsset;
 

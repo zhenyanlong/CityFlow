@@ -1,3 +1,14 @@
+## 2026-06-20
+
+- Added a Random Mode difficulty-selection step with Easy, Medium, and Hard profiles for building count, vehicle spawn interval, simulation duration, and road budget.
+- Added `UCityFlowDifficultyWidget` with Blueprint-bindable controls, one hover-driven localized profile-details block, Back handling, and a complete native fallback layout when no Widget Blueprint is configured.
+- Preserved the no-argument `StartRandomPlanningGame()` API as a Medium-difficulty compatibility path and added explicit difficulty-aware GameMode APIs.
+- Reworked vehicle spawning around target active populations, burst refill pulses, per-attempt blocked-origin checks, route fallback, and hard population caps.
+- Updated simulation countdown and runtime scoring inputs to use active per-match duration and spawn interval values.
+- Added configurable default traffic-density controls to CityFlow Developer Settings and completed a successful `CityFlow Win64 Development` build.
+- Updated the bilingual GDD and TDD with the difficulty curve, traffic-density design, runtime data flow, and Blueprint configuration contract.
+- Verified the standalone game target successfully; the Editor target compiled all source actions but could not relink `UnrealEditor-CityFlow.dll` while a running Unreal Editor process held the module open.
+
 ## 2026-06-19
 
 ### Main Menu, Tutorial, Settings, and Audio
