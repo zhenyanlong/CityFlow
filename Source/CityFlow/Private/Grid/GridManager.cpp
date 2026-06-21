@@ -20,6 +20,9 @@ void UGridManager::Deinitialize()
 
 void UGridManager::InitGrid(int32 InGridWidth, int32 InGridHeight, float InCellSize, const FVector& InGridOrigin)
 {
+	// GridOrigin is the centre of cell (0,0), not a corner of the visual plane.
+	// Keeping one convention for odd and even dimensions prevents the historical
+	// half-cell offset that appeared when presentation code recomputed an origin.
 	GridWidth = FMath::Max(1, InGridWidth);
 	GridHeight = FMath::Max(1, InGridHeight);
 	CellSize = FMath::Max(KINDA_SMALL_NUMBER, InCellSize);
@@ -52,6 +55,8 @@ void UGridManager::InitGrid(int32 InGridWidth, int32 InGridHeight, float InCellS
 
 FGridVector UGridManager::WorldToGrid(const FVector& WorldLocation) const
 {
+	// Round to the nearest cell centre. Floor would bias negative coordinates and
+	// make a world point map differently on opposite sides of the grid origin.
 	const float X = (WorldLocation.X - GridOrigin.X) / CellSize;
 	const float Y = (WorldLocation.Y - GridOrigin.Y) / CellSize;
 	return FGridVector(FMath::RoundToInt32(X), FMath::RoundToInt32(Y));
@@ -88,6 +93,8 @@ const FGridCell& UGridManager::GetCell(const FGridVector& GridPos) const
 
 bool UGridManager::OccupyCell(const FGridVector& GridPos, ECellType Type, int32 BuildingID, AActor* RoadActor)
 {
+	// Cell mutation is centralised here so masks, budget consumers, decoration
+	// cleanup, and UI listeners all observe the same authoritative transition.
 	if (!IsValidGridPos(GridPos))
 	{
 		return false;
@@ -126,6 +133,8 @@ bool UGridManager::OccupyCell(const FGridVector& GridPos, ECellType Type)
 
 bool UGridManager::ClearCell(const FGridVector& GridPos)
 {
+	// Capture the old cell before clearing it. Road removal may refund budget and
+	// neighbouring road actors need to rebuild their meshes after the type changes.
 	if (!IsValidGridPos(GridPos))
 	{
 		return false;
@@ -245,6 +254,9 @@ bool UGridManager::HasAdjacentType(const FGridVector& GridPos, ECellType Type) c
 
 uint8 UGridManager::CalculateConnectedMask(const FGridVector& GridPos) const
 {
+	// A bit is set only for cardinally adjacent road-compatible cells. The mask is
+	// shared by visual mesh selection, routing, component flood fills, and junction
+	// reservations, so diagonal proximity must never imply a connection.
 	uint8 Mask = 0;
 
 	auto CheckNeighbor = [&](EGridDirection Dir)
@@ -277,6 +289,8 @@ uint8 UGridManager::CalculateConnectedMask(const FGridVector& GridPos) const
 
 void UGridManager::UpdateNeighborMasks(const FGridVector& GridPos)
 {
+	// Updating only the edited cell is insufficient: adding or removing one road
+	// changes the reciprocal edge and therefore the mesh of each cardinal neighbour.
 	TArray<FGridVector> Neighbors = GetNeighbors(GridPos, true);
 	for (const FGridVector& N : Neighbors)
 	{
@@ -291,6 +305,9 @@ void UGridManager::UpdateNeighborMasks(const FGridVector& GridPos)
 
 AGridPlaceableActor* UGridManager::TryPlaceBuildingRandom(TSubclassOf<AGridPlaceableActor> PlaceableClass)
 {
+	// Random placement is bounded and validation-driven. Every candidate is checked
+	// through the actor's normal placement contract so generated maps obey exactly
+	// the same footprint and doorway rules as manually placed content.
 	if (!PlaceableClass || !bGridInitialized)
 	{
 		return nullptr;

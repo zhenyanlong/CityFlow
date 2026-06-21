@@ -8,6 +8,11 @@ class ABuilding;
 class STextBlock;
 class UTextBlock;
 
+/**
+ * Projects a building into screen space and switches to a rotated edge marker when
+ * the target is outside the viewport. A Slate fallback keeps the feature usable
+ * even when a Blueprint does not provide the optional bound text block.
+ */
 UCLASS(Blueprintable, BlueprintType)
 class CITYFLOW_API UBuildingMarkerWidget : public UUserWidget
 {

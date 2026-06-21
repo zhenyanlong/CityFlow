@@ -4,6 +4,7 @@
 #include "Grid/CityFlowGridTypes.h"
 #include "CityFlowRiverTypes.generated.h"
 
+/** One generated centre line plus its rasterised river and bank occupancy cells. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FCityFlowRiverPath
 {

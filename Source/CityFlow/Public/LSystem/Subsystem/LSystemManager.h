@@ -35,6 +35,15 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLSystemGenerationStarted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnLSystemGenerationStep, int32, RemainingBudget);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnLSystemGenerationFinished, bool, bAllBuildingsConnected);
 
+/**
+ * Connectivity-first procedural road assistant.
+ *
+ * Generation is deliberately split into two layers. A reserved connection plan
+ * first guarantees that affordable building-to-network paths are not consumed
+ * by decorative growth. The remaining budget may then be used by local,
+ * L-system-inspired growth rules. All mutations still pass through GridManager,
+ * so budget accounting and road connection masks remain authoritative.
+ */
 UCLASS()
 class CITYFLOW_API ULSystemManager : public UWorldSubsystem
 {
@@ -45,9 +54,11 @@ public:
 	virtual void Deinitialize() override;
 
 	UFUNCTION(BlueprintCallable, Category = "LSystem")
+	/** Builds a connection plan and starts timer-driven generation. */
 	void StartGenerate();
 
 	UFUNCTION(BlueprintCallable, Category = "LSystem")
+	/** Cancels pending timers without removing roads that were already committed. */
 	void AbortGeneration();
 
 	UFUNCTION(BlueprintCallable, Category = "LSystem")

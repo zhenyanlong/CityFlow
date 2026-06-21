@@ -196,7 +196,8 @@ void ACityFlowPawn::OnAltReleased()
 		InputMode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(InputMode);
 
-		// 仅在 Planning 阶段恢复放置，避免在 Simulating 等阶段误开启
+		// Restore placement only in Planning; enabling it in Simulation would allow
+		// the player to mutate the graph while vehicles are following cached paths.
 		if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
 		{
 			if (GM->GetCurrentPhase() == ECityFlowGamePhase::Planning)

@@ -3,6 +3,10 @@
 #include "CoreMinimal.h"
 #include "ScoringTypes.generated.h"
 
+/**
+ * Immutable final report passed from ScoringManager to UI. Raw counters are kept
+ * beside normalised scores so the player can understand how the total was formed.
+ */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FCityFlowScoreBreakdown
 {

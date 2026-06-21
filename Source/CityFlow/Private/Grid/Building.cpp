@@ -14,6 +14,9 @@ ABuilding::ABuilding()
 
 FGridVector ABuilding::TransformLocalPosition(const FGridVector& LocalPos) const
 {
+	// Rotate local grid coordinates around the footprint origin using integer
+	// transforms. Avoiding world-space floating-point rotation keeps doorway and
+	// occupied-cell calculations identical for all four 90-degree orientations.
 	const int32 W = FMath::Max(1, FMath::RoundToInt32(BuildingSize.X));
 	const int32 H = FMath::Max(1, FMath::RoundToInt32(BuildingSize.Y));
 
@@ -38,6 +41,8 @@ FGridVector ABuilding::TransformLocalPosition(const FGridVector& LocalPos) const
 
 FVector2D ABuilding::GetEffectiveBuildingSize() const
 {
+	// Logical footprint dimensions swap at 90 and 270 degrees; the visual mesh scale
+	// remains in unrotated local space and must not be swapped a second time.
 	const int32 W = FMath::Max(1, FMath::RoundToInt32(BuildingSize.X));
 	const int32 H = FMath::Max(1, FMath::RoundToInt32(BuildingSize.Y));
 
@@ -157,6 +162,9 @@ TArray<FGridVector> ABuilding::CalculateOccupiedCells(const FGridVector& BasePos
 
 bool ABuilding::ValidatePlacement(const FGridVector& BasePos) const
 {
+	// Validate the complete footprint and all doorway connection cells before any
+	// grid mutation. This preserves atomic placement: a failed late doorway check
+	// cannot leave half of a multi-cell building registered.
 	UGridManager* GM = GetGridManager();
 	if (!GM || !GM->IsGridInitialized())
 	{
@@ -178,13 +186,13 @@ bool ABuilding::ValidatePlacement(const FGridVector& BasePos) const
 	{
 		const FGridVector ConnPt = GetDoorwayConnectionPointForPosition(Doorway, BasePos);
 
-		// doorway 连接点必须在 grid 范围内
+		// A doorway is unusable when its connection cell falls outside the logical grid.
 		if (!GM->IsValidGridPos(ConnPt))
 		{
 			return false;
 		}
 
-		// doorway 连接点不能被其他 building 占据
+		// Reject doorways whose connection cell belongs to another building footprint.
 		const FGridCell& Cell = GM->GetCell(ConnPt);
 		if (Cell.Type == ECellType::Building)
 		{
@@ -268,6 +276,8 @@ void ABuilding::UpdateBuildingAppearance()
 
 void ABuilding::OnPlacedOnGrid_Implementation()
 {
+	// Subscribe to doorway-cell changes only after placement. Road updates can then
+	// refresh entrance visuals without making every building poll the grid each tick.
 	Super::OnPlacedOnGrid_Implementation();
 	UpdateBuildingAppearance();
 
@@ -440,6 +450,9 @@ void ABuilding::DetermineEdgeConnections(bool& bTop, bool& bRight, bool& bBottom
 
 void ABuilding::RefreshFoundation()
 {
+	// Foundation geometry is derived from the logical occupied cells, not mesh bounds.
+	// This keeps the sidewalk aligned with placement and doorway rules even when a
+	// decorative building mesh has pivots or overhangs outside its footprint.
 	if (!FoundationComponent || !bIsPlaced)
 	{
 		return;

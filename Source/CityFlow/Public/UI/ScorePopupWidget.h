@@ -8,6 +8,10 @@ class UTextBlock;
 class STextBlock;
 class APlayerController;
 
+/**
+ * Short-lived world-to-screen score feedback. It reprojects every tick so the
+ * popup remains attached to its event while the strategy camera moves.
+ */
 UCLASS(Blueprintable, BlueprintType)
 class CITYFLOW_API UScorePopupWidget : public UUserWidget
 {

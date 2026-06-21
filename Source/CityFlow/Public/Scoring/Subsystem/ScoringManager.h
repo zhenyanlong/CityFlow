@@ -11,6 +11,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnScoreChanged, int32, NewTotalScor
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnScorePopupRequested, FVector, WorldLocation, int32, DeltaScore);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSimulationEvaluation);
 
+/**
+ * Collects live simulation events and converts them into a final planning report.
+ * Live score is intentionally lightweight feedback; the authoritative final score
+ * is recomputed from connectivity, traffic outcomes, efficiency, budget, runtime,
+ * and a narrowly clamped map-difficulty multiplier when scoring stops.
+ */
 UCLASS()
 class CITYFLOW_API UScoringManager : public UWorldSubsystem
 {
@@ -21,9 +27,11 @@ public:
 	virtual void Deinitialize() override;
 
 	UFUNCTION(BlueprintCallable, Category = "Scoring")
+	/** Resets per-match state and subscribes to VehicleManager events. */
 	void StartScoring();
 
 	UFUNCTION(BlueprintCallable, Category = "Scoring")
+	/** Freezes event collection, computes the final breakdown, and broadcasts evaluation. */
 	void StopScoring();
 
 	UFUNCTION(BlueprintCallable, Category = "Scoring")

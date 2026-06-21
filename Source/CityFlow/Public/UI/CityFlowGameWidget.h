@@ -25,7 +25,7 @@ public:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 protected:
-	// ---- BindWidget 控件：蓝图放同名控件即自动绑定 ----
+	// ---- BindWidget controls: matching Blueprint names are bound automatically ----
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Btn_TriggerLSystem;
@@ -105,7 +105,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CityFlow|Vehicle Alert")
 	float VehicleAbilityAlertMaxScale = 1.12f;
 
-	// ---- 蓝图事件回调 ----
+	// ---- Blueprint presentation hooks ----
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "CityFlow|UI")
 	void OnPhaseChanged_BP(ECityFlowGamePhase OldPhase, ECityFlowGamePhase NewPhase);
@@ -132,7 +132,7 @@ protected:
 	void OnVehicleAbilityAlert_BP(EVehicleAbilityAlertType AlertType, const FText& AlertText);
 
 private:
-	// ---- 按钮回调（必须是 UFUNCTION，否则 AddDynamic 绑定静默失败）----
+	// ---- Button callbacks: UFUNCTION is required by AddDynamic ----
 	UFUNCTION()
 	void OnStartSimulationClicked();
 
@@ -142,7 +142,7 @@ private:
 	UFUNCTION()
 	void OnTriggerLSystemClicked();
 
-	// ---- 委托回调 ----
+	// ---- Gameplay delegate callbacks ----
 	UFUNCTION()
 	void HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, ECityFlowGamePhase NewPhase);
 
@@ -164,7 +164,7 @@ private:
 	UFUNCTION()
 	void HandleCellChanged(FGridVector CellPos, const FGridCell& NewCell);
 
-	// ---- 内部辅助 ----
+	// ---- Internal helpers ----
 	void UpdatePhaseText(ECityFlowGamePhase Phase);
 	void UpdateBudgetText();
 	void UpdateButtonStates(ECityFlowGamePhase Phase);

@@ -7,6 +7,7 @@
 
 class AGridPlaceableActor;
 
+/** Exact class/count request used by random-map population. */
 USTRUCT(BlueprintType)
 struct FBuildingSpawnRequest
 {
@@ -22,6 +23,11 @@ struct FBuildingSpawnRequest
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCellChanged, FGridVector, CellPos, const FGridCell&, NewCell);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGridPlaced, AGridPlaceableActor*, PlacedActor);
 
+/**
+ * Single source of truth for occupancy, cell/world conversion, connection masks,
+ * and the shared road budget. Other systems must not reconstruct a second grid
+ * origin or mutate cells without going through this subsystem.
+ */
 UCLASS()
 class CITYFLOW_API UGridManager : public UWorldSubsystem
 {

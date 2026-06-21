@@ -4,6 +4,7 @@
 #include "Grid/CityFlowGridTypes.h"
 #include "CityFlowVehicleTypes.generated.h"
 
+/** Mutually exclusive high-level states used by the vehicle tick state machine. */
 UENUM(BlueprintType)
 enum class EVehicleMovementState : uint8
 {
@@ -21,6 +22,7 @@ enum class EVehicleAbilityAlertType : uint8
 	Teleport
 };
 
+/** Grid node enriched with world data for conversion into a movement spline. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FVehiclePathNode
 {
@@ -40,6 +42,7 @@ struct CITYFLOW_API FVehiclePathNode
 		: GridPos(InGridPos), WorldPos(InWorldPos) {}
 };
 
+/** World-space movement target with optional intersection boundary metadata. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FVehicleWaypoint
 {
@@ -62,6 +65,7 @@ struct CITYFLOW_API FVehicleWaypoint
 		: Position(InPos), Speed(InSpeed) {}
 };
 
+/** Sequential waypoint plan; the index is runtime state and is reset on reuse. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FVehicleMovementPlan
 {
@@ -102,6 +106,10 @@ struct CITYFLOW_API FVehicleMovementPlan
 	}
 };
 
+/**
+ * A* search record. operator< is reversed because Unreal's heap helpers expose a
+ * max-heap by default, while pathfinding needs the lowest F cost first.
+ */
 USTRUCT()
 struct CITYFLOW_API FAStarNode
 {

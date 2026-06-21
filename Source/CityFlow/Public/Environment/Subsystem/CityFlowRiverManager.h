@@ -8,6 +8,11 @@
 class UGridManager;
 class UTextureRenderTarget2D;
 
+/**
+ * Deterministically generates river centre lines, rasterises grid occupancy, and
+ * writes a render-target mask consumed by the landscape material. River occupancy
+ * is also queried by placement systems so visuals and gameplay share one source.
+ */
 UCLASS()
 class CITYFLOW_API UCityFlowRiverManager : public UWorldSubsystem
 {

@@ -159,6 +159,9 @@ void UVehicleManager::Tick(float DeltaTime)
 
 void UVehicleManager::StartSpawning()
 {
+	// Spawn pulses refill towards a bounded target population rather than creating a
+	// fixed vehicle forever. Short completed trips therefore do not empty the map,
+	// while burst and hard-cap limits prevent sudden actor spikes.
 	StopSpawning();
 
 	bIsActive = true;
@@ -198,7 +201,8 @@ void UVehicleManager::StartSpawning()
 	TArray<ABuilding*> Origins, Destinations;
 	CollectOriginDestinations(Origins, Destinations);
 
-	// 所有 building 均可作为起点和终点，但需要至少 2 个建筑才能选到不同的起点/终点
+	// Every building may act as an origin or destination, but two distinct
+	// buildings are required to prevent a zero-length trip.
 	if (Origins.Num() < 2)
 	{
 		UE_LOG(LogVehicleManager, Warning, TEXT("StartSpawning: need at least 2 buildings, found %d"), Origins.Num());
@@ -252,6 +256,9 @@ void UVehicleManager::ClearAllVehicles()
 
 AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Destination)
 {
+	// A valid building pair may still be disconnected. Route construction therefore
+	// completes before the actor is committed, preventing stranded vehicles from
+	// being counted as active traffic.
 	if (!Origin || !Destination)
 	{
 		UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: null Origin or Destination"));
@@ -508,6 +515,9 @@ TArray<FVector> UVehicleManager::BuildSplinePath(const TArray<FGridVector>& Path
 
 TArray<FGridVector> UVehicleManager::FindRoadPath(const FGridVector& Start, const FGridVector& End) const
 {
+	// A* traverses reciprocal connection-mask edges on the read-only Simulation graph.
+	// Physical adjacency alone is insufficient because two road meshes may touch
+	// without exposing compatible directions.
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
@@ -631,6 +641,8 @@ TArray<FGridVector> UVehicleManager::FindRoadPath(const FGridVector& Start, cons
 
 void UVehicleManager::UpdateCongestion()
 {
+	// Congestion is sampled globally and broadcast as a set of affected cells. This
+	// decouples visual/scoring consumers from individual vehicle tick frequency.
 	const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
 	if (!Settings)
 	{
@@ -802,19 +814,22 @@ UGridManager* UVehicleManager::GetGridManager() const
 
 void UVehicleManager::CacheSpawnEntries()
 {
+	// Resolve and filter vehicle classes once per match. Repeated spawn pulses can
+	// then perform weighted selection without loading assets or accepting invalid
+	// zero-weight entries in the hot path.
 	if (CachedSpawnEntries.Num() > 0)
 	{
 		return;
 	}
 
-	// 优先使用 GameMode 传入的 DataAsset
+	// Prefer the match-specific asset supplied by GameMode.
 	if (ExternalVehicleDataAsset)
 	{
 		CachedSpawnEntries = ExternalVehicleDataAsset->VehicleEntries;
 	}
 	else
 	{
-		// 回退到 DeveloperSettings
+		// Fall back to the project-wide asset configured in DeveloperSettings.
 		const UCityFlowDeveloperSettings* Settings = UCityFlowDeveloperSettings::Get();
 		if (!Settings || Settings->DefaultVehicleDataAsset.IsNull())
 		{

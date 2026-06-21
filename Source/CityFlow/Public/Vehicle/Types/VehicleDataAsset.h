@@ -6,6 +6,7 @@
 
 class AVehicleActor;
 
+/** Weighted class entry used by VehicleManager's deterministic spawn selection. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FVehicleSpawnEntry
 {
@@ -18,6 +19,7 @@ struct CITYFLOW_API FVehicleSpawnEntry
 	float SpawnWeight = 1.0f;
 };
 
+/** Data-driven vehicle roster that avoids hard-coding Blueprint classes in C++. */
 UCLASS(BlueprintType)
 class CITYFLOW_API UVehicleDataAsset : public UPrimaryDataAsset
 {

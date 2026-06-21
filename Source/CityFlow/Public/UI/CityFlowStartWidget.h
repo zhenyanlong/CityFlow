@@ -6,7 +6,7 @@
 #include "Components/TextBlock.h"
 #include "CityFlowStartWidget.generated.h"
 
-/** 主菜单 / 开始游戏界面 */
+/** Main-menu widget that exposes game-mode, tutorial, settings, and quit actions. */
 UCLASS()
 class CITYFLOW_API UCityFlowStartWidget : public UUserWidget
 {
@@ -21,7 +21,7 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSettingsClicked);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnQuitGameClicked);
 
-	/** 点击 "随机模式" 时广播 */
+	/** Broadcast when the player selects Random Mode. */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnRandomModeClicked OnRandomModeClicked;
 
@@ -31,7 +31,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnSettingsClicked OnSettingsClicked;
 
-	/** 点击 "退出游戏" 时广播 */
+	/** Broadcast when the player selects Quit Game. */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnQuitGameClicked OnQuitGameClicked;
 

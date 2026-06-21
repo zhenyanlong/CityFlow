@@ -62,7 +62,7 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
     const float TopZ = FoundationHeight;
     const float BotZ = 0.0f;
 
-    // ================= 1. 顶面数据 =================
+    // ================= 1. Top cap =================
     TArray<FVector> TopVerts, TopNormals;
     TArray<int32> TopTris;
     TArray<FVector2D> TopUVs;
@@ -77,7 +77,8 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
         TopUVs.Add(FVector2D(Outline[i].X * 0.01f, Outline[i].Y * 0.01f));
     }
 
-    // 修正：外轮廓是逆时针，顶面法线朝上，需要调换 i+1 和 i+2 变为顺时针
+    // The outline is counter-clockwise. Reverse the fan winding so Unreal's
+    // front-face convention produces an upward-facing top surface.
     for (int32 i = 0; i < N - 2; ++i)
     {
         TopTris.Add(0);
@@ -85,7 +86,7 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
         TopTris.Add(i + 1);
     }
 
-    // ================= 2. 底面数据 =================
+    // ================= 2. Bottom cap =================
     TArray<FVector> BotVerts, BotNormals;
     TArray<int32> BotTris;
     TArray<FVector2D> BotUVs;
@@ -100,7 +101,8 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
         BotUVs.Add(FVector2D(Outline[i].X * 0.01f, Outline[i].Y * 0.01f));
     }
 
-    // 修正：底面法线朝下。从下面往上看，原来的逆时针刚好变成了顺时针，所以保持 0, i+1, i+2
+    // Keep the original outline order for the bottom fan. Viewed from below,
+    // this winding faces outward and therefore produces downward normals.
     for (int32 i = 0; i < N - 2; ++i)
     {
         BotTris.Add(0);
@@ -108,7 +110,7 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
         BotTris.Add(i + 2);
     }
 
-    // ================= 3. 侧墙数据 =================
+    // ================= 3. Side walls =================
     TArray<FVector> WallVerts;
     TArray<int32> WallTris;
     TArray<FVector> WallNormals;
@@ -134,7 +136,8 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
         WallVerts.Add(FVector(B.X, B.Y, BotZ));
         WallVerts.Add(FVector(A.X, A.Y, BotZ));
 
-        // 修正：从外面看墙壁时的顺时针生成顺序
+        // Emit each quad in outward-facing order. Reversing this order makes
+        // the wall disappear through back-face culling and produces dark seams.
         WallTris.Add(Base); WallTris.Add(Base + 1); WallTris.Add(Base + 2);
         WallTris.Add(Base); WallTris.Add(Base + 2); WallTris.Add(Base + 3);
 
@@ -149,19 +152,19 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
         UVOffset = NextU;
     }
 
-    // ================= 4. 合并所有网格体数据 =================
+    // ================= 4. Merge mesh sections =================
     TArray<FVector> FoundationVerts;
     TArray<int32> FoundationTris;
     TArray<FVector> FoundationNormals;
     TArray<FVector2D> FoundationUVs;
 
-    // 添加顶面
+    // Append the top cap.
     FoundationVerts.Append(TopVerts);
     FoundationTris.Append(TopTris);
     FoundationNormals.Append(TopNormals);
     FoundationUVs.Append(TopUVs);
 
-    // 添加底面
+    // Append the bottom cap.
     const int32 BotBase = FoundationVerts.Num();
     FoundationVerts.Append(BotVerts);
     FoundationNormals.Append(BotNormals);
@@ -169,7 +172,7 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
     for (int32& Idx : BotTris) { Idx += BotBase; }
     FoundationTris.Append(BotTris);
 
-    // 添加侧墙
+    // Append side-wall vertices after both caps so their local indices need an offset.
     const int32 WallBase = FoundationVerts.Num();
     FoundationVerts.Append(WallVerts);
     FoundationNormals.Append(WallNormals);
@@ -177,7 +180,7 @@ void UFoundationComponent::BuildFoundation(float EffWidth, float EffHeight, floa
     for (int32& Idx : WallTris) { Idx += WallBase; }
     FoundationTris.Append(WallTris);
 
-    // 创建 Mesh
+    // Submit one mesh section so the cap and walls share collision and materials.
     FoundationMesh = NewObject<UProceduralMeshComponent>(Owner);
     FoundationMesh->SetupAttachment(Owner->GetRootComponent());
     FoundationMesh->SetRelativeLocation(FVector::ZeroVector);

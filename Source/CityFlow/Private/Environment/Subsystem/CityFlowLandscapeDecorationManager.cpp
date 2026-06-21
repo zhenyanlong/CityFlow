@@ -28,6 +28,8 @@ void UCityFlowLandscapeDecorationManager::Deinitialize()
 
 void UCityFlowLandscapeDecorationManager::GenerateDecorations(int32 Seed)
 {
+	// Use a local deterministic stream so regenerating the same map seed produces the
+	// same decoration layout without perturbing gameplay randomness in other systems.
 	UGridManager* GM = GetGridManager();
 	if (!GM || !GM->IsGridInitialized())
 	{
@@ -132,6 +134,8 @@ void UCityFlowLandscapeDecorationManager::ClearDecorationsForCell(FGridVector Ce
 
 void UCityFlowLandscapeDecorationManager::ClearDecorationsForCells(const TArray<FGridVector>& Cells, int32 ExtraPaddingCells)
 {
+	// Decorations may cover several grid cells. Resolve cells to logical instance ids
+	// first, then clear each id once to avoid HISM index churn and duplicate removal.
 	UGridManager* GM = GetGridManager();
 	if (!GM || !GM->IsGridInitialized())
 	{
@@ -261,6 +265,8 @@ UHierarchicalInstancedStaticMeshComponent* UCityFlowLandscapeDecorationManager::
 	int32 ConfigIndex,
 	const FCityFlowLandscapeDecorationConfig& Config)
 {
+	// One HISM component is shared by identical mesh/material configurations. This
+	// keeps draw calls bounded and avoids creating one actor per tree or rock.
 	if (ConfigIndex < 0)
 	{
 		return nullptr;
@@ -364,6 +370,9 @@ void UCityFlowLandscapeDecorationManager::GenerateGrassCoverage(
 	const FCityFlowGrassCoverageConfig& Config,
 	FRandomStream& RandomStream)
 {
+	// Grass uses many cheap candidate samples per eligible cell. Sampling the same
+	// ground-colour texture as the landscape material keeps coverage aligned with
+	// visible green areas without requiring runtime landscape weight-map access.
 	if (!Config.bEnabled || Config.DensityPerCell <= 0)
 	{
 		UE_LOG(LogCityFlowLandscapeDecoration, Log,
@@ -499,6 +508,9 @@ bool UCityFlowLandscapeDecorationManager::ReadGroundColorPixels(
 	int32& OutWidth,
 	int32& OutHeight) const
 {
+	// Texture source data is read once into CPU memory before spawning. Per-instance
+	// texture reads would dominate generation time and are unavailable in packaged
+	// builds when the texture is not configured for CPU access.
 	OutPixels.Reset();
 	OutWidth = 0;
 	OutHeight = 0;
@@ -732,6 +744,9 @@ bool UCityFlowLandscapeDecorationManager::TrySpawnDecorationInCell(
 	const TArray<FCityFlowLandscapeDecorationConfig>& Configs,
 	FRandomStream& RandomStream)
 {
+	// Footprint validation happens before AddInstance. Large scaled meshes therefore
+	// cannot overlap buildings, roads, rivers, or leave the logical grid even when
+	// their pivot lies inside an otherwise valid cell.
 	const int32 ConfigIndex = PickConfigIndex(Configs, RandomStream);
 	if (!Configs.IsValidIndex(ConfigIndex))
 	{
@@ -978,6 +993,8 @@ void UCityFlowLandscapeDecorationManager::RegisterInstance(
 
 void UCityFlowLandscapeDecorationManager::ClearDecorationInstance(int32 InstanceId)
 {
+	// HISM removal compacts instance indices and would invalidate every stored index.
+	// Hide the instance with zero scale and mark the stable logical record dead instead.
 	FCityFlowLandscapeInstanceRecord* Record = InstanceRecords.Find(InstanceId);
 	if (!Record || !Record->bAlive)
 	{

@@ -81,6 +81,9 @@ void UCityFlowEvaluationWidget::RefreshUI()
 
 void UCityFlowEvaluationWidget::BuildAnimatedScoreLines()
 {
+	// Store labels, targets, precision, and widget destinations as data. The tick
+	// animation can then reveal heterogeneous metrics through one sequencing path
+	// instead of duplicating timing logic for every text block.
 	EnsureScoreReportTextBlocks();
 	AnimatedScoreLines.Empty();
 
@@ -127,6 +130,9 @@ void UCityFlowEvaluationWidget::BuildAnimatedScoreLines()
 
 void UCityFlowEvaluationWidget::EnsureScoreReportTextBlocks()
 {
+	// Older Blueprint assets may not contain the newer detailed fields. Create
+	// missing text blocks at runtime so C++ additions remain backward compatible
+	// without silently discarding parts of the evaluation report.
 	if (!ScoreReportPanel || !WidgetTree)
 	{
 		return;
@@ -480,6 +486,8 @@ void UCityFlowEvaluationWidget::AddAnimatedTimeLine(UTextBlock* TextBlock, const
 
 void UCityFlowEvaluationWidget::StartScoreAnimation()
 {
+	// Reset visibility and accumulated time before revealing the first line. Restart
+	// can reuse the same widget instance, so animation state cannot be assumed fresh.
 	if (AnimatedScoreLines.Num() == 0)
 	{
 		return;
@@ -533,6 +541,8 @@ void UCityFlowEvaluationWidget::StopScoreAnimation(bool bComplete)
 
 void UCityFlowEvaluationWidget::AdvanceScoreAnimation(float DeltaTime)
 {
+	// Lines animate sequentially to keep the report readable. Large frame times are
+	// consumed by the current line first instead of skipping multiple result entries.
 	if (!AnimatedScoreLines.IsValidIndex(CurrentAnimatedLineIndex))
 	{
 		StopScoreAnimation(true);

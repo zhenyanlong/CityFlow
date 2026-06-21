@@ -86,6 +86,9 @@ void ACityFlowPlayerController::Tick(float DeltaTime)
 
 void ACityFlowPlayerController::SpawnPreview()
 {
+	// The preview uses the real placeable class so footprint and doorway validation
+	// cannot drift from final placement. Preview actors remain unregistered until the
+	// placement transaction succeeds.
 	if (!PlaceableActorClass)
 	{
 		return;
@@ -105,6 +108,9 @@ void ACityFlowPlayerController::SpawnPreview()
 
 void ACityFlowPlayerController::UpdatePreviewPosition()
 {
+	// Convert the cursor hit through GridManager and snap once. Visual snapping and
+	// CanPlaceAt must receive the same grid coordinate to avoid a green preview that
+	// commits into a neighbouring cell.
 	if (!PreviewActor)
 	{
 		return;
@@ -171,6 +177,8 @@ void ACityFlowPlayerController::DisablePlacement()
 
 void ACityFlowPlayerController::TryPlaceAtCursor()
 {
+	// Drag placement may trigger every input frame. LastPlacedGridPos suppresses
+	// duplicate attempts and sounds while still allowing continuous road painting.
 	if (!bPlacementEnabled || !PreviewActor || !PlaceableActorClass)
 	{
 		return;
@@ -267,6 +275,8 @@ void ACityFlowPlayerController::OnPlaceItemCompleted_Implementation()
 
 void ACityFlowPlayerController::TryRemoveAtCursor()
 {
+	// Removal is restricted to registered road actors. Buildings and transient
+	// previews share grid-facing base classes but are not valid right-drag targets.
 	if (!bPlacementEnabled)
 	{
 		return;
@@ -342,6 +352,9 @@ void ACityFlowPlayerController::OnPausePressed_Implementation()
 
 void ACityFlowPlayerController::UpdateVehicleHover()
 {
+	// Vehicle inspection is available only during Simulation and intentionally uses
+	// one hovered actor at a time. Clearing the previous outline before applying the
+	// next one prevents custom-depth state from leaking across destroyed vehicles.
 	if (!IsSimulationPhaseActive())
 	{
 		ClearHoveredVehicle();

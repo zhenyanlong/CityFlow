@@ -10,7 +10,7 @@
 #include "Scoring/Types/ScoringTypes.h"
 #include "CityFlowEvaluationWidget.generated.h"
 
-/** 结算界面 —— 展示模拟结果与历史最高分，提供返回主菜单 / 重新开始 */
+/** Presents the final simulation report and offers restart or main-menu actions. */
 UCLASS()
 class CITYFLOW_API UCityFlowEvaluationWidget : public UUserWidget
 {
@@ -24,15 +24,15 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBackToMainClicked);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRestartClicked);
 
-	/** 点击 "返回主菜单" */
+	/** Broadcast when the player selects Back to Main Menu. */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnBackToMainClicked OnBackToMainClicked;
 
-	/** 点击 "重新开始" */
+	/** Broadcast when the player selects Restart. */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnRestartClicked OnRestartClicked;
 
-	/** 设置本局所有结算数据并刷新 UI */
+	/** Supplies the complete immutable result snapshot and refreshes every field. */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
 	void Populate(int32 TotalScore, int32 Arrivals, int32 Penalty, float ElapsedTime);
 
@@ -40,7 +40,7 @@ public:
 	void PopulateFromBreakdown(const FCityFlowScoreBreakdown& Breakdown);
 
 protected:
-	// ---- BindWidget 控件 ----
+	// ---- Blueprint BindWidget controls ----
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Btn_BackToMain;
@@ -193,7 +193,7 @@ private:
 	FCityFlowScoreBreakdown CachedBreakdown;
 	bool bHasScoreBreakdown = false;
 
-	/** 运行时历史最高分（进程生命期内有效） */
+	/** Session-only high score; intentionally not persisted between processes. */
 	bool bScoreAnimationActive = false;
 	int32 CurrentAnimatedLineIndex = INDEX_NONE;
 	float CurrentLineElapsed = 0.0f;

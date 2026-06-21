@@ -4,6 +4,10 @@
 #include "GameFramework/Actor.h"
 #include "GridPlaneVisualizer.generated.h"
 
+/**
+ * Material-driven grid overlay. Its transform is derived from GridManager's cell
+ * centres so the visual plane never invents a second snapping origin.
+ */
 UCLASS(Blueprintable, BlueprintType)
 class CITYFLOW_API AGridPlaneVisualizer : public AActor
 {

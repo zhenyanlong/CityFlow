@@ -18,6 +18,7 @@ enum class ECityFlowLandscapeDecorationKind : uint8
 	Mountain     UMETA(DisplayName = "Mountain")
 };
 
+/** Authoring data for one weighted HISM decoration type. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FCityFlowLandscapeDecorationConfig
 {
@@ -60,6 +61,7 @@ struct CITYFLOW_API FCityFlowLandscapeDecorationConfig
 	bool bRejectOccupiedFootprint = true;
 };
 
+/** Controls texture-guided grass sampling independently from sparse decorations. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FCityFlowGrassCoverageConfig
 {
@@ -108,6 +110,7 @@ struct CITYFLOW_API FCityFlowGrassCoverageConfig
 	bool bRejectOccupiedCells = true;
 };
 
+/** Stable logical handle; it deliberately does not expose a mutable HISM index. */
 USTRUCT(BlueprintType)
 struct CITYFLOW_API FCityFlowLandscapeInstanceHandle
 {
@@ -122,6 +125,10 @@ struct CITYFLOW_API FCityFlowLandscapeInstanceHandle
 	}
 };
 
+/**
+ * Internal instance bookkeeping. HISM indices may be compacted by removal, so
+ * gameplay refers to InstanceId and records are normally retired by zero-scaling.
+ */
 struct CITYFLOW_API FCityFlowLandscapeInstanceRecord
 {
 	int32 ConfigIndex = INDEX_NONE;

@@ -5,7 +5,7 @@
 #include "Components/Button.h"
 #include "CityFlowPauseWidget.generated.h"
 
-/** 暂停菜单 —— 以 Overlay 形式叠加在当前画面上 */
+/** Modal pause overlay displayed above the active gameplay HUD. */
 UCLASS()
 class CITYFLOW_API UCityFlowPauseWidget : public UUserWidget
 {
@@ -18,11 +18,11 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnResumeClicked);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReturnToMainClicked);
 
-	/** 点击 "继续" 时广播 */
+	/** Broadcast when the player selects Resume. */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnResumeClicked OnResumeClicked;
 
-	/** 点击 "返回主菜单" 时广播 */
+	/** Broadcast when the player selects Back to Main Menu. */
 	UPROPERTY(BlueprintAssignable, Category = "CityFlow|UI")
 	FOnReturnToMainClicked OnReturnToMainClicked;
 

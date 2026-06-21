@@ -20,6 +20,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVehicleDied, class AVehicleActor*
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVehicleAbilityActivated, class AVehicleActor*, Vehicle, EVehicleAbilityAlertType, AlertType);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCongestionUpdated);
 
+/**
+ * Owns vehicle population, route construction, congestion sampling, and global
+ * traffic events. The road graph is rebuilt after planning and treated as
+ * read-only during Simulation so many vehicles can share topology safely.
+ */
 UCLASS()
 class CITYFLOW_API UVehicleManager : public UWorldSubsystem, public FTickableGameObject
 {
@@ -60,7 +65,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Vehicle|Spawning")
 	int32 GetSpawnBurstSize() const { return SpawnBurstSize; }
 
-	/** 设置车辆生成数据资产。优先于 DeveloperSettings 中的配置。 */
+	/** Sets a match-specific vehicle data asset that overrides DeveloperSettings. */
 	void SetVehicleDataAsset(UVehicleDataAsset* InDataAsset) { ExternalVehicleDataAsset = InDataAsset; }
 
 	UFUNCTION(BlueprintCallable, Category = "Vehicle")

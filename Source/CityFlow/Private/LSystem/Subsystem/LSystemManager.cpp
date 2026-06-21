@@ -77,6 +77,8 @@ void ULSystemManager::AddBudget(int32 Amount)
 
 void ULSystemManager::StartGenerate()
 {
+	// Planning is performed before the timer starts. This prevents early visual
+	// growth from spending tiles that a later building connection still requires.
 	if (bIsGenerating)
 	{
 		AbortGeneration();
@@ -162,6 +164,9 @@ void ULSystemManager::EnqueueGrowthPoint(const FLSystemGrowthPoint& Point)
 
 void ULSystemManager::CollectStartPointsFromRoads()
 {
+	// Existing player roads are treated as immutable anchors. Dead ends continue
+	// forward, while sufficiently spaced straight segments may expose side-growth
+	// candidates without changing the topology the player already authored.
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
@@ -277,6 +282,9 @@ void ULSystemManager::CollectStartPointsFromRoads()
 
 void ULSystemManager::CollectStartPointsFromBuildings()
 {
+	// Doorways are the only legal interface between a building footprint and the
+	// road graph. Using the transformed doorway direction is essential for rotated
+	// rectangular buildings; the actor origin alone is not a valid connection cell.
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
@@ -344,6 +352,9 @@ void ULSystemManager::CollectStartPointsFromBuildings()
 
 void ULSystemManager::ProcessGrowthStep()
 {
+	// Commit at most one visible unit of work per timer tick. Besides producing a
+	// readable growth animation, this keeps delegates and neighbour-mask updates in
+	// a deterministic order that UI and tests can observe.
 	if (!bIsGenerating)
 	{
 		return;
@@ -430,6 +441,9 @@ void ULSystemManager::ProcessGrowthStep()
 
 bool ULSystemManager::ProcessConnectionPlanStep()
 {
+	// Connection paths were costed before growth began. Existing road cells have
+	// zero placement cost, so replaying the plan may traverse them without spending
+	// budget; only newly occupied cells reduce the shared pool.
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
@@ -462,6 +476,9 @@ bool ULSystemManager::ProcessConnectionPlanStep()
 
 bool ULSystemManager::TryGrowAt(const FLSystemGrowthPoint& Point)
 {
+	// A growth point is directional state, not just a cell. Keeping direction in the
+	// visited key prevents accidental infinite loops while still allowing the same
+	// junction to be considered from another meaningful approach.
 	UGridManager* GM = GetGridManager();
 	if (!GM)
 	{
@@ -774,6 +791,9 @@ TArray<ABuilding*> ULSystemManager::GetAllBuildings() const
 TSet<FGridVector> ULSystemManager::FloodRoadComponent(
 	const FGridVector& Seed, const TSet<FGridVector>& RoadCells) const
 {
+	// Connectivity is evaluated on reciprocal connection-mask edges rather than
+	// geometric adjacency. Two touching road meshes are not connected unless both
+	// cells explicitly expose the corresponding direction bit.
 	TSet<FGridVector> Component;
 	if (!RoadCells.Contains(Seed))
 	{
@@ -890,6 +910,9 @@ bool ULSystemManager::FindPathToNetwork(
 	const TSet<FGridVector>& Network,
 	TArray<FGridVector>& OutPath) const
 {
+	// This search targets any cell in the current connected network. Its cost model
+	// charges only empty cells, making reuse of player roads preferable and keeping
+	// the reserved budget equal to the number of tiles that will actually be placed.
 	OutPath.Reset();
 	UGridManager* GM = GetGridManager();
 	if (!Building || !GM || Network.IsEmpty())
@@ -964,6 +987,9 @@ bool ULSystemManager::FindPathToNetwork(
 
 void ULSystemManager::BuildConnectionPlan()
 {
+	// Reserve complete paths before optional growth. Each accepted path expands the
+	// working network, so later buildings can connect to earlier reserved paths and
+	// share segments instead of paying for independent routes.
 	UGridManager* GM = GetGridManager();
 	PendingConnectionCells.Reset();
 	NextConnectionCellIndex = 0;
@@ -1185,6 +1211,9 @@ bool ULSystemManager::IsSideBranchValid(const FGridVector& Pos, EGridDirection D
 
 void ULSystemManager::FinishGeneration(bool bAllConnected)
 {
+	// Always clear transient queues before broadcasting. Listeners may immediately
+	// start Simulation or another preview match, so no state from this run may leak
+	// into the next generation request.
 	GetWorld()->GetTimerManager().ClearTimer(GrowthTimerHandle);
 	PendingGrowthPoints.Empty();
 	QueuedGrowthPoints.Empty();

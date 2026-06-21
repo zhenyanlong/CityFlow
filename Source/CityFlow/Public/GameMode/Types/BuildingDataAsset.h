@@ -24,7 +24,7 @@ class CITYFLOW_API UBuildingDataAsset : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
-	/** 可生成的建筑列表。是起点还是目的地由建筑蓝图自身的 bIsDestination 决定。 */
+	/** Weighted building classes. Each building Blueprint owns its origin/destination role. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
 	TArray<FBuildingDataEntry> BuildingEntries;
 

@@ -18,7 +18,7 @@
 #define LOCTEXT_NAMESPACE "CityFlowGameWidget"
 
 // ============================================================================
-//  生命周期
+//  Widget lifecycle
 // ============================================================================
 
 void UCityFlowGameWidget::NativeConstruct()
@@ -31,7 +31,8 @@ void UCityFlowGameWidget::NativeConstruct()
 		Txt_VehicleAbilityAlert->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
 	}
 
-	// 绑定按钮（回调必须是 UFUNCTION，否则 AddDynamic 静默失败）
+	// Dynamic delegates require UFUNCTION callbacks; otherwise AddDynamic compiles
+	// but the Blueprint-facing button event is never invoked.
 	if (Btn_TriggerLSystem)
 		Btn_TriggerLSystem->OnClicked.AddDynamic(this, &UCityFlowGameWidget::OnTriggerLSystemClicked);
 	if (Btn_StartSimulation)
@@ -39,7 +40,7 @@ void UCityFlowGameWidget::NativeConstruct()
 	if (Btn_RestartPlanning)
 		Btn_RestartPlanning->OnClicked.AddDynamic(this, &UCityFlowGameWidget::OnRestartPlanningClicked);
 
-	// 绑定 GameMode / Scoring / LSystem 委托
+	// Subscribe to authoritative gameplay services instead of polling them every frame.
 	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		GM->OnGamePhaseChanged.AddDynamic(this, &UCityFlowGameWidget::HandleGamePhaseChanged);
 
@@ -60,25 +61,26 @@ void UCityFlowGameWidget::NativeConstruct()
 		VM->OnVehicleAbilityActivated.AddDynamic(this, &UCityFlowGameWidget::HandleVehicleAbilityActivated);
 	}
 
-	// 监听网格变化，随时刷新预算显示
+	// Grid mutations are the source of truth for the live budget display.
 	if (UGridManager* GridMgr = GetWorld()->GetSubsystem<UGridManager>())
 	{
 		GridMgr->OnCellChanged.AddDynamic(this, &UCityFlowGameWidget::HandleCellChanged);
 	}
 
-	// 初始 UI 状态
+	// Build the first frame from current subsystem state because the widget may be
+	// created after one or more startup delegates have already fired.
 	UpdateButtonStates(GetCityFlowGameMode() ? GetCityFlowGameMode()->GetCurrentPhase() : ECityFlowGamePhase::None);
 	RequestBuildingMarkerRefresh();
 }
 
 void UCityFlowGameWidget::NativeDestruct()
 {
-	// 解绑按钮
+	// Remove button bindings before destruction to prevent duplicate callbacks after recreation.
 	if (Btn_TriggerLSystem)     Btn_TriggerLSystem->OnClicked.RemoveAll(this);
 	if (Btn_StartSimulation)    Btn_StartSimulation->OnClicked.RemoveAll(this);
 	if (Btn_RestartPlanning)    Btn_RestartPlanning->OnClicked.RemoveAll(this);
 
-	// 解绑委托
+	// Weak UObject delegates still need explicit removal because this widget is recreated between phases.
 	if (ACityFlowGameMode* GM = GetCityFlowGameMode())
 		GM->OnGamePhaseChanged.RemoveDynamic(this, &UCityFlowGameWidget::HandleGamePhaseChanged);
 
@@ -126,7 +128,7 @@ void UCityFlowGameWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 }
 
 // ============================================================================
-//  按钮回调
+//  Button callbacks
 // ============================================================================
 
 void UCityFlowGameWidget::OnStartSimulationClicked()
@@ -154,7 +156,7 @@ void UCityFlowGameWidget::OnTriggerLSystemClicked()
 }
 
 // ============================================================================
-//  委托回调
+//  Gameplay delegate callbacks
 // ============================================================================
 
 void UCityFlowGameWidget::HandleGamePhaseChanged(ECityFlowGamePhase OldPhase, ECityFlowGamePhase NewPhase)
@@ -249,7 +251,7 @@ void UCityFlowGameWidget::HandleLSystemFinished(bool bAllConnected)
 }
 
 // ============================================================================
-//  UI 更新辅助
+//  UI update helpers
 // ============================================================================
 
 void UCityFlowGameWidget::UpdatePhaseText(ECityFlowGamePhase Phase)
@@ -367,7 +369,7 @@ void UCityFlowGameWidget::UpdateVehicleAbilityAlertFallback(float DeltaTime)
 }
 
 // ============================================================================
-//  网格变更 → 刷新预算
+//  Grid mutation -> budget refresh
 // ============================================================================
 
 void UCityFlowGameWidget::HandleCellChanged(FGridVector CellPos, const FGridCell& NewCell)
@@ -377,7 +379,7 @@ void UCityFlowGameWidget::HandleCellChanged(FGridVector CellPos, const FGridCell
 }
 
 // ============================================================================
-//  辅助
+//  Internal helpers
 // ============================================================================
 
 void UCityFlowGameWidget::RequestBuildingMarkerRefresh()
@@ -672,7 +674,7 @@ int32 UCityFlowGameWidget::GetRemainingBudget() const
 }
 
 // ============================================================================
-//  倒计时
+//  Simulation countdown
 // ============================================================================
 
 void UCityFlowGameWidget::StartCountdown()

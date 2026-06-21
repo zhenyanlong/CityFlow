@@ -8,6 +8,12 @@
 class UBuildingDataAsset;
 class UVehicleDataAsset;
 
+/**
+ * Authoritative match coordinator for Planning, Simulation, and Evaluation.
+ * Systems remain in world subsystems, while GameMode owns transition order so a
+ * new phase cannot observe half-created buildings, an unfinished road graph, or
+ * vehicles left by a previous menu preview.
+ */
 UCLASS()
 class CITYFLOW_API ACityFlowGameMode : public AGameModeBase
 {
@@ -18,15 +24,15 @@ public:
 
 	virtual void BeginPlay() override;
 
-	/** 玩家点击 "开始游戏" 后调用，创建场景并进入 Planning */
+	/** Creates a playable scene and enters Planning after the player starts a match. */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void StartNewGame();
 
-	/** 使用随机参数创建一局自动对局：生成场景、生成道路，并在道路生成完成后进入模拟 */
+	/** Creates an automated preview match and starts Simulation after road generation. */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void StartAutomatedRandomMatch(bool bAsMenuPreview);
 
-	/** 使用随机参数创建一局玩家可操作的规划开局：只生成景观和建筑，停留在 Planning */
+	/** Creates a player-controlled random map with scenery and buildings, then stays in Planning. */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void StartRandomPlanningGame();
 
@@ -34,7 +40,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void StartRandomPlanningGameWithDifficulty(ECityFlowDifficulty Difficulty);
 
-	/** 回到主菜单 —— 清理所有 Actor 和状态 */
+	/** Clears match actors and transient state before returning to the main menu. */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void ReturnToMainMenu();
 
@@ -92,19 +98,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|Game")
 	void InitializeDefaultScene();
 
-	/** 建筑生成数据资产 —— 配置可生成的建筑类型及权重。设置后优先使用，否则回退到 OriginBuildingClass/DestinationBuildingClass */
+	/** Weighted building configuration; overrides the legacy origin/destination class pair. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TObjectPtr<UBuildingDataAsset> BuildingDataAsset;
 
-	/** 车辆生成数据资产 —— 配置可生成的车辆类型及权重。设置后优先使用，否则回退到 DeveloperSettings */
+	/** Weighted vehicle configuration; overrides the DeveloperSettings default asset. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TObjectPtr<UVehicleDataAsset> VehicleDataAsset;
 
-	/** @deprecated 回退用：当 BuildingDataAsset 未设置时使用 */
+	/** @deprecated Legacy origin fallback used when BuildingDataAsset is not configured. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TSubclassOf<class AGridPlaceableActor> OriginBuildingClass;
 
-	/** @deprecated 回退用：当 BuildingDataAsset 未设置时使用 */
+	/** @deprecated Legacy destination fallback used when BuildingDataAsset is not configured. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|Spawn")
 	TSubclassOf<class AGridPlaceableActor> DestinationBuildingClass;
 

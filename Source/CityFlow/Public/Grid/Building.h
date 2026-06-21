@@ -56,7 +56,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	FGridVector GetDoorwayConnectionPoint(const FBuildingDoorway& Doorway) const;
 
-	/** 计算在指定候选位置时，某个 doorway 的连接点（用于放置前验证） */
+	/** Computes a doorway connection cell at a candidate position before placement mutates the grid. */
 	FGridVector GetDoorwayConnectionPointForPosition(const FBuildingDoorway& Doorway, const FGridVector& BasePos) const;
 
 	UFUNCTION(BlueprintPure, Category = "Building")

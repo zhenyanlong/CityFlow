@@ -83,6 +83,9 @@ void ACityFlowGameMode::StartNewGame()
 
 void ACityFlowGameMode::StartAutomatedRandomMatch(bool bAsMenuPreview)
 {
+	// Menu previews run the production map pipeline. Their only policy difference is
+	// the missing player-planning pass, so automatic generation may spend the full
+	// remaining budget before Simulation begins.
 	ResetRuntimeScene();
 	ResetActiveMatchSettings();
 
@@ -204,7 +207,7 @@ void ACityFlowGameMode::InitializeScene(int32 GridWidth, int32 GridHeight, float
 
 	if (BuildingDataAsset)
 	{
-		// 使用 BuildingDataAsset 按权重占比确定各建筑生成数量
+		// Convert the data asset's relative weights into an exact building count.
 		const TArray<FBuildingDataEntry>& Entries = BuildingDataAsset->BuildingEntries;
 		if (Entries.Num() > 0)
 		{
@@ -216,7 +219,8 @@ void ACityFlowGameMode::InitializeScene(int32 GridWidth, int32 GridHeight, float
 
 			if (TotalWeight > 0.0f)
 			{
-				// 按 weight / TotalWeight * DefaultBuildingCount 分配，取整后用最大余数法补足
+				// Allocate floor(weight / total weight * requested count), then use the
+				// largest-remainder method so rounding never changes the requested total.
 				int32 AssignedTotal = 0;
 				TArray<TPair<int32, float>> Fractionals; // (entry_index, fractional_part)
 
@@ -239,7 +243,7 @@ void ACityFlowGameMode::InitializeScene(int32 GridWidth, int32 GridHeight, float
 					}
 				}
 
-				// 余量按小数部分从大到小分配
+				// Give the remaining slots to entries with the largest fractional parts.
 				const int32 Remainder = BuildingCount - AssignedTotal;
 				Fractionals.Sort([](const TPair<int32, float>& A, const TPair<int32, float>& B)
 				{
@@ -272,7 +276,7 @@ void ACityFlowGameMode::InitializeScene(int32 GridWidth, int32 GridHeight, float
 	}
 	else
 	{
-		// 回退：使用旧的单类配置
+		// Preserve legacy projects that still configure one origin and destination class.
 		if (OriginBuildingClass || DestinationBuildingClass)
 		{
 			const int32 HalfCount = BuildingCount / 2;
@@ -305,6 +309,8 @@ void ACityFlowGameMode::InitializeScene(int32 GridWidth, int32 GridHeight, float
 
 void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
 {
+	// Centralising phase changes guarantees that input, timers, scoring, traffic,
+	// and HUD listeners all observe the same transition order.
 	const ECityFlowGamePhase OldPhase = CurrentPhase;
 	CurrentPhase = NewPhase;
 
@@ -341,7 +347,7 @@ void ACityFlowGameMode::TransitionToPhase(ECityFlowGamePhase NewPhase)
 				ActiveMaxVehicleCount,
 				ActiveVehicleSpawnBurstSize);
 
-			// 优先使用 GameMode 上的 VehicleDataAsset，否则 VehicleManager 回退到 DeveloperSettings
+			// A match-specific data asset overrides the project-wide DeveloperSettings fallback.
 			if (VehicleDataAsset)
 			{
 				VM->SetVehicleDataAsset(VehicleDataAsset);
@@ -567,6 +573,8 @@ void ACityFlowGameMode::ApplyDifficultyProfile(ECityFlowDifficulty Difficulty)
 
 void ACityFlowGameMode::ResetRuntimeScene()
 {
+	// Stop timer-driven producers before destroying actors. A pending spawn or growth
+	// callback must not repopulate the world while the menu is being reconstructed.
 	bAutoStartSimulationAfterLSystem = false;
 
 	GetWorldTimerManager().ClearTimer(SimulationTimerHandle);

@@ -20,14 +20,14 @@
 #include "Sound/SoundClass.h"
 
 // ============================================================================
-//  生命周期
+//  HUD lifecycle
 // ============================================================================
 
 void ACityFlowHUD::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 监听 GameMode 阶段变化，自动切换 Widget
+	// GameMode owns phase state; HUD only maps that state to the correct widget.
 	if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
 	{
 		GM->OnSimulationPhaseEnd.AddDynamic(this, &ACityFlowHUD::HandleSimulationEnded);
@@ -63,12 +63,12 @@ void ACityFlowHUD::HandleSimulationEnded()
 }
 
 // ============================================================================
-//  Widget 切换
+//  Widget transitions
 // ============================================================================
 
 void ACityFlowHUD::ShowStartWidget()
 {
-	// 清理已有 Widget
+	// Remove the previous screen first so input and dynamic delegates cannot remain active.
 	if (GameWidget && GameWidget->IsInViewport())
 		GameWidget->RemoveFromParent();
 	if (EvaluationWidget && EvaluationWidget->IsInViewport())
@@ -101,7 +101,7 @@ void ACityFlowHUD::ShowStartWidget()
 		StartWidget->OnQuitGameClicked.AddDynamic(this, &ACityFlowHUD::HandleQuitGameClicked);
 	}
 
-	// 确保鼠标可见
+	// Menu screens use pointer interaction even when the previous gameplay screen hid it.
 	if (APlayerController* PC = GetOwningPlayerController())
 	{
 		if (ACityFlowPlayerController* CFPC = Cast<ACityFlowPlayerController>(PC))
@@ -141,7 +141,7 @@ void ACityFlowHUD::ShowPauseOverlay()
 
 	if (PauseWidget && !PauseWidget->IsInViewport())
 	{
-		PauseWidget->AddToViewport(100); // 叠在最上层
+		PauseWidget->AddToViewport(100); // Keep the modal above HUD and gameplay widgets.
 
 		PauseWidget->OnResumeClicked.RemoveAll(this);
 		PauseWidget->OnResumeClicked.AddDynamic(this, &ACityFlowHUD::HandleResumeClicked);
@@ -196,7 +196,7 @@ void ACityFlowHUD::ShowEvaluationWidget()
 	{
 		EvaluationWidget->AddToViewport();
 
-		// 委托已绑定过就不重复绑
+		// Evaluation can be reopened; avoid stacking the same delegate binding.
 		EvaluationWidget->OnBackToMainClicked.RemoveAll(this);
 		EvaluationWidget->OnBackToMainClicked.AddDynamic(this, &ACityFlowHUD::HandleEvaluationReturn);
 
@@ -204,7 +204,7 @@ void ACityFlowHUD::ShowEvaluationWidget()
 		EvaluationWidget->OnRestartClicked.AddDynamic(this, &ACityFlowHUD::HandleRestartClicked);
 	}
 
-	// 从 ScoringManager 读取结算数据并填入 Widget
+	// Copy the immutable final snapshot from ScoringManager into the presentation widget.
 	UScoringManager* SM = GetWorld()->GetSubsystem<UScoringManager>();
 	ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode());
 
@@ -236,7 +236,7 @@ void ACityFlowHUD::ShowEvaluationWidget()
 }
 
 // ============================================================================
-//  暂停 / 恢复
+//  Pause / resume
 // ============================================================================
 
 void ACityFlowHUD::TogglePause()
@@ -256,7 +256,7 @@ void ACityFlowHUD::HandleReturnToMainClicked()
 {
 	HidePauseOverlay();
 
-	// 让 GameMode 清理并回到主菜单
+	// GameMode performs authoritative teardown before the menu is reconstructed.
 	if (ACityFlowGameMode* GM = Cast<ACityFlowGameMode>(GetWorld()->GetAuthGameMode()))
 		GM->ReturnToMainMenu();
 
@@ -264,7 +264,7 @@ void ACityFlowHUD::HandleReturnToMainClicked()
 }
 
 // ============================================================================
-//  结算 → 主菜单
+//  Evaluation -> main menu
 // ============================================================================
 
 void ACityFlowHUD::ReturnToMainMenu()
@@ -284,7 +284,7 @@ void ACityFlowHUD::HandleEvaluationReturn()
 }
 
 // ============================================================================
-//  StartWidget 按钮处理
+//  Start-widget button handlers
 // ============================================================================
 
 void ACityFlowHUD::HandleRandomModeClicked()
@@ -329,7 +329,7 @@ void ACityFlowHUD::HandleRestartClicked()
 
 void ACityFlowHUD::ShowGameWidgetRandom(ECityFlowDifficulty Difficulty)
 {
-	// 隐藏 StartWidget
+	// Hide the menu while the difficulty modal owns pointer input.
 	if (StartWidget && StartWidget->IsInViewport())
 		StartWidget->RemoveFromParent();
 	if (EvaluationWidget && EvaluationWidget->IsInViewport())

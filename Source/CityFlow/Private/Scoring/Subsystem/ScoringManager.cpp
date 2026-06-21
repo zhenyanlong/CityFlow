@@ -29,6 +29,9 @@ void UScoringManager::Deinitialize()
 
 void UScoringManager::StartScoring()
 {
+	// Bind once at the simulation boundary rather than when the world subsystem is
+	// created. Menu previews and planning can spawn managers without representing a
+	// scoreable player run.
 	StopScoring();
 
 	ResetScoreState();
@@ -66,6 +69,8 @@ void UScoringManager::StartScoring()
 
 void UScoringManager::StopScoring()
 {
+	// Stop accepting events before computing the report. Vehicle destruction during
+	// phase teardown must not race with or modify the frozen evaluation snapshot.
 	const bool bWasScoring = bIsScoring;
 
 	UWorld* World = GetWorld();
@@ -236,6 +241,9 @@ void UScoringManager::OnCongestionUpdatedHandler()
 
 void UScoringManager::UpdateCongestionPenalty()
 {
+	// Congestion is integrated over time instead of penalised once per notification.
+	// This makes a short queue less harmful than a persistent bottleneck and keeps
+	// the result independent of the manager's notification frequency.
 	if (!bIsScoring)
 	{
 		return;
@@ -287,6 +295,8 @@ void UScoringManager::ResetScoreState()
 
 void UScoringManager::ComputeFinalScore()
 {
+	// Rebuild every component from raw counters. The live HUD score is feedback only
+	// and may omit normalised metrics that require the complete simulation history.
 	FCityFlowScoreBreakdown NewBreakdown;
 	NewBreakdown.ElapsedSimulationTime = ElapsedSimulationTime;
 
@@ -360,6 +370,9 @@ void UScoringManager::ComputeFinalScore()
 
 void UScoringManager::ComputeConnectivityStats(FCityFlowScoreBreakdown& OutBreakdown) const
 {
+	// Building entrances are mapped onto reciprocal road components. Reporting both
+	// connected buildings and the largest shared component distinguishes isolated
+	// pairs from a city in which every destination is mutually reachable.
 	const TArray<ABuilding*> Buildings = GetAllBuildings();
 	OutBreakdown.TotalBuildingCount = Buildings.Num();
 	if (Buildings.Num() == 0)
@@ -549,6 +562,8 @@ bool UScoringManager::IsBuildingConnected(ABuilding* Building) const
 
 void UScoringManager::BuildRoadComponentMap(TMap<FGridVector, int32>& OutComponentByCell) const
 {
+	// Assign a stable component id with flood fill. As with vehicle routing, mask
+	// reciprocity is required so a stale one-way neighbour bit cannot inflate score.
 	OutComponentByCell.Empty();
 
 	UGridManager* GM = GetGridManager();
@@ -604,6 +619,9 @@ void UScoringManager::BuildRoadComponentMap(TMap<FGridVector, int32>& OutCompone
 
 int32 UScoringManager::EstimateMinimumRoadNeed(const TArray<ABuilding*>& Buildings) const
 {
+	// This is a planning-pressure estimate, not an exact Steiner-tree solution. It is
+	// intentionally deterministic and inexpensive because it is used only to
+	// normalise budget efficiency across differently scattered random maps.
 	if (Buildings.Num() <= 1)
 	{
 		return 0;

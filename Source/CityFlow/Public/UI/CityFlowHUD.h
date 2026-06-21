@@ -17,11 +17,11 @@ class USoundBase;
 class USoundClass;
 
 /**
- * HUD —— 管理完整 Widget 生命周期：
+ * Owns the complete widget lifecycle:
  *   StartWidget → Tutorial/Settings or Random Game → Pause/Evaluation → (loop)
  *
- *   BeginPlay 显示 StartWidget；点击 Random Mode 进入 Planning；
- *   Esc 切换暂停菜单；结算后可返回主菜单。
+ *   BeginPlay shows StartWidget; Random Mode enters Planning;
+ *   Escape toggles pause, and Evaluation can return to the menu.
  */
 UCLASS()
 class CITYFLOW_API ACityFlowHUD : public AHUD
@@ -31,15 +31,15 @@ class CITYFLOW_API ACityFlowHUD : public AHUD
 public:
 	virtual void BeginPlay() override;
 
-	/** 切换暂停 / 恢复（由 GameMode 的 Esc 输入调用） */
+	/** Toggles pause; called by the player controller's Escape input. */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
 	void TogglePause();
 
-	/** 当前是否已暂停 */
+	/** Returns whether this HUD currently owns an active pause modal. */
 	UFUNCTION(BlueprintPure, Category = "CityFlow|UI")
 	bool IsPaused() const { return bPaused; }
 
-	// ---- Widget 访问器 ----
+	// ---- Widget accessors ----
 	UFUNCTION(BlueprintPure, Category = "CityFlow|UI")
 	UCityFlowStartWidget* GetStartWidget() const { return StartWidget; }
 
@@ -49,11 +49,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "CityFlow|UI")
 	UCityFlowEvaluationWidget* GetEvaluationWidget() const { return EvaluationWidget; }
 
-	/** 从结算界面返回主菜单 */
+	/** Leaves Evaluation and requests authoritative main-menu teardown. */
 	UFUNCTION(BlueprintCallable, Category = "CityFlow|UI")
 	void ReturnToMainMenu();
 
-	// ---- 蓝图可配置 Widget 类 ----
+	// ---- Blueprint-configurable widget classes ----
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CityFlow|UI")
 	TSubclassOf<UCityFlowStartWidget> StartWidgetClass;
 
@@ -94,7 +94,7 @@ protected:
 	UFUNCTION()
 	void HandleSimulationEnded();
 
-	/** 退出结算界面时自动调用，回到主菜单 */
+	/** Handles the evaluation widget's Back to Main Menu action. */
 	UFUNCTION()
 	void HandleEvaluationReturn();
 
@@ -126,7 +126,7 @@ protected:
 	void HandleRestartClicked();
 
 private:
-	// ---- Widget 创建 / 切换 ----
+	// ---- Widget creation and transitions ----
 	void ShowStartWidget();
 
 	void ShowGameWidgetRandom(ECityFlowDifficulty Difficulty);
@@ -138,7 +138,7 @@ private:
 	void ShowEvaluationWidget();
 	void StartBackgroundMusic();
 
-	// ---- Widget 实例 ----
+	// ---- Live widget instances ----
 	UPROPERTY()
 	TObjectPtr<UCityFlowStartWidget> StartWidget;
 
