@@ -1,0 +1,146 @@
+\ProvidesPackage{gamesengineering}[Games Engineering Article Style File]
+
+% Based on Wenneker
+
+%----------------------------------------------------------------------------------------
+%	PACKAGES AND CONFIGURATIONS
+%----------------------------------------------------------------------------------------
+
+\RequirePackage[english]{babel}
+\RequirePackage{microtype}
+\RequirePackage{amsmath,amsfonts,amsthm}
+\RequirePackage[svgnames]{xcolor}
+\RequirePackage[hang, small, labelfont=bf, up, textfont=it]{caption}
+\RequirePackage{booktabs}
+\RequirePackage{lastpage}
+\RequirePackage{graphicx}
+\RequirePackage{enumitem}
+\RequirePackage{sectsty}
+\RequirePackage[ruled]{algorithm2e}
+\RequirePackage{xcolor}
+\RequirePackage{listings}
+\RequirePackage{geometry}
+\RequirePackage[T1]{fontenc}
+\RequirePackage[utf8]{inputenc}
+\RequirePackage{XCharter}
+\RequirePackage{fancyhdr}
+\RequirePackage{titling}
+\RequirePackage{lettrine}
+\RequirePackage{fix-cm}
+\RequirePackage{xstring}
+\RequirePackage[backend=bibtex,style=authoryear,natbib=true]{biblatex}
+\RequirePackage[autostyle=true]{csquotes}
+
+%----------------------------------------------------------------------------------------
+%	COLOR AND STYLE DEFINITIONS
+%----------------------------------------------------------------------------------------
+
+% Define colors for listings
+\definecolor{mGreen}{rgb}{0,0.6,0}
+\definecolor{mGray}{rgb}{0.5,0.5,0.5}
+\definecolor{mPurple}{rgb}{0.58,0,0.82}
+\definecolor{backgroundColour}{rgb}{0.95,0.95,0.92}
+
+% Listings configuration for C++ code
+\lstdefinestyle{CPPStyle}{
+    basicstyle=\ttfamily,
+    keywordstyle=\color{blue}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    commentstyle=\color{green}\ttfamily,
+    morecomment=[l][\color{magenta}]{\#},
+    basicstyle=\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    language=C++
+}
+
+% Section font
+\allsectionsfont{\usefont{OT1}{phv}{b}{n}}
+
+% Custom commands for title and author styling
+\newcommand{\authorstyle}[1]{{\large\usefont{OT1}{phv}{b}{n}\color{NavyBlue}#1}}
+\newcommand{\institution}[1]{{\footnotesize\usefont{OT1}{phv}{m}{sl}\color{Black}University of Warwick}}
+
+% Horizontal rule for title
+\newcommand{\HorRule}{\color{NavyBlue}\rule{\linewidth}{1pt}}
+
+% Custom title setup
+\pretitle{
+    \vspace{-30pt} % Move the entire title section up
+    \HorRule\vspace{10pt} % Horizontal rule before the title
+    \fontsize{32}{36}\usefont{OT1}{phv}{b}{n}\selectfont % Helvetica
+    \color{NavyBlue} % Text colour for the title
+}
+\posttitle{\par\vskip 15pt} % Whitespace under the title
+
+\preauthor{} % No additional formatting before author
+\postauthor{
+    \vspace{10pt} % Space before the rule
+    \par\HorRule % Horizontal rule after the title
+    \vspace{20pt} % Space after the title section
+}
+
+% Initial letter style for lettrine
+\newcommand{\initial}[1]{\lettrine[lines=2,findent=4pt,nindent=0pt]{\color{NavyBlue}{#1}}{}}
+\newcommand{\lettrineabstract}[1]{%
+    \StrLeft{#1}{1}[\firstletter]
+    \initial{\firstletter}\textbf{\StrGobbleLeft{#1}{1}}
+}
+
+%----------------------------------------------------------------------------------------
+%	HEADER AND FOOTER CONFIGURATION
+%----------------------------------------------------------------------------------------
+
+% Fancyhdr setup for headers and footers
+\pagestyle{fancy}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\renewcommand{\sectionmark}[1]{\markboth{#1}{}}
+
+% Header and footer content
+\fancyhf{}
+\lhead{}
+\chead{\textit{\thetitle}}
+\rhead{}
+\lfoot{}
+\cfoot{}
+\rfoot{\footnotesize Page \thepage\ of \pageref{LastPage}}
+
+% First page style without footer rule
+\fancypagestyle{firstpage}{
+    \fancyhf{}
+    \renewcommand{\footrulewidth}{0pt}
+}
+
+%----------------------------------------------------------------------------------------
+%	GEOMETRY CONFIGURATION
+%----------------------------------------------------------------------------------------
+
+\geometry{
+	top=1cm,
+	bottom=1.5cm,
+	left=2cm,
+	right=2cm,
+	includehead,
+	includefoot,
+}
+
+% Set column separation
+\setlength{\columnsep}{7mm}
+
+%----------------------------------------------------------------------------------------
+%	BIBLIOGRAPHY RESOURCE
+%----------------------------------------------------------------------------------------
+
+\addbibresource{GamesEngineering.bib}
+
+% End the package
+\endinput

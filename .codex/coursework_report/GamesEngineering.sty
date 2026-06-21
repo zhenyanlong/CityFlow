@@ -1,0 +1,101 @@
+\ProvidesPackage{GamesEngineering}[Games Engineering Article Style File]
+
+\RequirePackage[english]{babel}
+\RequirePackage{microtype}
+\RequirePackage{amsmath,amsfonts,amsthm}
+\RequirePackage[svgnames]{xcolor}
+\RequirePackage[hang,small,labelfont=bf,up,textfont=it]{caption}
+\RequirePackage{booktabs}
+\RequirePackage{lastpage}
+\RequirePackage{graphicx}
+\RequirePackage{enumitem}
+\RequirePackage{sectsty}
+\RequirePackage[ruled]{algorithm2e}
+\RequirePackage{listings}
+\RequirePackage{geometry}
+\RequirePackage[T1]{fontenc}
+\RequirePackage[utf8]{inputenc}
+\RequirePackage{XCharter}
+\RequirePackage{fancyhdr}
+\RequirePackage{titling}
+\RequirePackage{lettrine}
+\RequirePackage{fix-cm}
+\RequirePackage{xstring}
+\RequirePackage[backend=bibtex,style=authoryear,natbib=true]{biblatex}
+\RequirePackage[autostyle=true]{csquotes}
+
+\definecolor{mGreen}{rgb}{0,0.6,0}
+\definecolor{mGray}{rgb}{0.5,0.5,0.5}
+\definecolor{mPurple}{rgb}{0.58,0,0.82}
+\definecolor{backgroundColour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{CPPStyle}{
+    basicstyle=\footnotesize\ttfamily,
+    keywordstyle=\color{blue}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    commentstyle=\color{green}\ttfamily,
+    morecomment=[l][\color{magenta}]{\#},
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    language=C++
+}
+
+\allsectionsfont{\usefont{OT1}{phv}{b}{n}}
+\newcommand{\authorstyle}[1]{{\large\usefont{OT1}{phv}{b}{n}\color{NavyBlue}#1}}
+\newcommand{\institution}[1]{{\footnotesize\usefont{OT1}{phv}{m}{sl}\color{Black}University of Warwick}}
+\newcommand{\HorRule}{\color{NavyBlue}\rule{\linewidth}{1pt}}
+
+\pretitle{
+    \vspace{-30pt}
+    \HorRule\vspace{10pt}
+    \fontsize{32}{36}\usefont{OT1}{phv}{b}{n}\selectfont
+    \color{NavyBlue}
+}
+\posttitle{\par\vskip 15pt}
+\preauthor{}
+\postauthor{
+    \vspace{10pt}
+    \par\HorRule
+    \vspace{20pt}
+}
+
+\newcommand{\initial}[1]{\lettrine[lines=2,findent=4pt,nindent=0pt]{\color{NavyBlue}{#1}}{}}
+\newcommand{\lettrineabstract}[1]{%
+    \StrLeft{#1}{1}[\firstletter]
+    \initial{\firstletter}\textbf{\StrGobbleLeft{#1}{1}}
+}
+
+\pagestyle{fancy}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\renewcommand{\sectionmark}[1]{\markboth{#1}{}}
+\fancyhf{}
+\chead{\textit{\thetitle}}
+\rfoot{\footnotesize Page \thepage\ of \pageref{LastPage}}
+
+\fancypagestyle{firstpage}{
+    \fancyhf{}
+    \renewcommand{\footrulewidth}{0pt}
+}
+
+\geometry{
+    top=1cm,
+    bottom=1.5cm,
+    left=2cm,
+    right=2cm,
+    includehead,
+    includefoot,
+}
+
+\setlength{\columnsep}{7mm}
+\addbibresource{GamesEngineering.bib}
+\endinput
+
