@@ -9,10 +9,6 @@
 
 CityFlow asks the player to design an arterial road network under a limited budget, then uses procedural generation to complete the smaller connecting roads. Once planning ends, traffic is released into the city and the road network is evaluated through connectivity, traffic flow, travel efficiency, and budget use.
 
-<p align="center">
-  <img src="Pictures/ChooseDifficulty.png" alt="CityFlow difficulty selection and generated city preview" width="820">
-</p>
-
 ## Gameplay
 
 Each match has three stages:
@@ -232,6 +228,3 @@ CityFlow uses the following third-party asset packs and audio. Many thanks to th
 
 All third-party assets remain subject to their original licenses and redistribution terms. Consult the linked source pages before redistributing project content.
 
-## Project license
-
-No project-level open-source license is currently included. Unless a `LICENSE` file is added, the source code and original project content remain all rights reserved and may not be copied, modified, or redistributed without permission.
