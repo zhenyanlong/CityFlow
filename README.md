@@ -197,8 +197,41 @@ The main C++ areas are `GameMode`, `Grid`, `LSystem`, `Vehicle`, `Scoring`, `Env
 
 CityFlow is an active game project. Systems, balance values, UI assets, and content configuration may continue to change. The current repository is intended for development and assessment rather than as a final packaged release.
 
-## Third-party assets and license
+## Third-party assets and credits
 
-This project may contain third-party Unreal Engine content and free asset packs. Their original licenses and attribution requirements still apply. Review every asset's redistribution terms and add a complete `CREDITS.md` before publishing or distributing the repository.
+CityFlow uses the following third-party asset packs and audio. Many thanks to their creators for making these resources available.
+
+### Buildings and vehicles
+
+| Asset | Usage | Source |
+|---|---|---|
+| Car Kit | Vehicle models | [Kenney](https://www.kenney.nl/assets/car-kit) |
+| City Kit (Commercial) | Building models | [Kenney](https://www.kenney.nl/assets/city-kit-commercial) |
+
+### User interface
+
+| Asset | Usage | Source |
+|---|---|---|
+| UI Pack (RPG Expansion) | Menu panels, buttons, and UI elements | [Kenney](https://www.kenney.nl/assets/ui-pack-rpg-expansion) |
+| UI Pack - Pixel Adventure | Additional interface elements | [Kenney](https://www.kenney.nl/assets/ui-pack-pixel-adventure) |
+
+### Music
+
+| Asset | Usage | Source |
+|---|---|---|
+| 90's Lofi City - Lofi Music | Main background music | [Pixabay](https://pixabay.com/music/beats-90x27s-lofi-city-lofi-music-332737/) |
+
+### Environment, roads, and visual effects
+
+| Asset | Usage | Source |
+|---|---|---|
+| Stylized Mossy Ground 01A - Material | Landscape ground material | [Fab](https://www.fab.com/listings/18b5746d-dd8d-48c4-b0ec-6a61e02bf240) |
+| River Forest - RAD Low Poly | Trees, rocks, plants, and river environment assets | [Fab](https://www.fab.com/listings/e8bf2cd3-1828-4860-8d0c-8ad6ec253cba) |
+| Flipbook VFX | Runtime visual effects | [Fab](https://www.fab.com/listings/434162ef-4456-49d4-bfda-79b82b236171) |
+| Road Blockout Kit - Modular Streets & Obstacles | Road and street assets | [Fab](https://www.fab.com/listings/dc6b14b3-f7eb-4a53-a589-eb3d5bfbb8d5) |
+
+All third-party assets remain subject to their original licenses and redistribution terms. Consult the linked source pages before redistributing project content.
+
+## Project license
 
 No project-level open-source license is currently included. Unless a `LICENSE` file is added, the source code and original project content remain all rights reserved and may not be copied, modified, or redistributed without permission.
