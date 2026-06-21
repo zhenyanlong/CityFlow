@@ -1345,6 +1345,7 @@ The legacy `Btn_StartGame` is no longer part of the flow; the native base collap
 - `UCityFlowTutorialDataAsset` owns an ordered array of `FCityFlowTutorialEntry` values: stable `Id`, localizable `FText Title`, multiline localizable `FText Body`, and optional soft `UTexture2D` image.
 - `UCityFlowTutorialWidget` binds optional `TutorialList`, `Txt_TutorialTitle`, `Txt_TutorialBody`, `Img_Tutorial`, and `Btn_Back` controls.
 - With `bBuildDefaultEntryButtons=true`, C++ creates the left-side buttons and selection proxies automatically. Blueprints can disable this and implement `OnTutorialListRebuilt` for custom visual entries that call `SelectTutorial(Index)`.
+- Native entry generation exposes configurable normal/selected `FButtonStyle`, text font and colors, content padding, and list-slot padding. Generated widget references let `SelectTutorial()` maintain a persistent selected state; `RefreshGeneratedEntryStyles()` reapplies appearance after runtime changes.
 - Selecting an entry updates the right-side title/body and loads the optional image synchronously; the image collapses when no texture is configured.
 
 #### Settings, Audio Routing, and Persistence

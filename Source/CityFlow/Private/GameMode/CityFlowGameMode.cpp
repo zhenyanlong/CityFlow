@@ -3,6 +3,8 @@
 #include "GameMode/Types/BuildingDataAsset.h"
 #include "Grid/GridManager.h"
 #include "Grid/GridPlaceableActor.h"
+#include "Grid/GridPlaneVisualizer.h"
+#include "Grid/GridVisualizer.h"
 #include "Grid/Building.h"
 #include "Grid/RoadTile.h"
 #include "Vehicle/Subsystem/VehicleManager.h"
@@ -172,6 +174,7 @@ void ACityFlowGameMode::InitializeScene(int32 GridWidth, int32 GridHeight, float
 	const FVector Origin = FVector(0.0f, 0.0f, 0.0f);
 	GM->InitGrid(GridWidth, GridHeight, CellSize, Origin);
 	GM->SetRoadBudget(ActiveTotalRoadBudget);
+	RefreshGridVisualizers();
 
 	if (const UCityFlowRiverSettings* RiverSettings = GetDefault<UCityFlowRiverSettings>())
 	{
@@ -638,6 +641,19 @@ void ACityFlowGameMode::PickRandomSceneParameters(int32& OutGridWidth, int32& Ou
 	OutRoadBudget = bRandomizeAutoMatchParameters
 		? PickIntInRange(AutoMatchRoadBudgetRange, TotalRoadBudget)
 		: TotalRoadBudget;
+}
+
+void ACityFlowGameMode::RefreshGridVisualizers()
+{
+	for (TActorIterator<AGridVisualizer> It(GetWorld()); It; ++It)
+	{
+		It->RedrawGrid();
+	}
+
+	for (TActorIterator<AGridPlaneVisualizer> It(GetWorld()); It; ++It)
+	{
+		It->SetupPlane();
+	}
 }
 
 void ACityFlowGameMode::ConfigureLSystemForActiveScene()

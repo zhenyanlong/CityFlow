@@ -216,8 +216,10 @@ void ABuilding::UpdatePreviewAppearance(const FGridVector& GridPos)
 	SetActorLocation(FVector(BasePos.X + OffsetX, BasePos.Y + OffsetY, BasePos.Z));
 
 	const float RefSize = FMath::Max(ReferenceMeshSize, 1.0f);
-	const float ScaleX = (EffSize.X * CellSize) / RefSize;
-	const float ScaleY = (EffSize.Y * CellSize) / RefSize;
+	const float LocalWidth = FMath::Max(1, FMath::RoundToInt32(BuildingSize.X));
+	const float LocalHeight = FMath::Max(1, FMath::RoundToInt32(BuildingSize.Y));
+	const float ScaleX = (LocalWidth * CellSize) / RefSize;
+	const float ScaleY = (LocalHeight * CellSize) / RefSize;
 	SetActorScale3D(FVector(ScaleX, ScaleY, 1.0f));
 
 	const float Yaw = static_cast<float>(static_cast<uint8>(BuildingRotation)) * 90.0f;
@@ -254,8 +256,10 @@ void ABuilding::UpdateBuildingAppearance()
 	SetActorLocation(FVector(BasePos.X + OffsetX, BasePos.Y + OffsetY, BasePos.Z));
 
 	const float RefSize = FMath::Max(ReferenceMeshSize, 1.0f);
-	const float ScaleX = (EffSize.X * CellSize) / RefSize;
-	const float ScaleY = (EffSize.Y * CellSize) / RefSize;
+	const float LocalWidth = FMath::Max(1, FMath::RoundToInt32(BuildingSize.X));
+	const float LocalHeight = FMath::Max(1, FMath::RoundToInt32(BuildingSize.Y));
+	const float ScaleX = (LocalWidth * CellSize) / RefSize;
+	const float ScaleY = (LocalHeight * CellSize) / RefSize;
 	SetActorScale3D(FVector(ScaleX, ScaleY, 1.0f));
 
 	const float Yaw = static_cast<float>(static_cast<uint8>(BuildingRotation)) * 90.0f;
@@ -318,6 +322,7 @@ void ABuilding::OnEnterPlaced_Implementation()
 
 void ABuilding::OnPreviewValidChanged_Implementation(bool bValid)
 {
+	Super::OnPreviewValidChanged_Implementation(bValid);
 }
 
 void ABuilding::EnsureMeshMaterialsCached(UStaticMesh* Mesh)
@@ -411,10 +416,6 @@ void ABuilding::DetermineEdgeConnections(bool& bTop, bool& bRight, bool& bBottom
 	UGridManager* GM = GetGridManager();
 	if (!GM) return;
 
-	const FVector2D EffSize = GetEffectiveBuildingSize();
-	const int32 EffW = FMath::RoundToInt32(EffSize.X);
-	const int32 EffH = FMath::RoundToInt32(EffSize.Y);
-
 	for (const FBuildingDoorway& Doorway : Doorways)
 	{
 		const FGridVector ConnectionPoint = GetDoorwayConnectionPoint(Doorway);
@@ -424,23 +425,15 @@ void ABuilding::DetermineEdgeConnections(bool& bTop, bool& bRight, bool& bBottom
 			continue;
 		}
 
-		const FGridVector Local = TransformLocalPosition(Doorway.RelativePosition);
-
-		if (Local.Y == 0)
+		// Foundation geometry is authored in the building's unrotated local space
+		// and then follows the actor rotation, so connection flags must also remain local.
+		switch (Doorway.FacingDirection)
 		{
-			bTop = true;
-		}
-		else if (Local.X == EffW - 1)
-		{
-			bRight = true;
-		}
-		else if (Local.Y == EffH - 1)
-		{
-			bBottom = true;
-		}
-		else if (Local.X == 0)
-		{
-			bLeft = true;
+		case EGridDirection::Up:    bTop = true; break;
+		case EGridDirection::Right: bRight = true; break;
+		case EGridDirection::Down:  bBottom = true; break;
+		case EGridDirection::Left:  bLeft = true; break;
+		default: break;
 		}
 	}
 }
@@ -458,15 +451,17 @@ void ABuilding::RefreshFoundation()
 		return;
 	}
 
-	const FVector2D EffSize = GetEffectiveBuildingSize();
+	const FVector2D LocalSize(
+		FMath::Max(1, FMath::RoundToInt32(BuildingSize.X)),
+		FMath::Max(1, FMath::RoundToInt32(BuildingSize.Y)));
 	const float CellSize = GM->GetCellSize();
 	const float RefSize = FMath::Max(ReferenceMeshSize, 1.0f);
-	const FVector TargetScale(EffSize.X * CellSize / RefSize, EffSize.Y * CellSize / RefSize, 1.0f);
+	const FVector TargetScale(LocalSize.X * CellSize / RefSize, LocalSize.Y * CellSize / RefSize, 1.0f);
 
 	bool bTop, bRight, bBottom, bLeft;
 	DetermineEdgeConnections(bTop, bRight, bBottom, bLeft);
 
-	FoundationComponent->BuildFoundation(EffSize.X, EffSize.Y, CellSize,
+	FoundationComponent->BuildFoundation(LocalSize.X, LocalSize.Y, CellSize,
 		bTop, bRight, bBottom, bLeft,
 		TargetScale);
 }

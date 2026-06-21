@@ -20,10 +20,19 @@ void UGridManager::Deinitialize()
 
 void UGridManager::InitGrid(int32 InGridWidth, int32 InGridHeight, float InCellSize, const FVector& InGridOrigin)
 {
-	GridWidth = InGridWidth;
-	GridHeight = InGridHeight;
-	CellSize = InCellSize;
-	GridOrigin = FVector(InGridOrigin.X - (GridWidth - 1) * CellSize * 0.5f, InGridOrigin.Y - (GridHeight - 1) * CellSize * 0.5f, InGridOrigin.Z);
+	GridWidth = FMath::Max(1, InGridWidth);
+	GridHeight = FMath::Max(1, InGridHeight);
+	CellSize = FMath::Max(KINDA_SMALL_NUMBER, InCellSize);
+
+	// Keep the logical cell lattice stable when random grid dimensions change parity.
+	// InGridOrigin is the world position of the central anchor cell, rather than the
+	// exact geometric centre between cells on even-sized axes.
+	const int32 AnchorCellX = GridWidth / 2;
+	const int32 AnchorCellY = GridHeight / 2;
+	GridOrigin = FVector(
+		InGridOrigin.X - AnchorCellX * CellSize,
+		InGridOrigin.Y - AnchorCellY * CellSize,
+		InGridOrigin.Z);
 
 	Grid.SetNum(GridHeight);
 	for (int32 Y = 0; Y < GridHeight; ++Y)

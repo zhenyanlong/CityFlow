@@ -189,6 +189,7 @@ private:
 	void ApplyDifficultyProfile(ECityFlowDifficulty Difficulty);
 	void PickRandomSceneParameters(int32& OutGridWidth, int32& OutGridHeight, int32& OutBuildingCount, int32& OutRoadBudget, int32& OutRandomSeed) const;
 	void InitializeScene(int32 GridWidth, int32 GridHeight, float CellSize, int32 BuildingCount, int32 RoadBudget, int32 RandomSeed);
+	void RefreshGridVisualizers();
 	void ConfigureLSystemForActiveScene();
 	void StartAutoRoadGenerationOrSimulation();
 	int32 GetActiveTotalRoadBudget() const;

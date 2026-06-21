@@ -49,8 +49,8 @@ void AGridPlaneVisualizer::SetupPlane()
 	const FVector Origin = GM->GetGridOrigin();
 
 	const FVector PlaneCenter(
-		Origin.X + TotalWidth * 0.5f,
-		Origin.Y + TotalHeight * 0.5f,
+		Origin.X + (GM->GetGridWidth() - 1) * GM->GetCellSize() * 0.5f,
+		Origin.Y + (GM->GetGridHeight() - 1) * GM->GetCellSize() * 0.5f,
 		Origin.Z + ZOffset
 	);
 
@@ -86,8 +86,9 @@ void AGridPlaneVisualizer::UpdateMaterialParams()
 	DynamicMaterial->SetScalarParameterValue(TEXT("CellSize"), GM->GetCellSize());
 	DynamicMaterial->SetScalarParameterValue(TEXT("LineWidth"), LineWidth);
 	DynamicMaterial->SetVectorParameterValue(TEXT("LineColor"), LineColor);
-	DynamicMaterial->SetScalarParameterValue(TEXT("OriginX"), Origin.X);
-	DynamicMaterial->SetScalarParameterValue(TEXT("OriginY"), Origin.Y);
+	// GridOrigin is the centre of cell (0,0); material grid lines belong on cell boundaries.
+	DynamicMaterial->SetScalarParameterValue(TEXT("OriginX"), Origin.X - GM->GetCellSize() * 0.5f);
+	DynamicMaterial->SetScalarParameterValue(TEXT("OriginY"), Origin.Y - GM->GetCellSize() * 0.5f);
 }
 
 void AGridPlaneVisualizer::SetGridVisible(bool bVisible)

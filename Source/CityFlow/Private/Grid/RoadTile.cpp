@@ -276,6 +276,7 @@ void ARoadTile::OnEnterPlaced_Implementation()
 
 void ARoadTile::OnPreviewValidChanged_Implementation(bool bValid)
 {
+	Super::OnPreviewValidChanged_Implementation(bValid);
 }
 
 void ARoadTile::EnsureMeshMaterialsCached(UStaticMesh* Mesh)
@@ -777,9 +778,12 @@ void ARoadTile::OnIntersectionBoxEndOverlap(UPrimitiveComponent* OverlappedCompo
 	// Remove from reverse-lookup
 	VehicleEntryDirs.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));
 
-	// Mark this intersection as passed so the vehicle can never re-acquire the lock
-	// (prevent self-re-entry: forward probe still sweeps the box just after exit)
-	Vehicle->MarkIntersectionPassed(this);
+	// Only a vehicle that entered with a registered direction actually passed the
+	// intersection. This excludes spawn/teleport overlap noise before path setup.
+	if (bHadEntry)
+	{
+		Vehicle->MarkIntersectionPassed(this);
+	}
 
 	// Clear timestamp
 	PendingReservationTimestamps.Remove(TWeakObjectPtr<AVehicleActor>(Vehicle));

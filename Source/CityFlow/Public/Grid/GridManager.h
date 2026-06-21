@@ -31,6 +31,7 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
+	/** Initializes a stable cell lattice; InGridOrigin is the world position of the central anchor cell. */
 	UFUNCTION(BlueprintCallable, Category = "Grid")
 	void InitGrid(int32 InGridWidth, int32 InGridHeight, float InCellSize, const FVector& InGridOrigin);
 

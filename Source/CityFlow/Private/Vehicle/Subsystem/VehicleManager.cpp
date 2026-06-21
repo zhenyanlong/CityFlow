@@ -337,14 +337,19 @@ AVehicleActor* UVehicleManager::SpawnVehicle(ABuilding* Origin, ABuilding* Desti
 		return nullptr;
 	}
 
-	const FVector SpawnWorldPos = GM->GridToWorld(StartPos);
-
 	TSubclassOf<AVehicleActor> VehicleClass = PickRandomVehicleClass();
 	if (!VehicleClass)
 	{
 		UE_LOG(LogVehicleManager, Warning, TEXT("SpawnVehicle: PickRandomVehicleClass returned null"));
 		return nullptr;
 	}
+
+	// Spawn at the actual first spline point inside the origin building. Spawning at
+	// StartPos (the doorway road cell) can place a not-yet-initialized vehicle inside
+	// an IntersectionBox before its path and travel direction have been assigned.
+	const AVehicleActor* VehicleCDO = VehicleClass->GetDefaultObject<AVehicleActor>();
+	const float SpawnZOffset = VehicleCDO ? VehicleCDO->VehicleZOffset : 30.0f;
+	const FVector SpawnWorldPos = SplinePoints[0] + FVector(0.0f, 0.0f, SpawnZOffset);
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;

@@ -2,10 +2,23 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Engine/Texture2D.h"
+#include "Styling/CoreStyle.h"
+
+UCityFlowTutorialWidget::UCityFlowTutorialWidget(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	EntryButtonStyle = FCoreStyle::Get().GetWidgetStyle<FButtonStyle>(TEXT("Button"));
+	SelectedEntryButtonStyle = EntryButtonStyle;
+	SelectedEntryButtonStyle.Normal = EntryButtonStyle.Hovered;
+	SelectedEntryButtonStyle.Hovered = EntryButtonStyle.Pressed;
+	EntryTextFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 18);
+}
 
 void UCityFlowTutorialSelectionProxy::Initialize(UCityFlowTutorialWidget* InOwner, int32 InEntryIndex)
 {
@@ -42,12 +55,18 @@ void UCityFlowTutorialWidget::NativeDestruct()
 	}
 
 	SelectionProxies.Reset();
+	GeneratedEntryButtons.Reset();
+	GeneratedEntryLabels.Reset();
+	SelectedTutorialIndex = INDEX_NONE;
 	Super::NativeDestruct();
 }
 
 void UCityFlowTutorialWidget::RebuildTutorialList()
 {
 	SelectionProxies.Reset();
+	GeneratedEntryButtons.Reset();
+	GeneratedEntryLabels.Reset();
+	SelectedTutorialIndex = INDEX_NONE;
 
 	TArray<FText> EntryTitles;
 	if (TutorialData)
@@ -72,14 +91,26 @@ void UCityFlowTutorialWidget::RebuildTutorialList()
 			UTextBlock* EntryLabel = WidgetTree->ConstructWidget<UTextBlock>();
 			EntryLabel->SetText(TutorialData->Entries[Index].Title);
 			EntryLabel->SetJustification(ETextJustify::Left);
-			EntryButton->AddChild(EntryLabel);
+			if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(EntryButton->AddChild(EntryLabel)))
+			{
+				ContentSlot->SetPadding(EntryContentPadding);
+				ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+			}
 
 			UCityFlowTutorialSelectionProxy* Proxy = NewObject<UCityFlowTutorialSelectionProxy>(this);
 			Proxy->Initialize(this, Index);
 			EntryButton->OnClicked.AddDynamic(Proxy, &UCityFlowTutorialSelectionProxy::HandleClicked);
 			SelectionProxies.Add(Proxy);
-			TutorialList->AddChildToVerticalBox(EntryButton);
+			GeneratedEntryButtons.Add(EntryButton);
+			GeneratedEntryLabels.Add(EntryLabel);
+			if (UVerticalBoxSlot* EntrySlot = TutorialList->AddChildToVerticalBox(EntryButton))
+			{
+				EntrySlot->SetPadding(EntrySlotPadding);
+				EntrySlot->SetHorizontalAlignment(HAlign_Fill);
+			}
 		}
+
+		RefreshGeneratedEntryStyles();
 	}
 
 	if (TutorialData && !TutorialData->Entries.IsEmpty())
@@ -102,6 +133,8 @@ void UCityFlowTutorialWidget::SelectTutorial(int32 EntryIndex)
 	}
 
 	const FCityFlowTutorialEntry& Entry = TutorialData->Entries[EntryIndex];
+	SelectedTutorialIndex = EntryIndex;
+	RefreshGeneratedEntryStyles();
 	if (Txt_TutorialTitle) Txt_TutorialTitle->SetText(Entry.Title);
 	if (Txt_TutorialBody) Txt_TutorialBody->SetText(Entry.Body);
 
@@ -119,6 +152,27 @@ void UCityFlowTutorialWidget::SelectTutorial(int32 EntryIndex)
 	}
 
 	OnTutorialSelectionChanged(EntryIndex, Entry);
+}
+
+void UCityFlowTutorialWidget::RefreshGeneratedEntryStyles()
+{
+	for (int32 Index = 0; Index < GeneratedEntryButtons.Num(); ++Index)
+	{
+		const bool bSelected = Index == SelectedTutorialIndex;
+		if (UButton* EntryButton = GeneratedEntryButtons[Index])
+		{
+			EntryButton->SetStyle(bSelected ? SelectedEntryButtonStyle : EntryButtonStyle);
+		}
+
+		if (GeneratedEntryLabels.IsValidIndex(Index))
+		{
+			if (UTextBlock* EntryLabel = GeneratedEntryLabels[Index])
+			{
+				EntryLabel->SetFont(EntryTextFont);
+				EntryLabel->SetColorAndOpacity(bSelected ? SelectedEntryTextColor : EntryTextColor);
+			}
+		}
+	}
 }
 
 void UCityFlowTutorialWidget::HandleBackClicked()
