@@ -1,4 +1,0 @@
-interface:
-  display_name: "CityFlow Session Init"
-  short_description: "Read CityFlow Trae skills and run session-init."
-  default_prompt: "Initialize this CityFlow session using the project Trae session-init skill."
